@@ -428,6 +428,61 @@ window.openEditDeviceModal = function(id, currentName, currentBranch) {
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 }
+
+
+
+window.loadBranchesPage = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3><i class="fas fa-store"></i> إدارة الفروع</h3>
+                <button class="btn-main" onclick="openAddBranchModal()">+ إضافة فرع جديد</button>
+            </div>
+            
+            <div class="info-card" style="margin-top:10px;">
+                <i class="fas fa-info-circle"></i> يجب تحديد فرع واحد فقط كـ "فرع رئيسي" ليكون مركز استلام المشتريات والمخزون الأولي.
+            </div>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>الاسم (عربي)</th>
+                        <th>الاسم (En)</th>
+                        <th>النوع</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="branches-list-body">
+                    <tr><td colspan="4">جاري تحميل الفروع...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    `;
+    document.getElementById('content-area').innerHTML = html;
+    // استدعاء دالة جلب البيانات من الموديول
+    if(window.listenToBranches) window.listenToBranches();
+};
+
+window.openAddBranchModal = function() {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>إضافة فرع جديد</h3>
+                <input type="text" id="branch-ar" placeholder="اسم الفرع بالعربي">
+                <input type="text" id="branch-en" placeholder="Branch Name (English)">
+                <label style="color:white; display:block; margin-top:15px; text-align:right;">
+                    <input type="checkbox" id="is-main-branch"> تعيين كفرع رئيسي
+                </label>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveNewBranch()">إضافة</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
     
 
 
@@ -608,6 +663,65 @@ function unlockSystem() {
     document.querySelector('.sidebar').style.opacity = "1";
     document.querySelector('.sidebar').style.pointerEvents = "auto";
 }
+
+
+// جلب الفروع وعرضها لحظياً
+window.listenToBranches = function() {
+    const branchesRef = ref(database, 'branches');
+    onValue(branchesRef, (snapshot) => {
+        const data = snapshot.val();
+        const tbody = document.getElementById('branches-list-body');
+        if (!tbody) return;
+        
+        tbody.innerHTML = "";
+        for (let id in data) {
+            const b = data[id];
+            tbody.innerHTML += `
+                <tr>
+                    <td>${b.nameAr}</td>
+                    <td>${b.nameEn}</td>
+                    <td>${b.isMain ? '<span style="color:#28a745; font-weight:bold;">رئيسي ★</span>' : 'فرعي'}</td>
+                    <td>
+                        <button onclick="deleteBranch('${id}')" class="btn-clear" style="padding:5px 10px; font-size:12px;">حذف</button>
+                    </td>
+                </tr>
+            `;
+        }
+    });
+}
+
+// حفظ الفرع الجديد والتعامل مع "الفرع الرئيسي"
+window.saveNewBranch = async function() {
+    const nameAr = document.getElementById('branch-ar').value;
+    const nameEn = document.getElementById('branch-en').value;
+    const isMain = document.getElementById('is-main-branch').checked;
+
+    if (!nameAr || !nameEn) { alert("يرجى إدخال الأسماء"); return; }
+
+    try {
+        const newBranchRef = ref(database, 'branches/' + Date.now());
+        
+        // إذا اختار المدير أن يكون هذا هو الفرع الرئيسي، يجب إلغاء "الرئيسي" من بقية الفروع أولاً
+        if (isMain) {
+            const allBranches = await get(ref(database, 'branches'));
+            if (allBranches.exists()) {
+                const updates = {};
+                for (let bid in allBranches.val()) {
+                    updates[`branches/${bid}/isMain`] = false;
+                }
+                await update(ref(database), updates);
+            }
+        }
+
+        await set(newBranchRef, {
+            nameAr, nameEn, isMain,
+            createdAt: new Date().toISOString()
+        });
+        
+        closeModal();
+    } catch (e) { alert("خطأ: " + e.message); }
+}
+
 
 </script>
 </body>

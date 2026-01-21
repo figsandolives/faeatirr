@@ -615,7 +615,36 @@ window.generateUserPin = function() {
     <script type="module">
     import { database, ref, onValue, set, get, update } from './firebase-config.js?v=2';
 
-    // 1. فحص الجهاز عند الدخول
+    // 1. تعريف وظيفة الصلاحيات وربطها بالنافذة (window) لضمان رؤيتها
+    window.applyRolePermissions = function(role) {
+        console.log("تطبيق صلاحيات الدور:", role);
+        
+        // إظهار كل شيء أولاً لإعادة الضبط
+        document.querySelectorAll('.sidebar-item, .dropdown-btn').forEach(el => {
+            el.style.setProperty('display', 'block', 'important');
+        });
+
+        if (role === 'أمين صندوق') {
+            // حجب المخازن والموردون تماماً (باستخدام المعرفات والبحث عن النص)
+            const hideList = ['#drop-stores', '#drop-suppliers', '[onclick*="drop-stores"]', '[onclick*="drop-suppliers"]'];
+            hideList.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => {
+                    el.style.setProperty('display', 'none', 'important');
+                });
+            });
+        } 
+        else if (role === 'أمين مخازن') {
+            // حجب الإدارة تماماً
+            const hideList = ['#drop-admin', '[onclick*="drop-admin"]'];
+            hideList.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => {
+                    el.style.setProperty('display', 'none', 'important');
+                });
+            });
+        }
+    };
+
+    // 2. فحص الجهاز عند الدخول
     async function checkDeviceBinding() {
         let deviceID = localStorage.getItem('fawatirr_device_id');
         if (!deviceID) {
@@ -624,6 +653,7 @@ window.generateUserPin = function() {
         }
         const deviceRef = ref(database, 'authorized_devices/' + deviceID);
         const snapshot = await get(deviceRef);
+        
         if (!snapshot.exists()) {
             await set(deviceRef, { id: deviceID, status: 'online', branchId: "غير محدد", branchName: "غير محدد", lastSeen: new Date().toLocaleString() });
         } else {
@@ -631,9 +661,11 @@ window.generateUserPin = function() {
             const dev = snapshot.val();
             sessionStorage.setItem('deviceBranchName', dev.branchName || 'غير محدد');
         }
+        
+        if(window.updateUserDisplay) window.updateUserDisplay();
     }
 
-    // 2. إدارة المستخدمين (حفظ وحذف)
+    // 3. دوال الإدارة المربوطة بالنافذة
     window.confirmSaveUser = async function() {
         const name = document.getElementById('user-name-input').value;
         const role = document.getElementById('user-role-select').value;
@@ -643,7 +675,7 @@ window.generateUserPin = function() {
             await set(ref(database, 'system_users/' + pin), { name, role, pin, createdAt: new Date().toISOString() });
             alert("✅ تم إضافة المستخدم بنجاح");
             closeModal();
-        } catch (e) { alert("خطأ: " + e.message); }
+        } catch (e) { alert("خطأ في الحفظ: " + e.message); }
     };
 
     window.deleteUser = async function(pin) {
@@ -655,57 +687,21 @@ window.generateUserPin = function() {
         }
     };
 
-    // 3. إدارة الفروع (تحديث وحذف)
-    window.updateBranchInFirebase = async function(id, nameAr, nameEn, isMain) {
-        if (isMain) {
-            const all = await get(ref(database, 'branches'));
-            if (all.exists()) {
-                const upds = {};
-                for (let bid in all.val()) upds[`branches/${bid}/isMain`] = false;
-                await update(ref(database), upds);
-            }
-        }
-        await update(ref(database, 'branches/' + id), { nameAr, nameEn, isMain });
-        alert("✅ تم تحديث بيانات الفرع");
-        closeModal();
+    window.updateUserDisplay = function() {
+        const name = sessionStorage.getItem('userName');
+        const branch = sessionStorage.getItem('deviceBranchName') || 'غير محدد';
+        const role = sessionStorage.getItem('userRole');
+        const display = role === 'مدير' || role === 'admin' ? name : `${name} (${branch})`;
+        const titleEl = document.getElementById('page-title');
+        if(titleEl) titleEl.innerHTML = `${display} <span style="font-size:12px; opacity:0.6;">- ${role}</span>`;
     };
 
-    window.deleteBranch = async function(id) {
-        if (confirm("هل أنت متأكد من حذف هذا الفرع؟")) {
-            try {
-                await set(ref(database, 'branches/' + id), null);
-                alert("تم حذف الفرع");
-            } catch (e) { alert("خطأ: " + e.message); }
-        }
-    };
-
-    // 4. إدارة الأجهزة (ربط الجهاز بفرع)
-    window.updateDeviceLink = async function(deviceId, branchId, branchName) {
-        try {
-            await update(ref(database, 'authorized_devices/' + deviceId), { branchId, branchName });
-            alert("✅ تم ربط الجهاز بالفرع بنجاح");
-            location.reload();
-        } catch (e) { alert("خطأ: " + e.message); }
-    };
-
-    // 5. جلب البيانات اللحظية (Listeners)
-    window.initUsersLogic = function() {
-        onValue(ref(database, 'system_users'), (snapshot) => {
-            const data = snapshot.val();
-            const tbody = document.getElementById('users-list-body');
-            if (!tbody) return;
-            tbody.innerHTML = "";
-            for (let id in data) {
-                const u = data[id];
-                tbody.innerHTML += `<tr><td>${u.name}</td><td>${u.role}</td><td>${u.pin}</td><td><button onclick="deleteUser('${u.pin}')" class="btn-clear" style="padding:5px">حذف</button></td></tr>`;
-            }
-        });
-    };
-
-    // التشغيل عند تحميل الصفحة
-    if (sessionStorage.getItem('userRole')) {
+    // 4. تشغيل النظام بالترتيب الصحيح
+    const currentRole = sessionStorage.getItem('userRole');
+    if (currentRole) {
+        // تأكد من تشغيل الصلاحيات أولاً ثم فحص الجهاز
+        window.applyRolePermissions(currentRole);
         checkDeviceBinding();
-        window.applyRolePermissions(sessionStorage.getItem('userRole'));
     }
 </script>
 </body>

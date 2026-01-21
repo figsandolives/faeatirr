@@ -407,26 +407,46 @@ window.editDevice = function(id) {
 
 
 
-window.openEditDeviceModal = function(id, currentName, currentBranch) {
+window.openEditDeviceModal = function(deviceId, currentBranch) {
+    let branchesOptions = '<option value="">-- اختر فرعاً --</option>';
+    
+    // استخدام الأفرع التي تم جلبها من فايربيس
+    if (window.availableBranches) {
+        for (let id in window.availableBranches) {
+            const b = window.availableBranches[id];
+            branchesOptions += `<option value="${id}">${b.nameAr}</option>`;
+        }
+    }
+
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
             <div class="modal-box">
-                <h3>تفعيل / تعديل الجهاز</h3>
-                <p style="font-size:12px; color:#aaa;">ID: ${id}</p>
-                <input type="text" id="edit-device-name" value="${currentName}" placeholder="اسم الجهاز (مثلاً: كاشير 1)">
-                <input type="text" id="edit-device-branch" value="${currentBranch}" placeholder="الفرع (مثلاً: أبو الحصانية)">
-                <select id="edit-device-status" style="width:100%; padding:10px; margin-top:10px; background:#1a1a2e; color:white; border-radius:5px;">
-                    <option value="pending">معلق (Pending)</option>
-                    <option value="authorized" selected>مقبول (Authorized)</option>
+                <h3>ربط الجهاز بفرع</h3>
+                <p style="font-size:12px; color:#aaa;">الجهاز: ${deviceId}</p>
+                <select id="select-branch-link" style="width:100%; padding:10px; background:#1a1a2e; color:white;">
+                    ${branchesOptions}
                 </select>
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
-                    <button class="btn-login" onclick="updateDeviceStatus('${id}')">حفظ التغييرات</button>
+                    <button class="btn-login" onclick="confirmLink('${deviceId}')">حفظ الربط</button>
                     <button class="btn-clear" onclick="closeModal()">إلغاء</button>
                 </div>
             </div>
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+window.confirmLink = function(deviceId) {
+    const select = document.getElementById('select-branch-link');
+    const branchId = select.value;
+    const branchName = select.options[select.selectedIndex].text;
+    
+    if (!branchId) { alert("يرجى اختيار فرع"); return; }
+    
+    // استدعاء وظيفة التحديث الموجودة في الموديول
+    if (window.updateDeviceLink) {
+        window.updateDeviceLink(deviceId, branchId, branchName);
+    }
 }
 
 
@@ -491,7 +511,40 @@ window.openAddBranchModal = function() {
     <script type="module">
     import { database, ref, onValue, set, get, update } from './firebase-config.js?v=2';
 
-    // 1. وظيفة فحص الجهاز عند الدخول (معدلة)
+    // 1. تعريف وظيفة رسالة المنع (لإصلاح الخطأ الذي ظهر لك)
+    function showUnauthorizedMessage(msg) {
+        const content = document.getElementById('content-area');
+        if (content) {
+            content.innerHTML = `
+                <div style="text-align:center; margin-top:100px; color:#e94560;">
+                    <i class="fas fa-exclamation-triangle fa-4x"></i>
+                    <h2 style="margin-top:20px;">دخول غير مصرح</h2>
+                    <p>${msg}</p>
+                    <p style="background:#16213e; padding:10px; border-radius:5px; display:inline-block;">
+                        معرف جهازك: <b>${localStorage.getItem('fawatirr_device_id')}</b>
+                    </p>
+                </div>
+            `;
+        }
+        const sidebar = document.querySelector('.sidebar');
+        if (sidebar) {
+            sidebar.style.pointerEvents = "none";
+            sidebar.style.opacity = "0.3";
+        }
+    }
+
+    function lockSystem(msg) {
+        document.getElementById('content-area').innerHTML = `<div class="lock-screen" style="text-align:center; margin-top:100px; color:#e94560;"><i class="fas fa-lock fa-4x"></i><p>${msg}</p></div>`;
+        document.querySelector('.sidebar').style.opacity = "0.2";
+        document.querySelector('.sidebar').style.pointerEvents = "none";
+    }
+
+    function unlockSystem() {
+        document.querySelector('.sidebar').style.opacity = "1";
+        document.querySelector('.sidebar').style.pointerEvents = "auto";
+    }
+
+    // 2. فحص الجهاز والربط بالفرع (النسخة الموحدة والصارمة)
     async function checkDeviceBinding() {
         const deviceID = localStorage.getItem('fawatirr_device_id');
         if (!deviceID) return;
@@ -500,229 +553,132 @@ window.openAddBranchModal = function() {
         const snapshot = await get(deviceRef);
         
         if (snapshot.exists()) {
-            const deviceData = snapshot.val();
-            // إذا كان الجهاز مقبولاً، اسمح له بالدخول
-            if (deviceData.status === 'authorized') {
-                sessionStorage.setItem('currentBranch', deviceData.branch);
-                console.log("✅ الجهاز معرف ومرتبط بفرع: " + deviceData.branch);
+            const dev = snapshot.val();
+            if (dev.branchId && dev.branchId !== "غير محدد") {
+                sessionStorage.setItem('deviceBranchId', dev.branchId);
+                sessionStorage.setItem('deviceBranchName', dev.branchName);
+                unlockSystem();
+                if(window.updateUserDisplay) window.updateUserDisplay();
             } else {
-                showUnauthorizedMessage("هذا الجهاز مسجل بانتظار 'تفعيل' المدير من قسم الأجهزة.");
+                showUnauthorizedMessage("هذا الجهاز مسجل ولكنه غير مرتبط بفرع حالياً.");
             }
         } else {
-            // تسجيل الجهاز كـ "معلق" لأول مرة
             await set(deviceRef, {
                 id: deviceID,
-                name: "جهاز جديد",
-                status: "pending",
-                branch: "غير محدد",
+                status: 'offline',
+                branchId: "غير محدد",
+                branchName: "غير محدد",
                 lastSeen: new Date().toLocaleString()
             });
-            showUnauthorizedMessage("هذا جهاز جديد. يرجى تفعيله من قبل المدير من قسم 'الأجهزة والكاشير'.");
+            showUnauthorizedMessage("جهاز جديد! يرجى تفعيل الجهاز وربطه بفرع من قسم الإدارة.");
         }
     }
 
-    // 2. وظيفة جلب الأجهزة وعرضها في الجدول مع زر التعديل
-    window.listenToDevices = function() {
-        const devicesRef = ref(database, 'authorized_devices');
-        onValue(devicesRef, (snapshot) => {
+    // 3. محرك الأجهزة والكاشير
+    window.initDevicesAndCashiers = function() {
+        onValue(ref(database, 'authorized_devices'), (snapshot) => {
             const data = snapshot.val();
-            const tbody = document.getElementById('devices-list-body');
+            const tbody = document.getElementById('devices-live-list');
             if (!tbody) return;
-            
             tbody.innerHTML = "";
             for (let id in data) {
-                const dev = data[id];
+                const d = data[id];
                 tbody.innerHTML += `
                     <tr>
-                        <td>${dev.id}</td>
-                        <td>${dev.name}</td>
-                        <td>${dev.branch}</td>
-                        <td><span class="status-badge ${dev.status === 'pending' ? 'status-pending' : 'status-online'}">${dev.status}</span></td>
-                        <td>
-                            <button onclick="openEditDeviceModal('${id}', '${dev.name}', '${dev.branch}')" class="btn-main" style="padding:5px 10px; font-size:12px;">تعديل / تفعيل</button>
-                        </td>
+                        <td>${d.id}</td>
+                        <td class="${d.status === 'online' ? 'status-online' : 'status-offline'}">${d.status}</td>
+                        <td>${d.branchName || 'غير محدد'}</td>
+                        <td>${d.lastSeen || '-'}</td>
+                        <td><button onclick="openEditDeviceModal('${id}', '${d.branchName}')" class="btn-main" style="padding:5px">ربط بفرع</button></td>
                     </tr>
                 `;
             }
         });
+
+        onValue(ref(database, 'cashiers'), (snapshot) => {
+            const data = snapshot.val();
+            const tbody = document.getElementById('cashiers-list-body');
+            if (!tbody) return;
+            tbody.innerHTML = "";
+            for (let id in data) {
+                const c = data[id];
+                tbody.innerHTML += `<tr><td>${c.name}</td><td>${c.pin}</td><td><button class="btn-clear" style="padding:5px">حذف</button></td></tr>`;
+            }
+        });
+
+        onValue(ref(database, 'branches'), (snapshot) => {
+            window.availableBranches = snapshot.val();
+        });
     }
 
-    // 3. وظيفة حفظ الكاشير الجديد في فايربيس (الربط الفعلي)
+    window.updateDeviceLink = async function(deviceId, branchId, branchName) {
+        try {
+            await update(ref(database, 'authorized_devices/' + deviceId), {
+                branchId: branchId,
+                branchName: branchName
+            });
+            alert("✅ تم ربط الجهاز بالفرع بنجاح");
+            location.reload();
+        } catch (e) { alert("خطأ: " + e.message); }
+    }
+
     window.saveNewCashier = async function() {
         const name = document.getElementById('cashier-name').value;
         const pin = document.getElementById('cashier-pin').value;
-
-        if (!name || !pin) {
-            alert("يرجى إدخال الاسم والرمز");
-            return;
-        }
-
-        try {
-            await set(ref(database, 'cashiers/' + pin), {
-                name: name,
-                pin: pin,
-                role: 'cashier',
-                createdAt: new Date().toISOString()
-            });
-            alert("✅ تم إضافة الكاشير بنجاح");
-            closeModal();
-        } catch (error) {
-            alert("حدث خطأ أثناء الحفظ: " + error.message);
-        }
+        if (!name || !pin) return alert("أكمل البيانات");
+        await set(ref(database, 'cashiers/' + pin), { name, pin, role: 'أمين صندوق' });
+        closeModal();
     }
 
-    // 4. وظيفة تحديث بيانات الجهاز (تفعيله بيد المدير)
-    window.updateDeviceStatus = async function(id) {
-        const newName = document.getElementById('edit-device-name').value;
-        const newBranch = document.getElementById('edit-device-branch').value;
-        const newStatus = document.getElementById('edit-device-status').value;
-
-        try {
-            await update(ref(database, 'authorized_devices/' + id), {
-                name: newName,
-                branch: newBranch,
-                status: newStatus
-            });
-            alert("✅ تم تحديث بيانات الجهاز بنجاح");
-            closeModal();
-        } catch (error) {
-            alert("خطأ في التحديث: " + error.message);
-        }
-    }
-
-    // تشغيل الفحص
-    if (sessionStorage.getItem('userRole')) {
-        checkDeviceBinding();
-    }
-
-
-
-// داخل <script type="module">
-
-// 1. التحقق من الجهاز والفرع (قفل النظام)
-async function enforceDevicePolicy() {
-    const deviceID = localStorage.getItem('fawatirr_device_id');
-    const deviceRef = ref(database, 'authorized_devices/' + deviceID);
-    const snapshot = await get(deviceRef);
-    
-    const content = document.getElementById('content-area');
-    const sidebar = document.querySelector('.sidebar');
-
-    if (snapshot.exists()) {
-        const devData = snapshot.val();
-        if (devData.branchId && devData.branchId !== "غير محدد") {
-            // الجهاز معتمد ومربوط بفرع
-            sessionStorage.setItem('deviceBranchName', devData.branchName);
-            sessionStorage.setItem('deviceBranchId', devData.branchId);
-            unlockSystem();
-        } else {
-            lockSystem("هذا الجهاز مسجل ولكنه غير مرتبط بفرع حالياً.");
-        }
-    } else {
-        // تسجيل كجهاز جديد غير معرف
-        await set(deviceRef, { id: deviceID, status: 'offline', branchId: null, branchName: 'غير محدد' });
-        lockSystem("جهاز جديد: يرجى التواصل مع المدير لربط هذا الجهاز بفرع.");
-    }
-}
-
-// 2. إدارة الصلاحيات حسب الدور
-window.applyRolePermissions = function(role) {
-    const menuItems = {
-        'أمين صندوق': ['#drop-stores', '#drop-suppliers'], // العناصر المحجوبة
-        'أمين مخازن': ['#drop-admin']
-    };
-
-    // إعادة إظهار الكل أولاً
-    document.querySelectorAll('.sidebar-item, .dropdown-btn').forEach(el => el.style.display = 'block');
-
-    if (menuItems[role]) {
-        menuItems[role].forEach(selector => {
-            const el = document.querySelector(selector);
-            if (el) el.style.display = 'none';
+    // 4. محرك الفروع
+    window.listenToBranches = function() {
+        onValue(ref(database, 'branches'), (snapshot) => {
+            const data = snapshot.val();
+            const tbody = document.getElementById('branches-list-body');
+            if (!tbody) return;
+            tbody.innerHTML = "";
+            for (let id in data) {
+                const b = data[id];
+                tbody.innerHTML += `<tr><td>${b.nameAr}</td><td>${b.nameEn}</td><td>${b.isMain ? 'رئيسي' : 'فرعي'}</td><td><button class="btn-clear" style="padding:5px">حذف</button></td></tr>`;
+            }
         });
     }
-}
 
-// 3. تحديث مسمى الكاشير (الاسم + الفرع)
-window.updateUserDisplay = function() {
-    const userName = sessionStorage.getItem('userName');
-    const branchName = sessionStorage.getItem('deviceBranchName');
-    const role = sessionStorage.getItem('userRole');
-    
-    const displayHTML = role === 'admin' ? userName : `${userName} (${branchName})`;
-    document.getElementById('page-title').innerHTML = `${displayHTML} <span style="font-size:12px; opacity:0.6;">- ${role}</span>`;
-}
-
-function lockSystem(msg) {
-    document.getElementById('content-area').innerHTML = `<div class="lock-screen"><i class="fas fa-lock"></i><p>${msg}</p></div>`;
-    document.querySelector('.sidebar').style.opacity = "0.2";
-    document.querySelector('.sidebar').style.pointerEvents = "none";
-}
-
-function unlockSystem() {
-    document.querySelector('.sidebar').style.opacity = "1";
-    document.querySelector('.sidebar').style.pointerEvents = "auto";
-}
-
-
-// جلب الفروع وعرضها لحظياً
-window.listenToBranches = function() {
-    const branchesRef = ref(database, 'branches');
-    onValue(branchesRef, (snapshot) => {
-        const data = snapshot.val();
-        const tbody = document.getElementById('branches-list-body');
-        if (!tbody) return;
-        
-        tbody.innerHTML = "";
-        for (let id in data) {
-            const b = data[id];
-            tbody.innerHTML += `
-                <tr>
-                    <td>${b.nameAr}</td>
-                    <td>${b.nameEn}</td>
-                    <td>${b.isMain ? '<span style="color:#28a745; font-weight:bold;">رئيسي ★</span>' : 'فرعي'}</td>
-                    <td>
-                        <button onclick="deleteBranch('${id}')" class="btn-clear" style="padding:5px 10px; font-size:12px;">حذف</button>
-                    </td>
-                </tr>
-            `;
-        }
-    });
-}
-
-// حفظ الفرع الجديد والتعامل مع "الفرع الرئيسي"
-window.saveNewBranch = async function() {
-    const nameAr = document.getElementById('branch-ar').value;
-    const nameEn = document.getElementById('branch-en').value;
-    const isMain = document.getElementById('is-main-branch').checked;
-
-    if (!nameAr || !nameEn) { alert("يرجى إدخال الأسماء"); return; }
-
-    try {
-        const newBranchRef = ref(database, 'branches/' + Date.now());
-        
-        // إذا اختار المدير أن يكون هذا هو الفرع الرئيسي، يجب إلغاء "الرئيسي" من بقية الفروع أولاً
+    window.saveNewBranch = async function() {
+        const nameAr = document.getElementById('branch-ar').value;
+        const nameEn = document.getElementById('branch-en').value;
+        const isMain = document.getElementById('is-main-branch').checked;
         if (isMain) {
-            const allBranches = await get(ref(database, 'branches'));
-            if (allBranches.exists()) {
-                const updates = {};
-                for (let bid in allBranches.val()) {
-                    updates[`branches/${bid}/isMain`] = false;
-                }
-                await update(ref(database), updates);
+            const all = await get(ref(database, 'branches'));
+            if (all.exists()) {
+                const upds = {};
+                for (let bid in all.val()) upds[`branches/${bid}/isMain`] = false;
+                await update(ref(database), upds);
             }
         }
-
-        await set(newBranchRef, {
-            nameAr, nameEn, isMain,
-            createdAt: new Date().toISOString()
-        });
-        
+        await set(ref(database, 'branches/' + Date.now()), { nameAr, nameEn, isMain });
         closeModal();
-    } catch (e) { alert("خطأ: " + e.message); }
-}
+    }
 
+    // 5. الصلاحيات وتحديث العرض
+    window.applyRolePermissions = function(role) {
+        document.querySelectorAll('.sidebar-item, .dropdown-btn').forEach(el => el.style.display = 'block');
+        const hidden = { 'أمين صندوق': ['#drop-stores', '#drop-suppliers'], 'أمين مخازن': ['#drop-admin'] };
+        if (hidden[role]) hidden[role].forEach(s => { const el = document.querySelector(s); if (el) el.style.display = 'none'; });
+    }
 
+    window.updateUserDisplay = function() {
+        const name = sessionStorage.getItem('userName');
+        const branch = sessionStorage.getItem('deviceBranchName') || 'غير محدد';
+        const role = sessionStorage.getItem('userRole');
+        const display = role === 'admin' ? name : `${name} (${branch})`;
+        document.getElementById('page-title').innerHTML = `${display} <span style="font-size:12px; opacity:0.6;">- ${role}</span>`;
+    }
+
+    if (sessionStorage.getItem('userRole')) {
+        checkDeviceBinding();
+        window.applyRolePermissions(sessionStorage.getItem('userRole'));
+    }
 </script>
 </body>
 </html>

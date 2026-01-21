@@ -273,13 +273,14 @@
     }
 
     function checkDeviceBinding() {
-        let deviceID = sessionStorage.getItem('fawatirr_device_id');
-        if (!deviceID) {
-            deviceID = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
-            sessionStorage.setItem('fawatirr_device_id', deviceID);
-        }
-        console.log("هوية الجهاز الحالية:", deviceID);
+    // نستخدم localStorage هنا لكي لا يتغير الـ ID للجهاز ابداً
+    let deviceID = localStorage.getItem('fawatirr_device_id');
+    if (!deviceID) {
+        deviceID = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+        localStorage.setItem('fawatirr_device_id', deviceID);
     }
+    console.log("هوية الجهاز الحالية:", deviceID);
+}
 
     // فحص حالة الدخول عند تحميل الصفحة
     window.addEventListener('DOMContentLoaded', (event) => {
@@ -349,7 +350,20 @@ window.loadPOSDevicesPage = function() {
         </div>
     `;
     document.getElementById('content-area').innerHTML = html;
+
+    if(window.listenToDevices) window.listenToDevices(); 
+
 };
+
+
+window.saveNewCashier = function() {
+    alert("سيتم ربط وظيفة الحفظ بفايربيس في الخطوة القادمة ✅");
+    closeModal();
+}
+
+window.editDevice = function(id) {
+    alert("تعديل الجهاز رقم: " + id);
+}
     
 
 
@@ -385,6 +399,32 @@ window.loadPOSDevicesPage = function() {
             showUnauthorizedMessage("هذا الجهاز غير معرف. تم إرسال طلب للمدير لتعريفه.");
         }
     }
+
+    // داخل <script type="module">
+window.listenToDevices = function() {
+    const devicesRef = ref(database, 'authorized_devices');
+    onValue(devicesRef, (snapshot) => {
+        const data = snapshot.val();
+        const tbody = document.getElementById('devices-list-body');
+        if (!tbody) return;
+        
+        tbody.innerHTML = "";
+        for (let id in data) {
+            const dev = data[id];
+            tbody.innerHTML += `
+                <tr>
+                    <td>${dev.id}</td>
+                    <td>${dev.name}</td>
+                    <td>${dev.branch || 'غير محدد'}</td>
+                    <td><span class="status-badge ${dev.status === 'pending' ? 'status-pending' : 'status-online'}">${dev.status}</span></td>
+                    <td>
+                        <button onclick="editDevice('${id}')" class="btn-main" style="padding:5px">تعديل</button>
+                    </td>
+                </tr>
+            `;
+        }
+    });
+}
 
     // 2. وظيفة إظهار رسالة المنع
     function showUnauthorizedMessage(msg) {

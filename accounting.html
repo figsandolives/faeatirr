@@ -254,18 +254,14 @@
     }
 
     window.checkLogin = function() {
-        const adminPin = "123456"; 
-        const errorMsg = document.getElementById('login-error');
-
-        if (pinCode === adminPin) {
-            sessionStorage.setItem('userRole', 'admin');
-            sessionStorage.setItem('userName', 'المدير العام');
-            proceedToSystem();
-        } else {
-            errorMsg.style.display = "block";
-            clearPin();
-        }
+    const errorMsg = document.getElementById('login-error');
+    // استدعاء وظيفة التحقق الموجودة في الموديول
+    if (window.verifyUserLogin) {
+        window.verifyUserLogin(pinCode);
+    } else {
+        console.error("محرك الدخول لم يكتمل تحميله بعد");
     }
+}
 
     function proceedToSystem() {
         document.getElementById('login-overlay').style.display = "none";
@@ -591,7 +587,7 @@ window.openAddUserModal = function() {
                     <option value="مدير">مدير</option>
                 </select>
                 <div style="display:flex; gap:10px; margin-top:15px;">
-                    <input type="text" id="user-pin-input" placeholder="رمز الدخول (6 أرقام)" maxlength="6">
+                    <input type="text" id="user-pin-input" placeholder="الرمز (4 أرقام)" maxlength="4">
                     <button class="btn-main" onclick="generateUserPin()">إنشاء رمز</button>
                 </div>
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
@@ -604,18 +600,12 @@ window.openAddUserModal = function() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
-// دالة توليد الرمز للمستخدمين (6 أرقام)
+// دالة توليد رمز من 4 أرقام للمستخدمين
 window.generateUserPin = function() {
-    const pin = Math.floor(100000 + Math.random() * 900000); // 6 أرقام
+    const pin = Math.floor(1000 + Math.random() * 9000); // توليد 4 أرقام
     document.getElementById('user-pin-input').value = pin;
 };
 
-
-
-window.generateUserPin = function() {
-    const pin = Math.floor(100000 + Math.random() * 900000); // رمز من 6 أرقام
-    document.getElementById('user-pin-input').value = pin;
-}
 
 
 
@@ -940,6 +930,57 @@ window.confirmSaveUser = async function() {
         alert("✅ تم حفظ مستخدم المحاسبة بنجاح");
         closeModal();
     } catch (e) { alert("خطأ في حفظ المستخدم: " + e.message); }
+};
+
+// داخل <script type="module">
+
+// داخل <script type="module">
+
+window.verifyUserLogin = async function(enteredPin) {
+    const errorMsg = document.getElementById('login-error');
+    
+    // رمز المدير العام للطوارئ (يمكنك تغييره لـ 4 أرقام أيضاً إذا أردت)
+    if (enteredPin === "123456") {
+        sessionStorage.setItem('userRole', 'admin');
+        sessionStorage.setItem('userName', 'المدير العام');
+        location.reload();
+        return;
+    }
+
+    try {
+        // البحث في نظام المستخدمين (المحاسبة)
+        const userRef = ref(database, 'system_users/' + enteredPin);
+        const userSnap = await get(userRef);
+
+        if (userSnap.exists()) {
+            const userData = userSnap.val();
+            sessionStorage.setItem('userRole', userData.role);
+            sessionStorage.setItem('userName', userData.name);
+            alert("مرحباً بك: " + userData.name);
+            location.reload();
+            return;
+        }
+
+        // البحث في نظام الكاشير (المبيعات)
+        const cashierRef = ref(database, 'cashiers/' + enteredPin);
+        const cashierSnap = await get(cashierRef);
+
+        if (cashierSnap.exists()) {
+            const cashierData = cashierSnap.val();
+            sessionStorage.setItem('userRole', 'أمين صندوق');
+            sessionStorage.setItem('userName', cashierData.name);
+            alert("دخول الكاشير: " + cashierData.name);
+            location.reload();
+            return;
+        }
+
+        // إذا لم يتطابق الرمز
+        errorMsg.style.display = "block";
+        clearPin();
+
+    } catch (error) {
+        alert("خطأ في الاتصال بقاعدة البيانات");
+    }
 };
 </script>
 </body>

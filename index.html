@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fawatirr System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="rtl" id="body-tag">
+
+    <div class="main-container">
+        <img src="logo.png" alt="Company Logo" class="logo">
+
+        <div class="nav-buttons">
+            <a href="cashier.html" class="btn-main" id="btn-cashier">الكاشير (نظام المبيعات)</a>
+            
+            <a href="accounting.html" class="btn-main" id="btn-accounting">المحاسبة والمخازن</a>
+        </div>
+
+        <button class="lang-switch" onclick="toggleLanguage()" id="btn-lang">English</button>
+    </div>
+
+    <script>
+        let currentLang = 'ar';
+        function toggleLanguage() {
+            const body = document.getElementById('body-tag');
+            const btnCashier = document.getElementById('btn-cashier');
+            const btnAcc = document.getElementById('btn-accounting');
+            const btnLang = document.getElementById('btn-lang');
+
+            if (currentLang === 'ar') {
+                body.className = 'ltr';
+                btnCashier.innerText = 'Cashier System';
+                btnAcc.innerText = 'Accounting & Stores';
+                btnLang.innerText = 'عربي';
+                currentLang = 'en';
+            } else {
+                body.className = 'rtl';
+                btnCashier.innerText = 'الكاشير (نظام المبيعات)';
+                btnAcc.innerText = 'المحاسبة والمخازن';
+                btnLang.innerText = 'English';
+                currentLang = 'ar';
+            }
+        }
+    </script>
+</body>
+</html>

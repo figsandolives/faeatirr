@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="tab-title">المحاسبة والمخازن</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="rtl" id="body-tag">
+
+
+    <div id="login-overlay" class="login-screen">
+    <div class="login-box">
+        <img src="logo.png" alt="Logo" class="login-logo">
+        <h2 id="login-title">تسجيل الدخول للنظام</h2>
+        <div class="pin-display">
+            <input type="password" id="pin-input" readonly placeholder="******">
+        </div>
+        <div class="pin-pad">
+            <button onclick="appendPin('1')">1</button>
+            <button onclick="appendPin('2')">2</button>
+            <button onclick="appendPin('3')">3</button>
+            <button onclick="appendPin('4')">4</button>
+            <button onclick="appendPin('5')">5</button>
+            <button onclick="appendPin('6')">6</button>
+            <button onclick="appendPin('7')">7</button>
+            <button onclick="appendPin('8')">8</button>
+            <button onclick="appendPin('9')">9</button>
+            <button class="btn-clear" onclick="clearPin()">C</button>
+            <button onclick="appendPin('0')">0</button>
+            <button class="btn-login" onclick="checkLogin()">Enter</button>
+        </div>
+        <p id="login-error" style="color: #e94560; margin-top: 15px; display: none;">الرمز غير صحيح!</p>
+    </div>
+</div>
+
+    <div class="dashboard-container">
+        <aside class="sidebar">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <img src="logo.png" alt="Logo" style="width: 80px;">
+            </div>
+
+            <a class="sidebar-item" id="menu-orders" onclick="loadPage('orders')">الطلبات</a>
+            <a class="sidebar-item" id="menu-customers" onclick="loadPage('customers')">العملاء</a>
+            <a class="sidebar-item" id="menu-products" onclick="loadPage('products')">المنتجات</a>
+            <a class="sidebar-item" id="menu-categories" onclick="loadPage('categories')">التصنيفات</a>
+            <a class="sidebar-item" id="menu-units" onclick="loadPage('units')">الوحدات</a>
+            <a class="sidebar-item" id="menu-itemcard" onclick="loadPage('itemcard')">بطاقة الصنف</a>
+
+            <div class="sidebar-item dropdown-btn" onclick="toggleDropdown('drop-stores')">
+                <span id="menu-stores-title">المخازن</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="drop-stores" class="dropdown-container">
+                <a class="sidebar-item" id="sub-inv-items">مواد المخزون</a>
+                <a class="sidebar-item" id="sub-storage-locations">أماكن التخزين</a>
+                <a class="sidebar-item" id="sub-disbursement">صرف</a>
+                <a class="sidebar-item" id="sub-production">انتاج</a>
+                <a class="sidebar-item" id="sub-inventory-check">جرد</a>
+                <a class="sidebar-item" id="sub-transfers">تحويلات</a>
+                <a class="sidebar-item" id="sub-return-store">مرتجع للمخزن</a>
+                <a class="sidebar-item" id="sub-return-waste">مرتجع توالف</a>
+            </div>
+
+            <div class="sidebar-item dropdown-btn" onclick="toggleDropdown('drop-suppliers')">
+                <span id="menu-suppliers-title">الموردون</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="drop-suppliers" class="dropdown-container">
+                <a class="sidebar-item" id="sub-suppliers-list">الموردون</a>
+                <a class="sidebar-item" id="sub-purchasing">الشراء</a>
+                <a class="sidebar-item" id="sub-return-supplier">مرتجع للمورد</a>
+            </div>
+
+            <div class="sidebar-item dropdown-btn" onclick="toggleDropdown('drop-admin')">
+                <span id="menu-admin-title">الإدارة</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="drop-admin" class="dropdown-container">
+                <a class="sidebar-item" id="sub-pending-moves">حركات مخزون معلقة</a>
+                <a class="sidebar-item" id="sub-pos-devices" onclick="loadPOSDevicesPage()">الأجهزة والكاشير</a>
+                <a class="sidebar-item" id="sub-store-staff">موظفي المخازن</a>
+                <a class="sidebar-item" id="sub-prod-staff">موظفي الانتاج</a>
+                <a class="sidebar-item" id="sub-branches">الفروع</a>
+                <a class="sidebar-item" id="sub-delivery-areas">مناطق التوصيل</a>
+                <a class="sidebar-item" id="sub-delivery-prices">أسعار التوصيل</a>
+                <a class="sidebar-item" id="sub-discounts">خصومات</a>
+                <a class="sidebar-item" id="sub-payment-types">انواع الطلب وطرق الدفع</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-bar">
+                <h2 id="page-title">المحاسبة والمخازن</h2>
+                <button id="btn-lang-toggle" class="btn-main" onclick="toggleLanguage()" style="padding: 5px 15px;">English</button>
+            </header>
+            
+            <div id="content-area">
+                <p id="welcome-msg">اختر قسماً من القائمة الجانبية للبدء...</p>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // 1. قاموس الترجمة الشامل
+        const translations = {
+            ar: {
+                tabTitle: "المحاسبة والمخازن",
+                pageTitle: "المحاسبة والمخازن",
+                btnLang: "English",
+                welcome: "اختر قسماً من القائمة الجانبية للبدء...",
+                orders: "الطلبات",
+                customers: "العملاء",
+                products: "المنتجات",
+                categories: "التصنيفات",
+                units: "الوحدات",
+                itemcard: "بطاقة الصنف",
+                storesTitle: "المخازن",
+                invItems: "مواد المخزون",
+                storageLoc: "أماكن التخزين",
+                disbursement: "صرف",
+                production: "انتاج",
+                invCheck: "جرد",
+                transfers: "تحويلات",
+                retStore: "مرتجع للمخزن",
+                retWaste: "مرتجع توالف",
+                suppTitle: "الموردون",
+                suppList: "الموردون",
+                purchasing: "الشراء",
+                retSupp: "مرتجع للمورد",
+                adminTitle: "الإدارة",
+                pendingMoves: "حركات مخزون معلقة",
+                posDevices: "الأجهزة والكاشير",
+                storeStaff: "موظفي المخازن",
+                prodStaff: "موظفي الانتاج",
+                branches: "الفروع",
+                delAreas: "مناطق التوصيل",
+                delPrices: "أسعار التوصيل",
+                discounts: "خصومات",
+                paymentTypes: "انواع الطلب وطرق الدفع"
+            },
+            en: {
+                tabTitle: "Accounting System",
+                pageTitle: "Accounting & Stores",
+                btnLang: "عربي",
+                welcome: "Select a department from the sidebar to start...",
+                orders: "Orders",
+                customers: "Customers",
+                products: "Products",
+                categories: "Categories",
+                units: "Units",
+                itemcard: "Item Card",
+                storesTitle: "Stores",
+                invItems: "Inventory Items",
+                storageLoc: "Storage Locations",
+                disbursement: "Disbursement",
+                production: "Production",
+                invCheck: "Inventory Check",
+                transfers: "Transfers",
+                retStore: "Store Return",
+                retWaste: "Waste Return",
+                suppTitle: "Suppliers",
+                suppList: "Suppliers List",
+                purchasing: "Purchasing",
+                retSupp: "Supplier Return",
+                adminTitle: "Admin",
+                pendingMoves: "Pending Inventory",
+                posDevices: "POS Devices",
+                storeStaff: "Store Staff",
+                prodStaff: "Production Staff",
+                branches: "Branches",
+                delAreas: "Delivery Areas",
+                delPrices: "Delivery Prices",
+                discounts: "Discounts",
+                paymentTypes: "Payment & Order Types"
+            }
+        };
+
+        let currentLang = 'ar';
+
+        // 2. وظيفة تبديل اللغة (تحديث كل الـ IDs)
+        window.toggleLanguage = function() {
+            currentLang = (currentLang === 'ar') ? 'en' : 'ar';
+            const body = document.getElementById('body-tag');
+            body.className = (currentLang === 'ar') ? 'rtl' : 'ltr';
+            
+            const lang = translations[currentLang];
+
+            // تحديث كل عنصر بناءً على الـ ID الخاص به
+            document.getElementById('tab-title').innerText = lang.tabTitle;
+            document.getElementById('page-title').innerText = lang.pageTitle;
+            document.getElementById('btn-lang-toggle').innerText = lang.btnLang;
+            if(document.getElementById('welcome-msg')) document.getElementById('welcome-msg').innerText = lang.welcome;
+
+            document.getElementById('menu-orders').innerText = lang.orders;
+            document.getElementById('menu-customers').innerText = lang.customers;
+            document.getElementById('menu-products').innerText = lang.products;
+            document.getElementById('menu-categories').innerText = lang.categories;
+            document.getElementById('menu-units').innerText = lang.units;
+            document.getElementById('menu-itemcard').innerText = lang.itemcard;
+
+            document.getElementById('menu-stores-title').innerText = lang.storesTitle;
+            document.getElementById('sub-inv-items').innerText = lang.invItems;
+            document.getElementById('sub-storage-locations').innerText = lang.storageLoc;
+            document.getElementById('sub-disbursement').innerText = lang.disbursement;
+            document.getElementById('sub-production').innerText = lang.production;
+            document.getElementById('sub-inventory-check').innerText = lang.invCheck;
+            document.getElementById('sub-transfers').innerText = lang.transfers;
+            document.getElementById('sub-return-store').innerText = lang.retStore;
+            document.getElementById('sub-return-waste').innerText = lang.retWaste;
+
+            document.getElementById('menu-suppliers-title').innerText = lang.suppTitle;
+            document.getElementById('sub-suppliers-list').innerText = lang.suppList;
+            document.getElementById('sub-purchasing').innerText = lang.purchasing;
+            document.getElementById('sub-return-supplier').innerText = lang.retSupp;
+
+            document.getElementById('menu-admin-title').innerText = lang.adminTitle;
+            document.getElementById('sub-pending-moves').innerText = lang.pendingMoves;
+            document.getElementById('sub-pos-devices').innerText = lang.posDevices;
+            document.getElementById('sub-store-staff').innerText = lang.storeStaff;
+            document.getElementById('sub-prod-staff').innerText = lang.prodStaff;
+            document.getElementById('sub-branches').innerText = lang.branches;
+            document.getElementById('sub-delivery-areas').innerText = lang.delAreas;
+            document.getElementById('sub-delivery-prices').innerText = lang.delPrices;
+            document.getElementById('sub-discounts').innerText = lang.discounts;
+            document.getElementById('sub-payment-types').innerText = lang.paymentTypes;
+        };
+
+        // وظيفة القوائم المنسدلة
+        window.toggleDropdown = function(id) {
+            document.getElementById(id).classList.toggle('show');
+        };
+
+        // سيتم برمجة وظيفة تحميل الصفحات حبة حبة
+        window.loadPage = function(page) {
+            console.log("جاري تحميل صفحة: " + page);
+        };
+
+        // --- كود نظام الدخول والتعرف على الجهاز ---
+    let pinCode = "";
+
+    window.appendPin = function(num) {
+        if (pinCode.length < 6) {
+            pinCode += num;
+            document.getElementById('pin-input').value = "*".repeat(pinCode.length);
+        }
+    }
+
+    window.clearPin = function() {
+        pinCode = "";
+        document.getElementById('pin-input').value = "";
+        document.getElementById('login-error').style.display = "none";
+    }
+
+    window.checkLogin = function() {
+        const adminPin = "123456"; 
+        const errorMsg = document.getElementById('login-error');
+
+        if (pinCode === adminPin) {
+            sessionStorage.setItem('userRole', 'admin');
+            sessionStorage.setItem('userName', 'المدير العام');
+            proceedToSystem();
+        } else {
+            errorMsg.style.display = "block";
+            clearPin();
+        }
+    }
+
+    function proceedToSystem() {
+        document.getElementById('login-overlay').style.display = "none";
+        checkDeviceBinding();
+    }
+
+    function checkDeviceBinding() {
+        let deviceID = sessionStorage.getItem('fawatirr_device_id');
+        if (!deviceID) {
+            deviceID = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+            sessionStorage.setItem('fawatirr_device_id', deviceID);
+        }
+        console.log("هوية الجهاز الحالية:", deviceID);
+    }
+
+    // فحص حالة الدخول عند تحميل الصفحة
+    window.addEventListener('DOMContentLoaded', (event) => {
+        if (sessionStorage.getItem('userRole')) {
+            document.getElementById('login-overlay').style.display = "none";
+        }
+    });
+
+
+    // وظيفة فتح نافذة إضافة كاشير جديد
+window.openAddCashierModal = function() {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>إضافة كاشير جديد</h3>
+                <input type="text" id="cashier-name" placeholder="اسم الكاشير">
+                <div style="display:flex; gap:10px; margin-top:15px;">
+                    <input type="text" id="cashier-pin" placeholder="رمز الدخول (4 أرقام)">
+                    <button class="btn-main" onclick="generateRandomPin()">إنشاء</button>
+                </div>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveNewCashier()">إضافة</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+window.closeModal = function() {
+    const modal = document.getElementById('modal-overlay');
+    if (modal) modal.remove();
+}
+
+window.generateRandomPin = function() {
+    const pin = Math.floor(1000 + Math.random() * 9000);
+    document.getElementById('cashier-pin').value = pin;
+}
+
+
+
+    // --- كود عرض واجهة صفحة الأجهزة (يُضاف قبل نهاية السكربت الأول) ---
+window.loadPOSDevicesPage = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div class="admin-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3><i class="fas fa-desktop"></i> ${lang.posDevices}</h3>
+                <button class="btn-main" onclick="openAddCashierModal()" style="padding: 10px 20px;">+ إضافة كاشير جديد</button>
+            </div>
+            
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID الجهاز</th>
+                        <th>اسم الجهاز / الوصف</th>
+                        <th>الفرع المرتبط</th>
+                        <th>الحالة</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="devices-list-body">
+                    <tr><td colspan="5">جاري جلب الأجهزة...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    `;
+    document.getElementById('content-area').innerHTML = html;
+};
+    
+
+
+    </script>
+
+    <script type="module">
+    import { database, ref, onValue, set, get, update } from './firebase-config.js';
+
+    // 1. وظيفة فحص الجهاز عند الدخول
+    async function checkDeviceBinding() {
+        const deviceID = localStorage.getItem('fawatirr_device_id');
+        if (!deviceID) return;
+
+        const deviceRef = ref(database, 'authorized_devices/' + deviceID);
+        const snapshot = await get(deviceRef);
+        
+        if (snapshot.exists()) {
+            const deviceData = snapshot.val();
+            if (deviceData.branch) {
+                sessionStorage.setItem('currentBranch', deviceData.branch);
+                console.log("الجهاز مرتبط بفرع: " + deviceData.branch);
+            } else {
+                showUnauthorizedMessage("هذا الجهاز مسجل بانتظار تحديد فرع من المدير.");
+            }
+        } else {
+            // تسجيل الجهاز لأول مرة في القاعدة كجهاز جديد
+            await set(deviceRef, {
+                id: deviceID,
+                name: "جهاز جديد غير مسمى",
+                status: "pending",
+                lastSeen: new Date().toLocaleString()
+            });
+            showUnauthorizedMessage("هذا الجهاز غير معرف. تم إرسال طلب للمدير لتعريفه.");
+        }
+    }
+
+    // 2. وظيفة إظهار رسالة المنع
+    function showUnauthorizedMessage(msg) {
+        document.getElementById('content-area').innerHTML = `
+            <div style="text-align:center; margin-top:100px; color:#e94560;">
+                <i class="fas fa-exclamation-triangle fa-4x"></i>
+                <h2>دخول غير مصرح</h2>
+                <p>${msg}</p>
+                <p>معرف جهازك: <b>${localStorage.getItem('fawatirr_device_id')}</b></p>
+            </div>
+        `;
+        document.querySelector('.sidebar').style.pointerEvents = "none";
+        document.querySelector('.sidebar').style.opacity = "0.5";
+    }
+
+    // تشغيل الفحص فوراً عند الدخول
+    if (sessionStorage.getItem('userRole')) {
+        checkDeviceBinding();
+    }
+</script>
+</body>
+</html>

@@ -590,7 +590,10 @@ window.openAddUserModal = function() {
                     <option value="أمين مخازن">أمين مخازن</option>
                     <option value="مدير">مدير</option>
                 </select>
-                <input type="text" id="user-pin-input" placeholder="رمز الدخول">
+                <div style="display:flex; gap:10px; margin-top:15px;">
+                    <input type="text" id="user-pin-input" placeholder="رمز الدخول (6 أرقام)" maxlength="6">
+                    <button class="btn-main" onclick="generateUserPin()">إنشاء رمز</button>
+                </div>
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
                     <button class="btn-login" onclick="confirmSaveUser()">حفظ المستخدم</button>
                     <button class="btn-clear" onclick="closeModal()">إلغاء</button>
@@ -601,19 +604,13 @@ window.openAddUserModal = function() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
-// دالة توليد الرمز (تأكد من وجودها أيضاً)
+// دالة توليد الرمز للمستخدمين (6 أرقام)
 window.generateUserPin = function() {
-    const pin = Math.floor(100000 + Math.random() * 900000);
-    const pinInput = document.getElementById('user-pin-input');
-    if (pinInput) pinInput.value = pin;
-};
-// --- نهاية الكود ---
-
-// دالة توليد الرمز (تأكد من وجودها)
-window.generateUserPin = function() {
-    const pin = Math.floor(100000 + Math.random() * 900000);
+    const pin = Math.floor(100000 + Math.random() * 900000); // 6 أرقام
     document.getElementById('user-pin-input').value = pin;
 };
+
+
 
 window.generateUserPin = function() {
     const pin = Math.floor(100000 + Math.random() * 900000); // رمز من 6 أرقام
@@ -790,7 +787,7 @@ window.initDevicesAndCashiers = function() {
 
     // إضافة مراقبة جدول الكاشير (هذا هو الجزء الذي كان ينقصك)
     onValue(ref(database, 'cashiers'), (snapshot) => {
-        const tbody = document.getElementById('cashier-list-body'); // تأكد أن هذا الـ ID موجود في الـ HTML
+        const tbody = document.getElementById('cashiers-list-body'); // تأكد أن هذا الـ ID موجود في الـ HTML
         if (!tbody) return;
         tbody.innerHTML = "";
         const data = snapshot.val();

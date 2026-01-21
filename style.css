@@ -339,3 +339,17 @@ body.ltr { direction: ltr; }
     color: white;
     border-radius: 5px;
 }
+
+.lock-screen {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 60vh; color: #e94560; text-align: center;
+}
+.lock-screen i { font-size: 5rem; margin-bottom: 20px; }
+
+.info-card {
+    background: rgba(15, 52, 96, 0.5); padding: 15px; border-radius: 8px;
+    margin-bottom: 20px; border-inline-start: 4px solid var(--gold-accent);
+}
+
+.status-online { color: #28a745; font-weight: bold; }
+.status-offline { color: #888; }

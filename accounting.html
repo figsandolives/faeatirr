@@ -364,6 +364,30 @@ window.saveNewCashier = function() {
 window.editDevice = function(id) {
     alert("تعديل الجهاز رقم: " + id);
 }
+
+
+
+window.openEditDeviceModal = function(id, currentName, currentBranch) {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>تفعيل / تعديل الجهاز</h3>
+                <p style="font-size:12px; color:#aaa;">ID: ${id}</p>
+                <input type="text" id="edit-device-name" value="${currentName}" placeholder="اسم الجهاز (مثلاً: كاشير 1)">
+                <input type="text" id="edit-device-branch" value="${currentBranch}" placeholder="الفرع (مثلاً: أبو الحصانية)">
+                <select id="edit-device-status" style="width:100%; padding:10px; margin-top:10px; background:#1a1a2e; color:white; border-radius:5px;">
+                    <option value="pending">معلق (Pending)</option>
+                    <option value="authorized" selected>مقبول (Authorized)</option>
+                </select>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="updateDeviceStatus('${id}')">حفظ التغييرات</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
     
 
 
@@ -372,7 +396,7 @@ window.editDevice = function(id) {
     <script type="module">
     import { database, ref, onValue, set, get, update } from './firebase-config.js?v=2';
 
-    // 1. وظيفة فحص الجهاز عند الدخول
+    // 1. وظيفة فحص الجهاز عند الدخول (معدلة)
     async function checkDeviceBinding() {
         const deviceID = localStorage.getItem('fawatirr_device_id');
         if (!deviceID) return;
@@ -382,65 +406,96 @@ window.editDevice = function(id) {
         
         if (snapshot.exists()) {
             const deviceData = snapshot.val();
-            if (deviceData.branch) {
+            // إذا كان الجهاز مقبولاً، اسمح له بالدخول
+            if (deviceData.status === 'authorized') {
                 sessionStorage.setItem('currentBranch', deviceData.branch);
-                console.log("الجهاز مرتبط بفرع: " + deviceData.branch);
+                console.log("✅ الجهاز معرف ومرتبط بفرع: " + deviceData.branch);
             } else {
-                showUnauthorizedMessage("هذا الجهاز مسجل بانتظار تحديد فرع من المدير.");
+                showUnauthorizedMessage("هذا الجهاز مسجل بانتظار 'تفعيل' المدير من قسم الأجهزة.");
             }
         } else {
-            // تسجيل الجهاز لأول مرة في القاعدة كجهاز جديد
+            // تسجيل الجهاز كـ "معلق" لأول مرة
             await set(deviceRef, {
                 id: deviceID,
-                name: "جهاز جديد غير مسمى",
+                name: "جهاز جديد",
                 status: "pending",
+                branch: "غير محدد",
                 lastSeen: new Date().toLocaleString()
             });
-            showUnauthorizedMessage("هذا الجهاز غير معرف. تم إرسال طلب للمدير لتعريفه.");
+            showUnauthorizedMessage("هذا جهاز جديد. يرجى تفعيله من قبل المدير من قسم 'الأجهزة والكاشير'.");
         }
     }
 
-    // داخل <script type="module">
-window.listenToDevices = function() {
-    const devicesRef = ref(database, 'authorized_devices');
-    onValue(devicesRef, (snapshot) => {
-        const data = snapshot.val();
-        const tbody = document.getElementById('devices-list-body');
-        if (!tbody) return;
-        
-        tbody.innerHTML = "";
-        for (let id in data) {
-            const dev = data[id];
-            tbody.innerHTML += `
-                <tr>
-                    <td>${dev.id}</td>
-                    <td>${dev.name}</td>
-                    <td>${dev.branch || 'غير محدد'}</td>
-                    <td><span class="status-badge ${dev.status === 'pending' ? 'status-pending' : 'status-online'}">${dev.status}</span></td>
-                    <td>
-                        <button onclick="editDevice('${id}')" class="btn-main" style="padding:5px">تعديل</button>
-                    </td>
-                </tr>
-            `;
-        }
-    });
-}
-
-    // 2. وظيفة إظهار رسالة المنع
-    function showUnauthorizedMessage(msg) {
-        document.getElementById('content-area').innerHTML = `
-            <div style="text-align:center; margin-top:100px; color:#e94560;">
-                <i class="fas fa-exclamation-triangle fa-4x"></i>
-                <h2>دخول غير مصرح</h2>
-                <p>${msg}</p>
-                <p>معرف جهازك: <b>${localStorage.getItem('fawatirr_device_id')}</b></p>
-            </div>
-        `;
-        document.querySelector('.sidebar').style.pointerEvents = "none";
-        document.querySelector('.sidebar').style.opacity = "0.5";
+    // 2. وظيفة جلب الأجهزة وعرضها في الجدول مع زر التعديل
+    window.listenToDevices = function() {
+        const devicesRef = ref(database, 'authorized_devices');
+        onValue(devicesRef, (snapshot) => {
+            const data = snapshot.val();
+            const tbody = document.getElementById('devices-list-body');
+            if (!tbody) return;
+            
+            tbody.innerHTML = "";
+            for (let id in data) {
+                const dev = data[id];
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${dev.id}</td>
+                        <td>${dev.name}</td>
+                        <td>${dev.branch}</td>
+                        <td><span class="status-badge ${dev.status === 'pending' ? 'status-pending' : 'status-online'}">${dev.status}</span></td>
+                        <td>
+                            <button onclick="openEditDeviceModal('${id}', '${dev.name}', '${dev.branch}')" class="btn-main" style="padding:5px 10px; font-size:12px;">تعديل / تفعيل</button>
+                        </td>
+                    </tr>
+                `;
+            }
+        });
     }
 
-    // تشغيل الفحص فوراً عند الدخول
+    // 3. وظيفة حفظ الكاشير الجديد في فايربيس (الربط الفعلي)
+    window.saveNewCashier = async function() {
+        const name = document.getElementById('cashier-name').value;
+        const pin = document.getElementById('cashier-pin').value;
+
+        if (!name || !pin) {
+            alert("يرجى إدخال الاسم والرمز");
+            return;
+        }
+
+        try {
+            await set(ref(database, 'cashiers/' + pin), {
+                name: name,
+                pin: pin,
+                role: 'cashier',
+                createdAt: new Date().toISOString()
+            });
+            alert("✅ تم إضافة الكاشير بنجاح");
+            closeModal();
+        } catch (error) {
+            alert("حدث خطأ أثناء الحفظ: " + error.message);
+        }
+    }
+
+    // 4. وظيفة تحديث بيانات الجهاز (تفعيله بيد المدير)
+    window.updateDeviceStatus = async function(id) {
+        const newName = document.getElementById('edit-device-name').value;
+        const newBranch = document.getElementById('edit-device-branch').value;
+        const newStatus = document.getElementById('edit-device-status').value;
+
+        try {
+            await update(ref(database, 'authorized_devices/' + id), {
+                name: newName,
+                branch: newBranch,
+                status: newStatus
+            });
+            alert("✅ تم تحديث بيانات الجهاز بنجاح");
+            closeModal();
+        } catch (error) {
+            alert("خطأ في التحديث: " + error.message);
+        }
+    }
+
+    // تشغيل الفحص
     if (sessionStorage.getItem('userRole')) {
         checkDeviceBinding();
     }

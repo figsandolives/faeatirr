@@ -80,7 +80,7 @@
             <div id="drop-admin" class="dropdown-container">
                 <a class="sidebar-item" id="sub-pending-moves">حركات مخزون معلقة</a>
                 <a class="sidebar-item" id="sub-pos-devices" onclick="loadPOSDevicesPage()">الأجهزة والكاشير</a>
-                <a class="sidebar-item" id="sub-store-staff">موظفي المخازن</a>
+                <a class="sidebar-item" id="sub-store-staff" onclick="loadUsersPage()">المستخدمين</a>
                 <a class="sidebar-item" id="sub-prod-staff">موظفي الانتاج</a>
                 <a class="sidebar-item" id="sub-branches" onclick="loadBranchesPage()">الفروع</a>
                 <a class="sidebar-item" id="sub-delivery-areas">مناطق التوصيل</a>
@@ -548,79 +548,101 @@ window.confirmBranchUpdate = function(id) {
 }
 
 
+
+// 1. واجهة إدارة المستخدمين
+window.loadUsersPage = function() {
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3><i class="fas fa-user-shield"></i> إدارة المستخدمين والصلاحيات</h3>
+                <button class="btn-main" onclick="openAddUserModal()">+ إضافة مستخدم جديد</button>
+            </div>
+            
+            <table class="data-table" style="margin-top:20px;">
+                <thead>
+                    <tr>
+                        <th>الاسم</th>
+                        <th>الدور (الصلاحية)</th>
+                        <th>رمز الدخول</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="users-list-body">
+                    <tr><td colspan="4">جاري تحميل المستخدمين...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    `;
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initUsersLogic) window.initUsersLogic();
+};
+
+// 2. نافذة إضافة مستخدم جديد
+window.openAddUserModal = function() {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>إضافة مستخدم جديد</h3>
+                <input type="text" id="user-name-input" placeholder="اسم الموظف">
+                <select id="user-role-select" style="width:100%; padding:10px; margin-top:15px; background:#1a1a2e; color:white;">
+                    <option value="أمين صندوق">أمين صندوق (كاشير)</option>
+                    <option value="أمين مخازن">أمين مخازن</option>
+                    <option value="مدير">مدير (صلاحية كاملة)</option>
+                </select>
+                <div style="display:flex; gap:10px; margin-top:15px;">
+                    <input type="text" id="user-pin-input" placeholder="رمز الدخول">
+                    <button class="btn-main" onclick="generateUserPin()">إنشاء</button>
+                </div>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="confirmSaveUser()">حفظ المستخدم</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+window.generateUserPin = function() {
+    const pin = Math.floor(100000 + Math.random() * 900000); // رمز من 6 أرقام
+    document.getElementById('user-pin-input').value = pin;
+}
+
+
+
     </script>
 
     <script type="module">
     import { database, ref, onValue, set, get, update } from './firebase-config.js?v=2';
 
-    // 1. تعريف وظيفة رسالة المنع (لإصلاح الخطأ الذي ظهر لك)
+    // 1. وظائف فحص الجهاز والواجهة
     function showUnauthorizedMessage(msg) {
         const content = document.getElementById('content-area');
         if (content) {
-            content.innerHTML = `
-                <div style="text-align:center; margin-top:100px; color:#e94560;">
-                    <i class="fas fa-exclamation-triangle fa-4x"></i>
-                    <h2 style="margin-top:20px;">دخول غير مصرح</h2>
-                    <p>${msg}</p>
-                    <p style="background:#16213e; padding:10px; border-radius:5px; display:inline-block;">
-                        معرف جهازك: <b>${localStorage.getItem('fawatirr_device_id')}</b>
-                    </p>
-                </div>
-            `;
-        }
-        const sidebar = document.querySelector('.sidebar');
-        if (sidebar) {
-            sidebar.style.pointerEvents = "none";
-            sidebar.style.opacity = "0.3";
+            content.innerHTML = `<div style="text-align:center; margin-top:100px; color:#e94560;"><i class="fas fa-lock fa-4x"></i><h2>دخول غير مصرح</h2><p>${msg}</p></div>`;
         }
     }
 
-    function lockSystem(msg) {
-        document.getElementById('content-area').innerHTML = `<div class="lock-screen" style="text-align:center; margin-top:100px; color:#e94560;"><i class="fas fa-lock fa-4x"></i><p>${msg}</p></div>`;
-        document.querySelector('.sidebar').style.opacity = "0.2";
-        document.querySelector('.sidebar').style.pointerEvents = "none";
-    }
-
-    function unlockSystem() {
-        document.querySelector('.sidebar').style.opacity = "1";
-        document.querySelector('.sidebar').style.pointerEvents = "auto";
-    }
-
-    // فحص الجهاز في قسم المحاسبة (تسجيل فقط بدون قفل)
     async function checkDeviceBinding() {
         let deviceID = localStorage.getItem('fawatirr_device_id');
-        // تأكيد وجود ID للجهاز في المتصفح
         if (!deviceID) {
             deviceID = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
             localStorage.setItem('fawatirr_device_id', deviceID);
         }
-
         const deviceRef = ref(database, 'authorized_devices/' + deviceID);
         const snapshot = await get(deviceRef);
         
         if (!snapshot.exists()) {
-            // إذا كان جهازاً جديداً، سجله في القاعدة لكي يظهر للمدير في القائمة لإعداده لاحقاً
-            await set(deviceRef, {
-                id: deviceID,
-                status: 'online',
-                branchId: "غير محدد",
-                branchName: "غير محدد",
-                lastSeen: new Date().toLocaleString()
-            });
+            await set(deviceRef, { id: deviceID, status: 'online', branchId: "غير محدد", branchName: "غير محدد", lastSeen: new Date().toLocaleString() });
         } else {
-            // تحديث وقت التواجد فقط
-            await update(deviceRef, { 
-                status: 'online',
-                lastSeen: new Date().toLocaleString() 
-            });
+            await update(deviceRef, { status: 'online', lastSeen: new Date().toLocaleString() });
+            const dev = snapshot.val();
+            sessionStorage.setItem('deviceBranchName', dev.branchName || 'غير محدد');
         }
-
-        // في المحاسبة: نفتح النظام دائماً لأن الدخول برمز المدير (123456)
-        unlockSystem();
         if(window.updateUserDisplay) window.updateUserDisplay();
     }
 
-    // 3. محرك الأجهزة والكاشير
+    // 2. إدارة الأجهزة والفروع (Live)
     window.initDevicesAndCashiers = function() {
         onValue(ref(database, 'authorized_devices'), (snapshot) => {
             const data = snapshot.val();
@@ -629,143 +651,38 @@ window.confirmBranchUpdate = function(id) {
             tbody.innerHTML = "";
             for (let id in data) {
                 const d = data[id];
-                tbody.innerHTML += `
-                    <tr>
-                        <td>${d.id}</td>
-                        <td class="${d.status === 'online' ? 'status-online' : 'status-offline'}">${d.status}</td>
-                        <td>${d.branchName || 'غير محدد'}</td>
-                        <td>${d.lastSeen || '-'}</td>
-                        <td><button onclick="openEditDeviceModal('${id}', '${d.branchName}')" class="btn-main" style="padding:5px">ربط بفرع</button></td>
-                    </tr>
-                `;
+                tbody.innerHTML += `<tr><td>${d.id}</td><td style="color:${d.status === 'online' ? '#28a745' : '#888'}">${d.status}</td><td>${d.branchName || 'غير محدد'}</td><td>${d.lastSeen || '-'}</td><td><button onclick="openEditDeviceModal('${id}', '${d.branchName}')" class="btn-main" style="padding:5px">ربط بفرع</button></td></tr>`;
             }
         });
-
-        onValue(ref(database, 'cashiers'), (snapshot) => {
+        onValue(ref(database, 'system_users'), (snapshot) => {
             const data = snapshot.val();
-            const tbody = document.getElementById('cashiers-list-body');
+            const tbody = document.getElementById('users-list-body');
             if (!tbody) return;
             tbody.innerHTML = "";
             for (let id in data) {
-                const c = data[id];
-                tbody.innerHTML += `<tr><td>${c.name}</td><td>${c.pin}</td><td><button class="btn-clear" style="padding:5px">حذف</button></td></tr>`;
+                const u = data[id];
+                tbody.innerHTML += `<tr><td>${u.name}</td><td>${u.role}</td><td>${u.pin}</td><td><button onclick="deleteUser('${id}')" class="btn-clear" style="padding:5px">حذف</button></td></tr>`;
             }
         });
-
-        onValue(ref(database, 'branches'), (snapshot) => {
-            window.availableBranches = snapshot.val();
-        });
     }
 
-    window.updateDeviceLink = async function(deviceId, branchId, branchName) {
-        try {
-            await update(ref(database, 'authorized_devices/' + deviceId), {
-                branchId: branchId,
-                branchName: branchName
-            });
-            alert("✅ تم ربط الجهاز بالفرع بنجاح");
-            location.reload();
-        } catch (e) { alert("خطأ: " + e.message); }
-    }
-
-    window.saveNewCashier = async function() {
-        const name = document.getElementById('cashier-name').value;
-        const pin = document.getElementById('cashier-pin').value;
-        if (!name || !pin) return alert("أكمل البيانات");
-        await set(ref(database, 'cashiers/' + pin), { name, pin, role: 'أمين صندوق' });
-        closeModal();
-    }
-
-    // 1. تحديث دالة عرض الفروع لإضافة زر التعديل
-window.listenToBranches = function() {
-    const branchesRef = ref(database, 'branches');
-    onValue(branchesRef, (snapshot) => {
-        const data = snapshot.val();
-        const tbody = document.getElementById('branches-list-body');
-        if (!tbody) return;
-        
-        tbody.innerHTML = "";
-        for (let id in data) {
-            const b = data[id];
-            // نمرر البيانات للدالة مع تحويل Boolean إلى نص لسهولة التعامل في الـ HTML
-            tbody.innerHTML += `
-                <tr>
-                    <td>${b.nameAr}</td>
-                    <td>${b.nameEn}</td>
-                    <td>${b.isMain ? '<span style="color:#28a745; font-weight:bold;">رئيسي ★</span>' : 'فرعي'}</td>
-                    <td>
-                        <button onclick="openEditBranchModal('${id}', '${b.nameAr}', '${b.nameEn}', '${b.isMain}')" 
-                                class="btn-main" style="padding:5px 10px; font-size:12px; margin-left:5px;">تعديل</button>
-                        <button onclick="deleteBranch('${id}')" 
-                                class="btn-clear" style="padding:5px 10px; font-size:12px;">حذف</button>
-                    </td>
-                </tr>
-            `;
-        }
-    });
-}
-
-// 2. دالة التحديث الفعلية في قاعدة البيانات
-window.updateBranchInFirebase = async function(id, nameAr, nameEn, isMain) {
-    try {
-        // إذا تم اختيار هذا الفرع كـ "رئيسي"، نقوم بإلغاء صفة الرئيسي عن باقي الفروع أولاً
-        if (isMain) {
-            const allBranchesSnapshot = await get(ref(database, 'branches'));
-            if (allBranchesSnapshot.exists()) {
-                const updates = {};
-                const branches = allBranchesSnapshot.val();
-                for (let bid in branches) {
-                    updates[`branches/${bid}/isMain`] = false;
-                }
-                await update(ref(database), updates);
-            }
-        }
-
-        // تنفيذ التحديث للفرع المطلوب
-        await update(ref(database, 'branches/' + id), {
-            nameAr: nameAr,
-            nameEn: nameEn,
-            isMain: isMain
-        });
-
-        alert("✅ تم تحديث بيانات الفرع بنجاح");
-        closeModal();
-    } catch (e) {
-        alert("خطأ أثناء التحديث: " + e.message);
-    }
-}
-
-// دالة حذف الفرع
-window.deleteBranch = async function(id) {
-    if (confirm("هل أنت متأكد من حذف هذا الفرع؟")) {
-        try {
-            await set(ref(database, 'branches/' + id), null);
-            alert("تم حذف الفرع");
-        } catch (e) { alert("خطأ في الحذف: " + e.message); }
-    }
-}
-
-    window.saveNewBranch = async function() {
-        const nameAr = document.getElementById('branch-ar').value;
-        const nameEn = document.getElementById('branch-en').value;
-        const isMain = document.getElementById('is-main-branch').checked;
-        if (isMain) {
-            const all = await get(ref(database, 'branches'));
-            if (all.exists()) {
-                const upds = {};
-                for (let bid in all.val()) upds[`branches/${bid}/isMain`] = false;
-                await update(ref(database), upds);
-            }
-        }
-        await set(ref(database, 'branches/' + Date.now()), { nameAr, nameEn, isMain });
-        closeModal();
-    }
-
-    // 5. الصلاحيات وتحديث العرض
+    // 3. منطق الصلاحيات (الذي سألت عنه - مدمج بنسختك)
     window.applyRolePermissions = function(role) {
+        // إظهار كل شيء أولاً عند التبديل
         document.querySelectorAll('.sidebar-item, .dropdown-btn').forEach(el => el.style.display = 'block');
-        const hidden = { 'أمين صندوق': ['#drop-stores', '#drop-suppliers'], 'أمين مخازن': ['#drop-admin'] };
-        if (hidden[role]) hidden[role].forEach(s => { const el = document.querySelector(s); if (el) el.style.display = 'none'; });
+
+        if (role === 'أمين صندوق') {
+            // حجب المخازن والموردون (الأزرار والقوائم)
+            document.querySelector('[onclick*="drop-stores"]')?.style.setProperty('display', 'none', 'important');
+            document.querySelector('[onclick*="drop-suppliers"]')?.style.setProperty('display', 'none', 'important');
+            document.getElementById('drop-stores')?.style.setProperty('display', 'none', 'important');
+            document.getElementById('drop-suppliers')?.style.setProperty('display', 'none', 'important');
+        } 
+        else if (role === 'أمين مخازن') {
+            // حجب الإدارة (الزر والقائمة)
+            document.querySelector('[onclick*="drop-admin"]')?.style.setProperty('display', 'none', 'important');
+            document.getElementById('drop-admin')?.style.setProperty('display', 'none', 'important');
+        }
     }
 
     window.updateUserDisplay = function() {
@@ -773,13 +690,25 @@ window.deleteBranch = async function(id) {
         const branch = sessionStorage.getItem('deviceBranchName') || 'غير محدد';
         const role = sessionStorage.getItem('userRole');
         const display = role === 'admin' ? name : `${name} (${branch})`;
-        document.getElementById('page-title').innerHTML = `${display} <span style="font-size:12px; opacity:0.6;">- ${role}</span>`;
+        const titleEl = document.getElementById('page-title');
+        if(titleEl) titleEl.innerHTML = `${display} <span style="font-size:12px; opacity:0.6;">- ${role}</span>`;
     }
 
+    // التشغيل
     if (sessionStorage.getItem('userRole')) {
         checkDeviceBinding();
         window.applyRolePermissions(sessionStorage.getItem('userRole'));
     }
+
+    // أضف هذه الدالة داخل <script type="module">
+window.deleteUser = async function(pin) {
+    if (confirm("هل أنت متأكد من حذف هذا الموظف؟")) {
+        try {
+            await set(ref(database, 'system_users/' + pin), null);
+            alert("تم حذف الموظف بنجاح");
+        } catch (e) { alert("خطأ في الحذف: " + e.message); }
+    }
+}
 </script>
 </body>
 </html>

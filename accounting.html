@@ -290,26 +290,23 @@
     });
 
 
-    // وظيفة فتح نافذة إضافة كاشير جديد
+    // نافذة إضافة "كاشير" (لنظام المبيعات فقط)
 window.openAddCashierModal = function() {
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
             <div class="modal-box">
-                <h3>إضافة كاشير جديد</h3>
-                <input type="text" id="cashier-name" placeholder="اسم الكاشير">
-                <div style="display:flex; gap:10px; margin-top:15px;">
-                    <input type="text" id="cashier-pin" placeholder="رمز الدخول (4 أرقام)">
-                    <button class="btn-main" onclick="generateRandomPin()">إنشاء</button>
-                </div>
+                <h3>إضافة كاشير جديد (مبيعات)</h3>
+                <input type="text" id="cashier-name-input" placeholder="اسم الكاشير">
+                <input type="text" id="cashier-pin-input" placeholder="رمز الدخول (PIN)">
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
-                    <button class="btn-login" onclick="saveNewCashier()">إضافة</button>
+                    <button class="btn-login" onclick="saveNewCashier()">حفظ الكاشير</button>
                     <button class="btn-clear" onclick="closeModal()">إلغاء</button>
                 </div>
             </div>
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
+};
 
 window.closeModal = function() {
     const modal = document.getElementById('modal-overlay');
@@ -573,22 +570,18 @@ window.loadUsersPage = function() {
     if(window.initUsersLogic) window.initUsersLogic();
 };
 
-// --- انسخ من هنا واستبدل الدالة القديمة ---
+// نافذة إضافة "مستخدم" (للمحاسبة والمخازن فقط)
 window.openAddUserModal = function() {
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
             <div class="modal-box">
-                <h3>إضافة مستخدم جديد</h3>
+                <h3>إضافة مستخدم (محاسبة/مخازن)</h3>
                 <input type="text" id="user-name-input" placeholder="اسم الموظف">
                 <select id="user-role-select" style="width:100%; padding:10px; margin-top:15px; background:#1a1a2e; color:white;">
-                    <option value="أمين صندوق">أمين صندوق</option>
                     <option value="أمين مخازن">أمين مخازن</option>
                     <option value="مدير">مدير</option>
                 </select>
-                <div style="display:flex; gap:10px; margin-top:15px;">
-                    <input type="text" id="user-pin-input" placeholder="رمز الدخول">
-                    <button class="btn-main" onclick="generateUserPin()">إنشاء</button>
-                </div>
+                <input type="text" id="user-pin-input" placeholder="رمز الدخول">
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
                     <button class="btn-login" onclick="confirmSaveUser()">حفظ المستخدم</button>
                     <button class="btn-clear" onclick="closeModal()">إلغاء</button>
@@ -844,6 +837,48 @@ window.confirmSaveUser = async function() {
         window.applyRolePermissions(role);
         checkDeviceBinding();
     }
+
+
+    // داخل <script type="module">
+
+// دالة حفظ الكاشير (المبيعات) - ستُحفظ في فرع 'cashiers'
+window.saveNewCashier = async function() {
+    const name = document.getElementById('cashier-name-input').value;
+    const pin = document.getElementById('cashier-pin-input').value;
+
+    if (!name || !pin) return alert("يرجى إكمال بيانات الكاشير");
+
+    try {
+        await set(ref(database, 'cashiers/' + pin), {
+            name: name,
+            pin: pin,
+            role: 'أمين صندوق',
+            createdAt: new Date().toISOString()
+        });
+        alert("✅ تم حفظ الكاشير بنجاح");
+        closeModal();
+    } catch (e) { alert("خطأ في حفظ الكاشير: " + e.message); }
+};
+
+// دالة حفظ المستخدم (المحاسبة) - ستُحفظ في فرع 'system_users'
+window.confirmSaveUser = async function() {
+    const name = document.getElementById('user-name-input').value;
+    const role = document.getElementById('user-role-select').value;
+    const pin = document.getElementById('user-pin-input').value;
+
+    if (!name || !pin) return alert("يرجى إكمال بيانات المستخدم");
+
+    try {
+        await set(ref(database, 'system_users/' + pin), {
+            name: name,
+            role: role,
+            pin: pin,
+            createdAt: new Date().toISOString()
+        });
+        alert("✅ تم حفظ مستخدم المحاسبة بنجاح");
+        closeModal();
+    } catch (e) { alert("خطأ في حفظ المستخدم: " + e.message); }
+};
 </script>
 </body>
 </html>

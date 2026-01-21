@@ -297,7 +297,10 @@ window.openAddCashierModal = function() {
             <div class="modal-box">
                 <h3>إضافة كاشير جديد (مبيعات)</h3>
                 <input type="text" id="cashier-name-input" placeholder="اسم الكاشير">
-                <input type="text" id="cashier-pin-input" placeholder="رمز الدخول (PIN)">
+                <div style="display:flex; gap:10px; margin-top:15px;">
+                    <input type="text" id="cashier-pin-input" placeholder="رمز الدخول (4 أرقام)" maxlength="4">
+                    <button class="btn-main" onclick="generateCashierPin()">إنشاء رمز</button>
+                </div>
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
                     <button class="btn-login" onclick="saveNewCashier()">حفظ الكاشير</button>
                     <button class="btn-clear" onclick="closeModal()">إلغاء</button>
@@ -306,6 +309,12 @@ window.openAddCashierModal = function() {
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+// دالة إنشاء رمز من 4 أرقام تلقائياً
+window.generateCashierPin = function() {
+    const pin = Math.floor(1000 + Math.random() * 9000); // توليد 4 أرقام
+    document.getElementById('cashier-pin-input').value = pin;
 };
 
 window.closeModal = function() {
@@ -765,26 +774,40 @@ window.confirmSaveUser = async function() {
         } catch (e) { alert("خطأ: " + e.message); }
     };
 
-    // 4. محرك الأجهزة والكاشير (تم إصلاح المحاذاة بإضافة خلية آخر ظهور)
-    window.initDevicesAndCashiers = function() {
-        onValue(ref(database, 'authorized_devices'), (snapshot) => {
-            const tbody = document.getElementById('devices-live-list');
-            if (!tbody) return;
-            tbody.innerHTML = "";
-            const data = snapshot.val();
-            for (let id in data) {
-                const d = data[id];
-                tbody.innerHTML += `
-                    <tr>
-                        <td>${d.id}</td>
-                        <td style="color:${d.status === 'online' ? '#28a745' : '#888'}">${d.status}</td>
-                        <td>${d.branchName || 'غير محدد'}</td>
-                        <td>${d.lastSeen || '-'}</td> <td><button class="btn-main link-device-btn" data-id="${d.id}" data-name="${d.branchName}">ربط</button></td>
-                    </tr>`;
-            }
-        });
-        onValue(ref(database, 'branches'), (snap) => { window.availableBranches = snap.val(); });
-    };
+    // 1. تحديث محرك الأجهزة والكاشير ليجلب البيانات فوراً
+window.initDevicesAndCashiers = function() {
+    // مراقبة الأجهزة (موجودة لديك)
+    onValue(ref(database, 'authorized_devices'), (snapshot) => {
+        const tbody = document.getElementById('devices-live-list');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const data = snapshot.val();
+        for (let id in data) {
+            const d = data[id];
+            tbody.innerHTML += `<tr><td>${d.id}</td><td style="color:${d.status === 'online' ? '#28a745' : '#888'}">${d.status}</td><td>${d.branchName || 'غير محدد'}</td><td>${d.lastSeen || '-'}</td><td><button class="btn-main link-device-btn" data-id="${d.id}" data-name="${d.branchName}">ربط</button></td></tr>`;
+        }
+    });
+
+    // إضافة مراقبة جدول الكاشير (هذا هو الجزء الذي كان ينقصك)
+    onValue(ref(database, 'cashiers'), (snapshot) => {
+        const tbody = document.getElementById('cashier-list-body'); // تأكد أن هذا الـ ID موجود في الـ HTML
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const data = snapshot.val();
+        if (!data) { tbody.innerHTML = "<tr><td colspan='3'>لا يوجد كاشير مضاف</td></tr>"; return; }
+        for (let pin in data) {
+            const c = data[pin];
+            tbody.innerHTML += `
+                <tr>
+                    <td>${c.name}</td><td>${c.pin}</td>
+                    <td>
+                        <button class="btn-main edit-cashier-btn" data-pin="${c.pin}" data-name="${c.name}">تعديل</button>
+                        <button class="btn-clear delete-cashier-btn" data-pin="${c.pin}">حذف</button>
+                    </td>
+                </tr>`;
+        }
+    });
+};
 
     window.updateDeviceLink = async function(deviceId, branchId, branchName) {
         await update(ref(database, 'authorized_devices/' + deviceId), { branchId, branchName });
@@ -794,7 +817,16 @@ window.confirmSaveUser = async function() {
 
     // 5. محرك "صيد النقرات" المطور (Event Delegation لجميع الأزرار)
     document.addEventListener('click', async (e) => {
-        const t = e.target;
+    const t = e.target;
+    // حذف كاشير
+    if (t.classList.contains('delete-cashier-btn')) {
+        if (confirm("هل أنت متأكد من حذف هذا الكاشير؟")) await set(ref(database, 'cashiers/' + t.dataset.pin), null);
+    }
+    // فتح نافذة تعديل كاشير
+    if (t.classList.contains('edit-cashier-btn')) {
+        window.openEditCashierModal(t.dataset.pin, t.dataset.name);
+    }
+
         // تعديل مستخدم
         if (t.classList.contains('edit-user-btn')) {
             window.openEditUserModal(t.dataset.pin, t.dataset.name, t.dataset.role);
@@ -816,6 +848,39 @@ window.confirmSaveUser = async function() {
             window.openEditDeviceModal(t.dataset.id, t.dataset.name);
         }
     });
+
+
+    // نافذة تعديل الكاشير (في السكربت العادي)
+window.openEditCashierModal = function(pin, currentName) {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>تعديل بيانات الكاشير</h3>
+                <p>الرمز الحالي: ${pin}</p>
+                <input type="text" id="edit-cashier-name" value="${currentName}" placeholder="الاسم الجديد">
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="confirmCashierUpdate('${pin}')">حفظ التغييرات</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.confirmCashierUpdate = function(pin) {
+    const newName = document.getElementById('edit-cashier-name').value;
+    if (window.updateCashierInFirebase) window.updateCashierInFirebase(pin, newName);
+};
+
+// تحديث الكاشير في فايربيس (في الموديول)
+window.updateCashierInFirebase = async function(pin, name) {
+    try {
+        await update(ref(database, 'cashiers/' + pin), { name });
+        alert("✅ تم تحديث الاسم بنجاح");
+        closeModal();
+    } catch (e) { alert("خطأ: " + e.message); }
+};
 
     // 6. التشغيل النهائي وفحص الجهاز (محفوظ كما هو)
     async function checkDeviceBinding() {

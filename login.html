@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>تسجيل دخول المدير</title>
+  <link rel="stylesheet" href="style.css" />
+
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase.js"></script>
+  <script src="lang.js"></script>
+  <script src="main.js" defer></script>
+</head>
+
+<body>
+  <div class="login-container">
+    <img src="logo.png" alt="Logo" class="login-logo" />
+    <h2 data-key="adminLogin">تسجيل دخول المدير</h2>
+
+    <div class="login-box">
+      <label for="passCode" data-key="enterCode">أدخل رمز الدخول</label>
+      <input type="password" id="passCode" placeholder="123456" />
+      <button id="loginBtn" class="main-btn" data-key="loginBtn">دخول</button>
+      <p id="loginMsg"></p>
+    </div>
+
+    <button id="toggleLangLogin" class="lang-btn">English</button>
+  </div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    // === اللغة والتحكم ===
+    let currentLang = localStorage.getItem("lang") || "ar";
+    const langBtn = document.getElementById("toggleLangLogin");
+    function updateLoginLang() {
+      document.documentElement.lang = currentLang;
+      document.documentElement.dir = currentLang === "ar" ? "rtl" : "ltr";
+      document.querySelectorAll("[data-key]").forEach(el => {
+        if (translations[currentLang][el.dataset.key]) {
+          el.textContent = translations[currentLang][el.dataset.key];
+        }
+      });
+      langBtn.textContent = currentLang === "ar" ? "English" : "العربية";
+    }
+
+    langBtn.addEventListener("click", () => {
+      currentLang = currentLang === "ar" ? "en" : "ar";
+      localStorage.setItem("lang", currentLang);
+      updateLoginLang();
+    });
+
+    updateLoginLang();
+
+    // === فحص حالة الدخول بعد تحميل الصفحة ===
+    setTimeout(() => {
+      if (localStorage.getItem("adminLoggedIn") === "true") {
+        window.location.href = "accounting.html";
+      }
+    }, 300); // <-- التأخير يمنع التداخل
+
+    document.getElementById("loginBtn").addEventListener("click", () => {
+      const code = document.getElementById("passCode").value.trim();
+      const msg = document.getElementById("loginMsg");
+      if (code === "123456") {
+        localStorage.setItem("adminLoggedIn", "true");
+        msg.style.color = "green";
+        msg.textContent = currentLang === "ar" ? "تم الدخول بنجاح ✅" : "Login successful ✅";
+        setTimeout(() => {
+          window.location.href = "accounting.html";
+        }, 800);
+      } else {
+        msg.style.color = "red";
+        msg.textContent = currentLang === "ar" ? "رمز الدخول غير صحيح ❌" : "Incorrect code ❌";
+      }
+    });
+  });
+</script>
+</body>
+</html>

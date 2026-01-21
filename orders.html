@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>الطلبات</title>
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Firebase الكلاسيكي -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.5/xlsx.full.min.js"></script>
+  <script src="lang.js"></script>
+  <script src="main.js" defer></script>
+</head>
+
+<body>
+  <div class="side-menu">
+    <div class="menu-header">
+      <img src="logo.png" class="mini-logo" />
+      <h2 data-key="ordersPageTitle">إدارة الطلبات</h2>
+    </div>
+    <button onclick="window.location.href='accounting.html'" class="main-btn" style="width:90%;margin:auto;">↩ العودة</button>
+  </div>
+
+  <div class="main-content">
+    <h1 data-key="ordersList">قائمة الطلبات</h1>
+    <button id="toggleLangOrder" class="lang-btn">English</button>
+
+    <div class="filter-box">
+      <label>من تاريخ:</label>
+      <input type="date" id="fromDate" />
+      <label>إلى تاريخ:</label>
+      <input type="date" id="toDate" />
+      <select id="filterBranch"><option value="">جميع الفروع</option></select>
+      <select id="filterCashier"><option value="">جميع الكاشيرات</option></select>
+      <select id="filterZone"><option value="">كل المناطق</option></select>
+      <button onclick="applyFilter()" class="main-btn">فلترة</button>
+    </div>
+
+    <div class="table-controls">
+      <button onclick="downloadExcel()" class="main-btn">📥 تحميل Excel</button>
+      <button onclick="printOrders()" class="main-btn">🖨️ طباعة الكل</button>
+      <label><input type="checkbox" id="selectAll" onchange="selectAllOrders(this)"> تحديد الكل</label>
+    </div>
+
+    <table id="ordersTable">
+      <thead>
+        <tr>
+          <th></th>
+          <th>رقم الفاتورة</th>
+          <th>اسم العميل</th>
+          <th>منطقة التوصيل</th>
+          <th>رقم الهاتف</th>
+          <th>التاريخ والوقت</th>
+          <th>الكاشير</th>
+          <th>الفرع</th>
+          <th>صافي الفاتورة</th>
+          <th>قيمة التوصيل</th>
+          <th>إجمالي الفاتورة</th>
+          <th>طريقة الدفع</th>
+          <th>إجراءات</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    
+   document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(() => {
+    if (localStorage.getItem("adminLoggedIn") !== "true") {
+      window.location.href = "login.html";
+    }
+  }, 400); // تأخير بسيط يمنع دخول الحلقة
+});
+
+    // ✅ ربط Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyBdDFbWuByBWsDqEmC18nSlIKG6QZ5s0wA",
+      authDomain: "fawatirr-75242.firebaseapp.com",
+      databaseURL: "https://fawatirr-75242-default-rtdb.firebaseio.com",
+      projectId: "fawatirr-75242",
+      storageBucket: "fawatirr-75242.firebasestorage.app",
+      messagingSenderId: "1059799456100",
+      appId: "1:1059799456100:web:d624eb6f98aaee78950271",
+      measurementId: "G-7SQXEJQY6Y"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let orders = [];
+    let filtered = [];
+
+    const tableBody = document.querySelector("#ordersTable tbody");
+
+    // ✅ تحميل الطلبات من Firebase
+    db.ref("orders").on("value", snap => {
+      const data = snap.val();
+      orders = [];
+      for (const id in data) {
+        orders.push({...data[id], id});
+      }
+      filtered = [...orders];
+      renderTable(orders);
+    });
+
+    // ✅ توليد الجدول
+    function renderTable(list) {
+      tableBody.innerHTML = "";
+      list.forEach(order => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input type="checkbox" class="orderCheck" data-id="${order.id}"></td>
+          <td>${order.invoice_no || "-"}</td>
+          <td>${order.customer_name || "-"}</td>
+          <td>${order.delivery_zone || "-"}</td>
+          <td>${order.customer_phone || "-"}</td>
+          <td>${order.date || "-"}</td>
+          <td>${order.cashier_name || "-"}</td>
+          <td>${order.branch_name || "-"}</td>
+          <td>${order.net_total || 0}</td>
+          <td>${order.delivery_fee || 0}</td>
+          <td>${order.total || 0}</td>
+          <td>${order.payment_method || "-"}</td>
+          <td><button class="editBtn" onclick="editOrder('${order.id}')">تعديل</button> <button class="delBtn" onclick="deleteOrder('${order.id}')">🗑️ حذف</button></td>
+        `;
+        tableBody.appendChild(tr);
+      });
+    }
+
+    // ✅ اختيار الكل
+    function selectAllOrders(chk) {
+      document.querySelectorAll(".orderCheck").forEach(c => {
+        c.checked = chk.checked;
+      });
+    }
+
+    // ✅ فلترة الطلبات
+    function applyFilter() {
+      const from = document.getElementById("fromDate").value;
+      const to = document.getElementById("toDate").value;
+      filtered = orders.filter(o => {
+        const d = new Date(o.date);
+        return (!from || new Date(from) <= d) && (!to || d <= new Date(to));
+      });
+      renderTable(filtered);
+    }
+
+    // ✅ حذف طلب
+    function deleteOrder(id) {
+      if (!confirm("هل أنت متأكد من حذف هذه الفاتورة؟")) return;
+      db.ref("orders/" + id).remove().then(() => alert("تم حذف الطلب"));
+    }
+
+    // ✅ تعديل طلب (مكانياً فقط – تطوير لاحق بلوحة تحرير)
+    function editOrder(id) {
+      alert("خاصية تعديل الطلب ستُفعل لاحقاً بعد بناء نموذج التعديل");
+    }
+
+    // ✅ تحميل Excel
+    function downloadExcel() {
+      const data = filtered.map(o => ({
+        "رقم الفاتورة": o.invoice_no,
+        "اسم العميل": o.customer_name,
+        "منطقة التوصيل": o.delivery_zone,
+        "رقم الهاتف": o.customer_phone,
+        "التاريخ": o.date,
+        "الكاشير": o.cashier_name,
+        "الفرع": o.branch_name,
+        "الإجمالي": o.total
+      }));
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Orders");
+      XLSX.writeFile(wb, "Orders_Report.xlsx");
+    }
+
+    // ✅ طباعة الفواتير
+    function printOrders() {
+      const selected = Array.from(document.querySelectorAll(".orderCheck:checked")).map(input =>
+        orders.find(o => o.id === input.dataset.id)
+      );
+      const list = selected.length ? selected : filtered;
+      const win = window.open("", "_blank");
+      win.document.write("<html><head><title>طباعة الفواتير</title></head><body>");
+      list.forEach(o => {
+        win.document.write(`
+          <div style='page-break-after: always; border:1px solid #ccc; padding:10px; margin:15px;'>
+            <h2>فاتورة رقم: ${o.invoice_no}</h2>
+            <p><strong>العميل:</strong> ${o.customer_name}</p>
+            <p><strong>الفرع:</strong> ${o.branch_name}</p>
+            <p><strong>الكاشير:</strong> ${o.cashier_name}</p>
+            <p><strong>الإجمالي:</strong> ${o.total}</p>
+          </div>
+        `);
+      });
+      win.document.write("</body></html>");
+      win.document.close();
+      win.print();
+    }
+
+
+    // ✅ تبديل اللغة داخل صفحة الطلبات
+let currentLang = localStorage.getItem("lang") || "ar";
+
+function updateOrdersLang() {
+  document.documentElement.lang = currentLang;
+  document.documentElement.dir = currentLang === "ar" ? "rtl" : "ltr";
+
+  document.querySelectorAll("[data-key]").forEach(el => {
+    el.textContent = translations[currentLang][el.dataset.key] || el.textContent;
+  });
+
+  document.getElementById("toggleLangOrder").textContent =
+    currentLang === "ar" ? "English" : "العربية";
+}
+
+document.getElementById("toggleLangOrder").addEventListener("click", () => {
+  currentLang = currentLang === "ar" ? "en" : "ar";
+  localStorage.setItem("lang", currentLang);
+  updateOrdersLang();
+});
+
+updateOrdersLang();
+
+
+  </script>
+</body>
+</html>

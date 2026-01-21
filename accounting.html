@@ -396,10 +396,6 @@ window.loadUsersPage = function() {
 };
 
 
-window.saveNewCashier = function() {
-    alert("سيتم ربط وظيفة الحفظ بفايربيس في الخطوة القادمة ✅");
-    closeModal();
-}
 
 window.editDevice = function(id) {
     alert("تعديل الجهاز رقم: " + id);
@@ -587,7 +583,7 @@ window.openAddUserModal = function() {
                 <select id="user-role-select" style="width:100%; padding:10px; margin-top:15px; background:#1a1a2e; color:white;">
                     <option value="أمين صندوق">أمين صندوق</option>
                     <option value="أمين مخازن">أمين مخازن</option>
-                    <option value="مدير">مدير (صلاحية كاملة)</option>
+                    <option value="مدير">مدير</option>
                 </select>
                 <div style="display:flex; gap:10px; margin-top:15px;">
                     <input type="text" id="user-pin-input" placeholder="رمز الدخول">
@@ -601,7 +597,7 @@ window.openAddUserModal = function() {
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
+};
 
 window.generateUserPin = function() {
     const pin = Math.floor(100000 + Math.random() * 900000); // رمز من 6 أرقام
@@ -731,14 +727,28 @@ window.confirmUserUpdate = function(pin) {
         });
     };
 
-    window.confirmSaveUser = async function() {
-        const name = document.getElementById('user-name-input').value;
-        const role = document.getElementById('user-role-select').value;
-        const pin = document.getElementById('user-pin-input').value;
-        if (!name || !pin) return alert("أكمل البيانات");
-        await set(ref(database, 'system_users/' + pin), { name, role, pin, createdAt: new Date().toISOString() });
+    // ابحث عن هذه الدالة داخل الموديول وتأكد أنها بهذا الشكل:
+window.confirmSaveUser = async function() {
+    const name = document.getElementById('user-name-input').value;
+    const role = document.getElementById('user-role-select').value;
+    const pin = document.getElementById('user-pin-input').value;
+
+    if (!name || !pin) return alert("يرجى إكمال البيانات");
+
+    try {
+        // الحفظ الفعلي في قاعدة البيانات
+        await set(ref(database, 'system_users/' + pin), {
+            name: name,
+            role: role,
+            pin: pin,
+            createdAt: new Date().toISOString()
+        });
+        alert("✅ تم حفظ المستخدم في قاعدة البيانات بنجاح");
         closeModal();
-    };
+    } catch (e) {
+        alert("خطأ في الحفظ: " + e.message);
+    }
+};
 
     window.updateUserInFirebase = async function(pin, name, role) {
         try {

@@ -38,29 +38,29 @@
     </div>
 
     <div class="table-controls">
-      <button onclick="downloadExcel()" class="main-btn">📥 تحميل Excel</button>
-      <button onclick="printOrders()" class="main-btn">🖨️ طباعة الكل</button>
-      <label><input type="checkbox" id="selectAll" onchange="selectAllOrders(this)"> تحديد الكل</label>
-    </div>
+  <button onclick="downloadExcel()" class="main-btn" data-key="downloadExcel">📥 تحميل Excel</button>
+  <button onclick="printOrders()" class="main-btn" data-key="printAll">🖨️ طباعة الكل</button>
+  <label><input type="checkbox" id="selectAll" onchange="selectAllOrders(this)"> <span data-key="selectAll">تحديد الكل</span></label>
+</div>
 
     <table id="ordersTable">
       <thead>
-        <tr>
-          <th></th>
-          <th>رقم الفاتورة</th>
-          <th>اسم العميل</th>
-          <th>منطقة التوصيل</th>
-          <th>رقم الهاتف</th>
-          <th>التاريخ والوقت</th>
-          <th>الكاشير</th>
-          <th>الفرع</th>
-          <th>صافي الفاتورة</th>
-          <th>قيمة التوصيل</th>
-          <th>إجمالي الفاتورة</th>
-          <th>طريقة الدفع</th>
-          <th>إجراءات</th>
-        </tr>
-      </thead>
+  <tr>
+    <th></th>
+    <th data-key="invoiceNo">رقم الفاتورة</th>
+    <th data-key="customerName">اسم العميل</th>
+    <th data-key="zone">منطقة التوصيل</th>
+    <th data-key="phone">رقم الهاتف</th>
+    <th data-key="dateTime">التاريخ والوقت</th>
+    <th data-key="cashierName">الكاشير</th>
+    <th data-key="branchName">الفرع</th>
+    <th data-key="netTotal">صافي الفاتورة</th>
+    <th data-key="deliveryFee">قيمة التوصيل</th>
+    <th data-key="total">إجمالي الفاتورة</th>
+    <th data-key="payment">طريقة الدفع</th>
+    <th data-key="actions">إجراءات</th>
+  </tr>
+</thead>
       <tbody></tbody>
     </table>
   </div>
@@ -123,7 +123,10 @@
           <td>${order.delivery_fee || 0}</td>
           <td>${order.total || 0}</td>
           <td>${order.payment_method || "-"}</td>
-          <td><button class="editBtn" onclick="editOrder('${order.id}')">تعديل</button> <button class="delBtn" onclick="deleteOrder('${order.id}')">🗑️ حذف</button></td>
+          <td>
+  <button class="editBtn" data-key="edit" onclick="editOrder('${order.id}')">${translations[currentLang].edit}</button>
+  <button class="delBtn" data-key="delete" onclick="deleteOrder('${order.id}')">🗑️ ${translations[currentLang].delete}</button>
+</td>
         `;
         tableBody.appendChild(tr);
       });
@@ -209,11 +212,17 @@ function updateOrdersLang() {
   document.documentElement.dir = currentLang === "ar" ? "rtl" : "ltr";
 
   document.querySelectorAll("[data-key]").forEach(el => {
-    el.textContent = translations[currentLang][el.dataset.key] || el.textContent;
+    const key = el.getAttribute("data-key");
+    if (translations[currentLang][key]) {
+      el.textContent = translations[currentLang][key];
+    }
   });
 
   document.getElementById("toggleLangOrder").textContent =
     currentLang === "ar" ? "English" : "العربية";
+
+  // تحديث الجدول بعد تغيير اللغة
+  renderTable(filtered);
 }
 
 document.getElementById("toggleLangOrder").addEventListener("click", () => {

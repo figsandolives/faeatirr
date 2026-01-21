@@ -615,57 +615,22 @@ window.generateUserPin = function() {
     <script type="module">
     import { database, ref, onValue, set, get, update } from './firebase-config.js?v=2';
 
-    // 1. تعريف وظيفة الصلاحيات وربطها بالنافذة (window) لضمان رؤيتها
+    // 1. تعريف كل الدوال وربطها بالنافذة (window) فوراً عند التحميل
     window.applyRolePermissions = function(role) {
-        console.log("تطبيق صلاحيات الدور:", role);
-        
-        // إظهار كل شيء أولاً لإعادة الضبط
         document.querySelectorAll('.sidebar-item, .dropdown-btn').forEach(el => {
             el.style.setProperty('display', 'block', 'important');
         });
-
-        if (role === 'أمين صندوق') {
-            // حجب المخازن والموردون تماماً (باستخدام المعرفات والبحث عن النص)
-            const hideList = ['#drop-stores', '#drop-suppliers', '[onclick*="drop-stores"]', '[onclick*="drop-suppliers"]'];
-            hideList.forEach(selector => {
-                document.querySelectorAll(selector).forEach(el => {
-                    el.style.setProperty('display', 'none', 'important');
-                });
-            });
-        } 
-        else if (role === 'أمين مخازن') {
-            // حجب الإدارة تماماً
-            const hideList = ['#drop-admin', '[onclick*="drop-admin"]'];
-            hideList.forEach(selector => {
-                document.querySelectorAll(selector).forEach(el => {
-                    el.style.setProperty('display', 'none', 'important');
-                });
+        const hidden = { 
+            'أمين صندوق': ['#drop-stores', '#drop-suppliers', '[onclick*="drop-stores"]', '[onclick*="drop-suppliers"]'],
+            'أمين مخازن': ['#drop-admin', '[onclick*="drop-admin"]']
+        };
+        if (hidden[role]) {
+            hidden[role].forEach(s => {
+                document.querySelectorAll(s).forEach(el => el.style.setProperty('display', 'none', 'important'));
             });
         }
     };
 
-    // 2. فحص الجهاز عند الدخول
-    async function checkDeviceBinding() {
-        let deviceID = localStorage.getItem('fawatirr_device_id');
-        if (!deviceID) {
-            deviceID = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
-            localStorage.setItem('fawatirr_device_id', deviceID);
-        }
-        const deviceRef = ref(database, 'authorized_devices/' + deviceID);
-        const snapshot = await get(deviceRef);
-        
-        if (!snapshot.exists()) {
-            await set(deviceRef, { id: deviceID, status: 'online', branchId: "غير محدد", branchName: "غير محدد", lastSeen: new Date().toLocaleString() });
-        } else {
-            await update(deviceRef, { status: 'online', lastSeen: new Date().toLocaleString() });
-            const dev = snapshot.val();
-            sessionStorage.setItem('deviceBranchName', dev.branchName || 'غير محدد');
-        }
-        
-        if(window.updateUserDisplay) window.updateUserDisplay();
-    }
-
-    // 3. دوال الإدارة المربوطة بالنافذة
     window.confirmSaveUser = async function() {
         const name = document.getElementById('user-name-input').value;
         const role = document.getElementById('user-role-select').value;
@@ -675,32 +640,91 @@ window.generateUserPin = function() {
             await set(ref(database, 'system_users/' + pin), { name, role, pin, createdAt: new Date().toISOString() });
             alert("✅ تم إضافة المستخدم بنجاح");
             closeModal();
-        } catch (e) { alert("خطأ في الحفظ: " + e.message); }
+        } catch (e) { alert("خطأ: " + e.message); }
     };
 
     window.deleteUser = async function(pin) {
         if (confirm("هل أنت متأكد من حذف هذا المستخدم؟")) {
-            try {
-                await set(ref(database, 'system_users/' + pin), null);
-                alert("تم حذف المستخدم بنجاح");
-            } catch (e) { alert("خطأ في الحذف: " + e.message); }
+            await set(ref(database, 'system_users/' + pin), null);
+            alert("تم حذف المستخدم");
         }
     };
 
-    window.updateUserDisplay = function() {
-        const name = sessionStorage.getItem('userName');
-        const branch = sessionStorage.getItem('deviceBranchName') || 'غير محدد';
-        const role = sessionStorage.getItem('userRole');
-        const display = role === 'مدير' || role === 'admin' ? name : `${name} (${branch})`;
-        const titleEl = document.getElementById('page-title');
-        if(titleEl) titleEl.innerHTML = `${display} <span style="font-size:12px; opacity:0.6;">- ${role}</span>`;
+    window.updateDeviceLink = async function(deviceId, branchId, branchName) {
+        await update(ref(database, 'authorized_devices/' + deviceId), { branchId, branchName });
+        alert("✅ تم الربط");
+        location.reload();
     };
 
-    // 4. تشغيل النظام بالترتيب الصحيح
-    const currentRole = sessionStorage.getItem('userRole');
-    if (currentRole) {
-        // تأكد من تشغيل الصلاحيات أولاً ثم فحص الجهاز
-        window.applyRolePermissions(currentRole);
+    // 2. فحص الجهاز
+    async function checkDeviceBinding() {
+        let deviceID = localStorage.getItem('fawatirr_device_id') || 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+        localStorage.setItem('fawatirr_device_id', deviceID);
+        
+        const deviceRef = ref(database, 'authorized_devices/' + deviceID);
+        const snap = await get(deviceRef);
+        if (!snap.exists()) {
+            await set(deviceRef, { id: deviceID, status: 'online', branchId: "غير محدد", branchName: "غير محدد", lastSeen: new Date().toLocaleString() });
+        } else {
+            const dev = snap.val();
+            sessionStorage.setItem('deviceBranchName', dev.branchName || 'غير محدد');
+        }
+    }
+
+    // 3. تحديث الجداول (بدون استخدام onclick داخل النصوص لرفع الأمان)
+    window.initUsersLogic = function() {
+        onValue(ref(database, 'system_users'), (snapshot) => {
+            const tbody = document.getElementById('users-list-body');
+            if (!tbody) return;
+            tbody.innerHTML = "";
+            const data = snapshot.val();
+            for (let id in data) {
+                const u = data[id];
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${u.name}</td>
+                        <td>${u.role}</td>
+                        <td>${u.pin}</td>
+                        <td><button class="btn-clear delete-user-btn" data-pin="${u.pin}">حذف</button></td>
+                    </tr>`;
+            }
+        });
+    };
+
+    window.initDevicesAndCashiers = function() {
+        onValue(ref(database, 'authorized_devices'), (snapshot) => {
+            const tbody = document.getElementById('devices-live-list');
+            if (!tbody) return;
+            tbody.innerHTML = "";
+            const data = snapshot.val();
+            for (let id in data) {
+                const d = data[id];
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${d.id}</td>
+                        <td style="color:${d.status === 'online' ? '#28a745' : '#888'}">${d.status}</td>
+                        <td>${d.branchName}</td>
+                        <td><button class="btn-main link-device-btn" data-id="${d.id}" data-name="${d.branchName}">ربط بفرع</button></td>
+                    </tr>`;
+            }
+        });
+        onValue(ref(database, 'branches'), (snapshot) => { window.availableBranches = snapshot.val(); });
+    };
+
+    // 4. محرك "صيد النقرات" (Event Delegation) - هذا يحل مشكلة الـ CSP نهائياً
+    document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('delete-user-btn')) {
+            window.deleteUser(e.target.dataset.pin);
+        }
+        if (e.target.classList.contains('link-device-btn')) {
+            window.openEditDeviceModal(e.target.dataset.id, e.target.dataset.name);
+        }
+    });
+
+    // 5. التشغيل النهائي
+    const role = sessionStorage.getItem('userRole');
+    if (role) {
+        window.applyRolePermissions(role);
         checkDeviceBinding();
     }
 </script>

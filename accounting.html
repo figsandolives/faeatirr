@@ -506,6 +506,48 @@ window.openAddBranchModal = function() {
     
 
 
+// وظيفة فتح نافذة تعديل الفرع
+window.openEditBranchModal = function(id, nameAr, nameEn, isMain) {
+    // تحويل القيمة النصية لـ isMain إلى Boolean للتحقق منها في الـ Checkbox
+    const checked = isMain === 'true' ? 'checked' : '';
+    
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>تعديل بيانات الفرع</h3>
+                <input type="text" id="edit-branch-ar" value="${nameAr}" placeholder="اسم الفرع بالعربي">
+                <input type="text" id="edit-branch-en" value="${nameEn}" placeholder="Branch Name (English)">
+                <label style="color:white; display:block; margin-top:15px; text-align:right;">
+                    <input type="checkbox" id="edit-is-main-branch" ${checked}> تعيين كفرع رئيسي
+                </label>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="confirmBranchUpdate('${id}')">حفظ التغييرات</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+// وظيفة تأكيد التعديل وجمع البيانات الجديدة
+window.confirmBranchUpdate = function(id) {
+    const nameAr = document.getElementById('edit-branch-ar').value;
+    const nameEn = document.getElementById('edit-branch-en').value;
+    const isMain = document.getElementById('edit-is-main-branch').checked;
+
+    if (!nameAr || !nameEn) {
+        alert("يرجى إكمال الحقول المطلوبة");
+        return;
+    }
+
+    // استدعاء وظيفة التحديث الموجودة في الموديول
+    if (window.updateBranchInFirebase) {
+        window.updateBranchInFirebase(id, nameAr, nameEn, isMain);
+    }
+}
+
+
     </script>
 
     <script type="module">
@@ -634,19 +676,74 @@ window.openAddBranchModal = function() {
         closeModal();
     }
 
-    // 4. محرك الفروع
-    window.listenToBranches = function() {
-        onValue(ref(database, 'branches'), (snapshot) => {
-            const data = snapshot.val();
-            const tbody = document.getElementById('branches-list-body');
-            if (!tbody) return;
-            tbody.innerHTML = "";
-            for (let id in data) {
-                const b = data[id];
-                tbody.innerHTML += `<tr><td>${b.nameAr}</td><td>${b.nameEn}</td><td>${b.isMain ? 'رئيسي' : 'فرعي'}</td><td><button class="btn-clear" style="padding:5px">حذف</button></td></tr>`;
+    // 1. تحديث دالة عرض الفروع لإضافة زر التعديل
+window.listenToBranches = function() {
+    const branchesRef = ref(database, 'branches');
+    onValue(branchesRef, (snapshot) => {
+        const data = snapshot.val();
+        const tbody = document.getElementById('branches-list-body');
+        if (!tbody) return;
+        
+        tbody.innerHTML = "";
+        for (let id in data) {
+            const b = data[id];
+            // نمرر البيانات للدالة مع تحويل Boolean إلى نص لسهولة التعامل في الـ HTML
+            tbody.innerHTML += `
+                <tr>
+                    <td>${b.nameAr}</td>
+                    <td>${b.nameEn}</td>
+                    <td>${b.isMain ? '<span style="color:#28a745; font-weight:bold;">رئيسي ★</span>' : 'فرعي'}</td>
+                    <td>
+                        <button onclick="openEditBranchModal('${id}', '${b.nameAr}', '${b.nameEn}', '${b.isMain}')" 
+                                class="btn-main" style="padding:5px 10px; font-size:12px; margin-left:5px;">تعديل</button>
+                        <button onclick="deleteBranch('${id}')" 
+                                class="btn-clear" style="padding:5px 10px; font-size:12px;">حذف</button>
+                    </td>
+                </tr>
+            `;
+        }
+    });
+}
+
+// 2. دالة التحديث الفعلية في قاعدة البيانات
+window.updateBranchInFirebase = async function(id, nameAr, nameEn, isMain) {
+    try {
+        // إذا تم اختيار هذا الفرع كـ "رئيسي"، نقوم بإلغاء صفة الرئيسي عن باقي الفروع أولاً
+        if (isMain) {
+            const allBranchesSnapshot = await get(ref(database, 'branches'));
+            if (allBranchesSnapshot.exists()) {
+                const updates = {};
+                const branches = allBranchesSnapshot.val();
+                for (let bid in branches) {
+                    updates[`branches/${bid}/isMain`] = false;
+                }
+                await update(ref(database), updates);
             }
+        }
+
+        // تنفيذ التحديث للفرع المطلوب
+        await update(ref(database, 'branches/' + id), {
+            nameAr: nameAr,
+            nameEn: nameEn,
+            isMain: isMain
         });
+
+        alert("✅ تم تحديث بيانات الفرع بنجاح");
+        closeModal();
+    } catch (e) {
+        alert("خطأ أثناء التحديث: " + e.message);
     }
+}
+
+// دالة حذف الفرع
+window.deleteBranch = async function(id) {
+    if (confirm("هل أنت متأكد من حذف هذا الفرع؟")) {
+        try {
+            await set(ref(database, 'branches/' + id), null);
+            alert("تم حذف الفرع");
+        } catch (e) { alert("خطأ في الحذف: " + e.message); }
+    }
+}
 
     window.saveNewBranch = async function() {
         const nameAr = document.getElementById('branch-ar').value;

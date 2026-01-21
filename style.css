@@ -1,355 +1,614 @@
-/* style.css */
-@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;700&display=swap');
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="tab-title">المحاسبة والمخازن</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="rtl" id="body-tag">
 
-:root {
-        writing-mode: horizontal-tb;
-    direction: rtl; 
-    --bg-color: #1a1a2e;
-    --secondary-bg: #16213e;
-    --accent-color: #0f3460;
-    --text-color: #ffffff;
-    --gold-accent: #e94560;
+
+    <div id="login-overlay" class="login-screen">
+    <div class="login-box">
+        <img src="logo.png" alt="Logo" class="login-logo">
+        <h2 id="login-title">تسجيل الدخول للنظام</h2>
+        <div class="pin-display">
+            <input type="password" id="pin-input" readonly placeholder="******">
+        </div>
+        <div class="pin-pad">
+            <button onclick="appendPin('1')">1</button>
+            <button onclick="appendPin('2')">2</button>
+            <button onclick="appendPin('3')">3</button>
+            <button onclick="appendPin('4')">4</button>
+            <button onclick="appendPin('5')">5</button>
+            <button onclick="appendPin('6')">6</button>
+            <button onclick="appendPin('7')">7</button>
+            <button onclick="appendPin('8')">8</button>
+            <button onclick="appendPin('9')">9</button>
+            <button class="btn-clear" onclick="clearPin()">C</button>
+            <button onclick="appendPin('0')">0</button>
+            <button class="btn-login" onclick="checkLogin()">Enter</button>
+        </div>
+        <p id="login-error" style="color: #e94560; margin-top: 15px; display: none;">الرمز غير صحيح!</p>
+    </div>
+</div>
+
+    <div class="dashboard-container">
+        <aside class="sidebar">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <img src="logo.png" alt="Logo" style="width: 80px;">
+            </div>
+
+            <a class="sidebar-item" id="menu-orders" onclick="loadPage('orders')">الطلبات</a>
+            <a class="sidebar-item" id="menu-customers" onclick="loadPage('customers')">العملاء</a>
+            <a class="sidebar-item" id="menu-products" onclick="loadPage('products')">المنتجات</a>
+            <a class="sidebar-item" id="menu-categories" onclick="loadPage('categories')">التصنيفات</a>
+            <a class="sidebar-item" id="menu-units" onclick="loadPage('units')">الوحدات</a>
+            <a class="sidebar-item" id="menu-itemcard" onclick="loadPage('itemcard')">بطاقة الصنف</a>
+
+            <div class="sidebar-item dropdown-btn" onclick="toggleDropdown('drop-stores')">
+                <span id="menu-stores-title">المخازن</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="drop-stores" class="dropdown-container">
+                <a class="sidebar-item" id="sub-inv-items">مواد المخزون</a>
+                <a class="sidebar-item" id="sub-storage-locations">أماكن التخزين</a>
+                <a class="sidebar-item" id="sub-disbursement">صرف</a>
+                <a class="sidebar-item" id="sub-production">انتاج</a>
+                <a class="sidebar-item" id="sub-inventory-check">جرد</a>
+                <a class="sidebar-item" id="sub-transfers">تحويلات</a>
+                <a class="sidebar-item" id="sub-return-store">مرتجع للمخزن</a>
+                <a class="sidebar-item" id="sub-return-waste">مرتجع توالف</a>
+            </div>
+
+            <div class="sidebar-item dropdown-btn" onclick="toggleDropdown('drop-suppliers')">
+                <span id="menu-suppliers-title">الموردون</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="drop-suppliers" class="dropdown-container">
+                <a class="sidebar-item" id="sub-suppliers-list">الموردون</a>
+                <a class="sidebar-item" id="sub-purchasing">الشراء</a>
+                <a class="sidebar-item" id="sub-return-supplier">مرتجع للمورد</a>
+            </div>
+
+            <div class="sidebar-item dropdown-btn" onclick="toggleDropdown('drop-admin')">
+                <span id="menu-admin-title">الإدارة</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="drop-admin" class="dropdown-container">
+                <a class="sidebar-item" id="sub-pending-moves">حركات مخزون معلقة</a>
+                <a class="sidebar-item" id="sub-pos-devices" onclick="loadPOSDevicesPage()">الأجهزة والكاشير</a>
+                <a class="sidebar-item" id="sub-store-staff">موظفي المخازن</a>
+                <a class="sidebar-item" id="sub-prod-staff">موظفي الانتاج</a>
+                <a class="sidebar-item" id="sub-branches">الفروع</a>
+                <a class="sidebar-item" id="sub-delivery-areas">مناطق التوصيل</a>
+                <a class="sidebar-item" id="sub-delivery-prices">أسعار التوصيل</a>
+                <a class="sidebar-item" id="sub-discounts">خصومات</a>
+                <a class="sidebar-item" id="sub-payment-types">انواع الطلب وطرق الدفع</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-bar">
+                <h2 id="page-title">المحاسبة والمخازن</h2>
+                <button id="btn-lang-toggle" class="btn-main" onclick="toggleLanguage()" style="padding: 5px 15px;">English</button>
+            </header>
+            
+            <div id="content-area">
+                <p id="welcome-msg">اختر قسماً من القائمة الجانبية للبدء...</p>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // 1. قاموس الترجمة الشامل
+        const translations = {
+            ar: {
+                tabTitle: "المحاسبة والمخازن",
+                pageTitle: "المحاسبة والمخازن",
+                btnLang: "English",
+                welcome: "اختر قسماً من القائمة الجانبية للبدء...",
+                orders: "الطلبات",
+                customers: "العملاء",
+                products: "المنتجات",
+                categories: "التصنيفات",
+                units: "الوحدات",
+                itemcard: "بطاقة الصنف",
+                storesTitle: "المخازن",
+                invItems: "مواد المخزون",
+                storageLoc: "أماكن التخزين",
+                disbursement: "صرف",
+                production: "انتاج",
+                invCheck: "جرد",
+                transfers: "تحويلات",
+                retStore: "مرتجع للمخزن",
+                retWaste: "مرتجع توالف",
+                suppTitle: "الموردون",
+                suppList: "الموردون",
+                purchasing: "الشراء",
+                retSupp: "مرتجع للمورد",
+                adminTitle: "الإدارة",
+                pendingMoves: "حركات مخزون معلقة",
+                posDevices: "الأجهزة والكاشير",
+                storeStaff: "موظفي المخازن",
+                prodStaff: "موظفي الانتاج",
+                branches: "الفروع",
+                delAreas: "مناطق التوصيل",
+                delPrices: "أسعار التوصيل",
+                discounts: "خصومات",
+                paymentTypes: "انواع الطلب وطرق الدفع"
+            },
+            en: {
+                tabTitle: "Accounting System",
+                pageTitle: "Accounting & Stores",
+                btnLang: "عربي",
+                welcome: "Select a department from the sidebar to start...",
+                orders: "Orders",
+                customers: "Customers",
+                products: "Products",
+                categories: "Categories",
+                units: "Units",
+                itemcard: "Item Card",
+                storesTitle: "Stores",
+                invItems: "Inventory Items",
+                storageLoc: "Storage Locations",
+                disbursement: "Disbursement",
+                production: "Production",
+                invCheck: "Inventory Check",
+                transfers: "Transfers",
+                retStore: "Store Return",
+                retWaste: "Waste Return",
+                suppTitle: "Suppliers",
+                suppList: "Suppliers List",
+                purchasing: "Purchasing",
+                retSupp: "Supplier Return",
+                adminTitle: "Admin",
+                pendingMoves: "Pending Inventory",
+                posDevices: "POS Devices",
+                storeStaff: "Store Staff",
+                prodStaff: "Production Staff",
+                branches: "Branches",
+                delAreas: "Delivery Areas",
+                delPrices: "Delivery Prices",
+                discounts: "Discounts",
+                paymentTypes: "Payment & Order Types"
+            }
+        };
+
+        let currentLang = 'ar';
+
+        // 2. وظيفة تبديل اللغة (تحديث كل الـ IDs)
+        window.toggleLanguage = function() {
+            currentLang = (currentLang === 'ar') ? 'en' : 'ar';
+            const body = document.getElementById('body-tag');
+            body.className = (currentLang === 'ar') ? 'rtl' : 'ltr';
+            
+            const lang = translations[currentLang];
+
+            // تحديث كل عنصر بناءً على الـ ID الخاص به
+            document.getElementById('tab-title').innerText = lang.tabTitle;
+            document.getElementById('page-title').innerText = lang.pageTitle;
+            document.getElementById('btn-lang-toggle').innerText = lang.btnLang;
+            if(document.getElementById('welcome-msg')) document.getElementById('welcome-msg').innerText = lang.welcome;
+
+            document.getElementById('menu-orders').innerText = lang.orders;
+            document.getElementById('menu-customers').innerText = lang.customers;
+            document.getElementById('menu-products').innerText = lang.products;
+            document.getElementById('menu-categories').innerText = lang.categories;
+            document.getElementById('menu-units').innerText = lang.units;
+            document.getElementById('menu-itemcard').innerText = lang.itemcard;
+
+            document.getElementById('menu-stores-title').innerText = lang.storesTitle;
+            document.getElementById('sub-inv-items').innerText = lang.invItems;
+            document.getElementById('sub-storage-locations').innerText = lang.storageLoc;
+            document.getElementById('sub-disbursement').innerText = lang.disbursement;
+            document.getElementById('sub-production').innerText = lang.production;
+            document.getElementById('sub-inventory-check').innerText = lang.invCheck;
+            document.getElementById('sub-transfers').innerText = lang.transfers;
+            document.getElementById('sub-return-store').innerText = lang.retStore;
+            document.getElementById('sub-return-waste').innerText = lang.retWaste;
+
+            document.getElementById('menu-suppliers-title').innerText = lang.suppTitle;
+            document.getElementById('sub-suppliers-list').innerText = lang.suppList;
+            document.getElementById('sub-purchasing').innerText = lang.purchasing;
+            document.getElementById('sub-return-supplier').innerText = lang.retSupp;
+
+            document.getElementById('menu-admin-title').innerText = lang.adminTitle;
+            document.getElementById('sub-pending-moves').innerText = lang.pendingMoves;
+            document.getElementById('sub-pos-devices').innerText = lang.posDevices;
+            document.getElementById('sub-store-staff').innerText = lang.storeStaff;
+            document.getElementById('sub-prod-staff').innerText = lang.prodStaff;
+            document.getElementById('sub-branches').innerText = lang.branches;
+            document.getElementById('sub-delivery-areas').innerText = lang.delAreas;
+            document.getElementById('sub-delivery-prices').innerText = lang.delPrices;
+            document.getElementById('sub-discounts').innerText = lang.discounts;
+            document.getElementById('sub-payment-types').innerText = lang.paymentTypes;
+        };
+
+        // وظيفة القوائم المنسدلة
+        window.toggleDropdown = function(id) {
+            document.getElementById(id).classList.toggle('show');
+        };
+
+        // سيتم برمجة وظيفة تحميل الصفحات حبة حبة
+        window.loadPage = function(page) {
+            console.log("جاري تحميل صفحة: " + page);
+        };
+
+        // --- كود نظام الدخول والتعرف على الجهاز ---
+    let pinCode = "";
+
+    window.appendPin = function(num) {
+        if (pinCode.length < 6) {
+            pinCode += num;
+            document.getElementById('pin-input').value = "*".repeat(pinCode.length);
+        }
+    }
+
+    window.clearPin = function() {
+        pinCode = "";
+        document.getElementById('pin-input').value = "";
+        document.getElementById('login-error').style.display = "none";
+    }
+
+    window.checkLogin = function() {
+        const adminPin = "123456"; 
+        const errorMsg = document.getElementById('login-error');
+
+        if (pinCode === adminPin) {
+            sessionStorage.setItem('userRole', 'admin');
+            sessionStorage.setItem('userName', 'المدير العام');
+            proceedToSystem();
+        } else {
+            errorMsg.style.display = "block";
+            clearPin();
+        }
+    }
+
+    function proceedToSystem() {
+        document.getElementById('login-overlay').style.display = "none";
+        checkDeviceBinding();
+    }
+
+    function checkDeviceBinding() {
+    // نستخدم localStorage هنا لكي لا يتغير الـ ID للجهاز ابداً
+    let deviceID = localStorage.getItem('fawatirr_device_id');
+    if (!deviceID) {
+        deviceID = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+        localStorage.setItem('fawatirr_device_id', deviceID);
+    }
+    console.log("هوية الجهاز الحالية:", deviceID);
 }
 
-body {
-    font-family: 'Tajawal', sans-serif;
-    background: linear-gradient(135deg, var(--bg-color) 0%, var(--secondary-bg) 50%, var(--accent-color) 100%);
-    min-height: 100vh;
-    margin: 0;
-    color: var(--text-color);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    transition: all 0.3s ease;
+    // فحص حالة الدخول عند تحميل الصفحة
+    window.addEventListener('DOMContentLoaded', (event) => {
+        if (sessionStorage.getItem('userRole')) {
+            document.getElementById('login-overlay').style.display = "none";
+        }
+    });
+
+
+    // وظيفة فتح نافذة إضافة كاشير جديد
+window.openAddCashierModal = function() {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>إضافة كاشير جديد</h3>
+                <input type="text" id="cashier-name" placeholder="اسم الكاشير">
+                <div style="display:flex; gap:10px; margin-top:15px;">
+                    <input type="text" id="cashier-pin" placeholder="رمز الدخول (4 أرقام)">
+                    <button class="btn-main" onclick="generateRandomPin()">إنشاء</button>
+                </div>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveNewCashier()">إضافة</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
 }
 
-/* التنسيق للغة العربية */
-body.rtl { direction: rtl; }
-body.ltr { direction: ltr; }
-
-/* الصفحة الرئيسية */
-.main-container {
-    text-align: center;
-    margin-top: 50px;
+window.closeModal = function() {
+    const modal = document.getElementById('modal-overlay');
+    if (modal) modal.remove();
 }
 
-.logo {
-    width: 200px;
-    margin-bottom: 30px;
-}
-
-.nav-buttons {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    width: 300px;
-}
-
-.btn-main {
-    padding: 15px 25px;
-    border: 2px solid var(--text-color);
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
-    font-size: 1.2rem;
-    cursor: pointer;
-    border-radius: 8px;
-    transition: 0.3s;
-    text-decoration: none;
-}
-
-.btn-main:hover {
-    background: var(--gold-accent);
-    border-color: var(--gold-accent);
-}
-
-.lang-switch {
-    margin-top: 40px;
-    background: none;
-    border: 1px solid #ccc;
-    color: #ccc;
-    padding: 8px 15px;
-    cursor: pointer;
-    border-radius: 20px;
-}
-
-/* إضافات لصفحة المحاسبة والمخازن */
-.dashboard-container {
-    display: flex;
-    width: 100%;
-    min-height: 100vh;
-}
-
-/* القائمة الجانبية */
-.sidebar {
-    width: 260px;
-    background: rgba(0, 0, 0, 0.3);
-    backdrop-filter: blur(10px);
-    border-inline-end: 1px solid rgba(255,255,255,0.1);
-    padding: 20px 0;
-    transition: 0.3s;
-    overflow-y: auto;
-}
-
-.sidebar-item {
-    padding: 12px 20px;
-    display: block;
-    color: #ddd;
-    text-decoration: none;
-    transition: 0.2s;
-    cursor: pointer;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
-}
-
-.sidebar-item:hover {
-    background: var(--gold-accent);
-    color: white;
-}
-
-/* القوائم المنسدلة */
-.dropdown-container {
-    display: none;
-    background: rgba(0,0,0,0.2);
-}
-
-.dropdown-btn {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.dropdown-container a {
-    padding-inline-start: 40px;
-    font-size: 0.9rem;
-}
-
-/* منطقة المحتوى الرئيسية */
-.main-content {
-    flex-grow: 1;
-    padding: 30px;
-}
-
-.top-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 30px;
-    padding-bottom: 10px;
-    border-bottom: 2px solid var(--gold-accent);
-}
-
-/* لإظهار القائمة المنسدلة */
-.show { display: block; }
-
-
-/* تنسيق شاشة الدخول */
-#login-overlay {
-    position: fixed;
-    top: 0; left: 0; width: 100%; height: 100%;
-    background: #1a1a2e;
-    display: flex; justify-content: center; align-items: center;
-    z-index: 9999;
-}
-
-.login-box {
-    background: rgba(255, 255, 255, 0.05);
-    padding: 40px; border-radius: 20px;
-    backdrop-filter: blur(15px);
-    text-align: center; border: 1px solid rgba(255,255,255,0.1);
-    width: 350px;
-}
-
-.pin-display input {
-    width: 100%; height: 50px; text-align: center;
-    font-size: 2rem; background: transparent;
-    border: none; color: #fff; letter-spacing: 10px; margin-bottom: 20px;
-}
-
-.pin-pad {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;
-}
-
-.pin-pad button {
-    height: 60px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2);
-    background: rgba(255,255,255,0.1); color: white; font-size: 1.5rem;
-    cursor: pointer; transition: 0.2s;
-}
-
-.pin-pad button:hover { background: var(--gold-accent); }
-.btn-clear { background: #e94560 !important; }
-.btn-login { background: #0f3460 !important; }
-
-/* --- تنسيق شاشة الدخول الاحترافية --- */
-
-.login-screen {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: radial-gradient(circle, #1a1a2e 0%, #0f0f1a 100%);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 10000; /* لضمان ظهورها فوق كل شيء */
-}
-
-.login-box {
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(15px); /* تأثير التغبيش الاحترافي */
-    padding: 40px;
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
-    text-align: center;
-    width: 100%;
-    max-width: 380px;
-}
-
-.login-logo {
-    width: 120px;
-    margin-bottom: 20px;
-}
-
-#login-title {
-    font-size: 1.5rem;
-    margin-bottom: 25px;
-    font-weight: 700;
-    color: #fff;
-}
-
-/* حقل عرض النجوم */
-.pin-display input {
-    width: 100%;
-    background: rgba(0, 0, 0, 0.3);
-    border: 2px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    height: 60px;
-    text-align: center;
-    font-size: 2.5rem;
-    color: var(--gold-accent);
-    letter-spacing: 12px;
-    margin-bottom: 25px;
-    outline: none;
-}
-
-/* لوحة الأرقام */
-.pin-pad {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 15px;
-}
-
-.pin-pad button {
-    height: 65px;
-    font-size: 1.5rem;
-    font-weight: bold;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    color: #fff;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
-.pin-pad button:hover {
-    background: var(--gold-accent); /* اللون الذهبي/الأحمر عند التمرير */
-    transform: translateY(-3px);
-    box-shadow: 0 5px 15px rgba(233, 69, 96, 0.3);
-}
-
-.pin-pad button:active {
-    transform: scale(0.95);
-}
-
-/* الأزرار الخاصة */
-.btn-clear {
-    background: rgba(233, 69, 96, 0.2) !important;
-    color: #e94560 !important;
-}
-
-.btn-login {
-    background: #0f3460 !important;
-    color: #fff !important;
-    grid-column: span 1; /* عرض عادي */
-}
-
-/* رسالة الخطأ */
-#login-error {
-    margin-top: 15px;
-    font-size: 0.9rem;
-    animation: shake 0.3s ease;
-}
-
-@keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-5px); }
-    75% { transform: translateX(5px); }
+window.generateRandomPin = function() {
+    const pin = Math.floor(1000 + Math.random() * 9000);
+    document.getElementById('cashier-pin').value = pin;
 }
 
 
-/* تنسيق الجداول الرسمية */
-.data-table {
-    width: 100%;
-    border-collapse: collapse;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 10px;
-    overflow: hidden;
-    margin-top: 20px;
+
+    // أضف هذه الدوال في السكربت العادي (الدوال العامة)
+
+// 1. واجهة الأجهزة والكاشير (المطورة)
+window.loadPOSDevicesPage = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div class="admin-section">
+            <h3><i class="fas fa-network-wired"></i> إدارة الأجهزة والفروع</h3>
+            <div class="info-card">هنا تظهر جميع الأجهزة التي فتحت النظام. يجب تحديد فرع لكل جهاز لكي يعمل.</div>
+            
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID الجهاز</th>
+                        <th>الحالة</th>
+                        <th>الفرع المخصص</th>
+                        <th>آخر ظهور</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="devices-live-list">
+                    <tr><td colspan="5">جاري مراقبة الأجهزة...</td></tr>
+                </tbody>
+            </table>
+
+            <hr style="margin: 40px 0; border: 0; border-top: 1px dashed rgba(255,255,255,0.1);">
+
+            <div class="header-flex">
+                <h3><i class="fas fa-users-cog"></i> إدارة الكاشير</h3>
+                <button class="btn-main" onclick="openAddCashierModal()">+ إضافة كاشير جديد</button>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>اسم الكاشير</th>
+                        <th>الرمز (PIN)</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="cashiers-list-body"></tbody>
+            </table>
+        </div>
+    `;
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initDevicesAndCashiers) window.initDevicesAndCashiers();
+};
+
+// 2. واجهة المستخدمين (الأدوار)
+window.loadUsersPage = function() {
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-user-shield"></i> إدارة المستخدمين والصلاحيات</h3>
+                <button class="btn-main" onclick="openAddUserModal()">+ إضافة مستخدم جديد</button>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>الاسم</th>
+                        <th>الدور</th>
+                        <th>الرمز</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="users-list-body"></tbody>
+            </table>
+        </div>
+    `;
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initUsersLogic) window.initUsersLogic();
+};
+
+
+window.saveNewCashier = function() {
+    alert("سيتم ربط وظيفة الحفظ بفايربيس في الخطوة القادمة ✅");
+    closeModal();
 }
 
-.data-table th {
-    background: #0f3460;
-    color: #e94560;
-    padding: 15px;
-    text-align: center;
+window.editDevice = function(id) {
+    alert("تعديل الجهاز رقم: " + id);
 }
 
-.data-table td {
-    padding: 15px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    text-align: center;
+
+
+window.openEditDeviceModal = function(id, currentName, currentBranch) {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>تفعيل / تعديل الجهاز</h3>
+                <p style="font-size:12px; color:#aaa;">ID: ${id}</p>
+                <input type="text" id="edit-device-name" value="${currentName}" placeholder="اسم الجهاز (مثلاً: كاشير 1)">
+                <input type="text" id="edit-device-branch" value="${currentBranch}" placeholder="الفرع (مثلاً: أبو الحصانية)">
+                <select id="edit-device-status" style="width:100%; padding:10px; margin-top:10px; background:#1a1a2e; color:white; border-radius:5px;">
+                    <option value="pending">معلق (Pending)</option>
+                    <option value="authorized" selected>مقبول (Authorized)</option>
+                </select>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="updateDeviceStatus('${id}')">حفظ التغييرات</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+    
+
+
+    </script>
+
+    <script type="module">
+    import { database, ref, onValue, set, get, update } from './firebase-config.js?v=2';
+
+    // 1. وظيفة فحص الجهاز عند الدخول (معدلة)
+    async function checkDeviceBinding() {
+        const deviceID = localStorage.getItem('fawatirr_device_id');
+        if (!deviceID) return;
+
+        const deviceRef = ref(database, 'authorized_devices/' + deviceID);
+        const snapshot = await get(deviceRef);
+        
+        if (snapshot.exists()) {
+            const deviceData = snapshot.val();
+            // إذا كان الجهاز مقبولاً، اسمح له بالدخول
+            if (deviceData.status === 'authorized') {
+                sessionStorage.setItem('currentBranch', deviceData.branch);
+                console.log("✅ الجهاز معرف ومرتبط بفرع: " + deviceData.branch);
+            } else {
+                showUnauthorizedMessage("هذا الجهاز مسجل بانتظار 'تفعيل' المدير من قسم الأجهزة.");
+            }
+        } else {
+            // تسجيل الجهاز كـ "معلق" لأول مرة
+            await set(deviceRef, {
+                id: deviceID,
+                name: "جهاز جديد",
+                status: "pending",
+                branch: "غير محدد",
+                lastSeen: new Date().toLocaleString()
+            });
+            showUnauthorizedMessage("هذا جهاز جديد. يرجى تفعيله من قبل المدير من قسم 'الأجهزة والكاشير'.");
+        }
+    }
+
+    // 2. وظيفة جلب الأجهزة وعرضها في الجدول مع زر التعديل
+    window.listenToDevices = function() {
+        const devicesRef = ref(database, 'authorized_devices');
+        onValue(devicesRef, (snapshot) => {
+            const data = snapshot.val();
+            const tbody = document.getElementById('devices-list-body');
+            if (!tbody) return;
+            
+            tbody.innerHTML = "";
+            for (let id in data) {
+                const dev = data[id];
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${dev.id}</td>
+                        <td>${dev.name}</td>
+                        <td>${dev.branch}</td>
+                        <td><span class="status-badge ${dev.status === 'pending' ? 'status-pending' : 'status-online'}">${dev.status}</span></td>
+                        <td>
+                            <button onclick="openEditDeviceModal('${id}', '${dev.name}', '${dev.branch}')" class="btn-main" style="padding:5px 10px; font-size:12px;">تعديل / تفعيل</button>
+                        </td>
+                    </tr>
+                `;
+            }
+        });
+    }
+
+    // 3. وظيفة حفظ الكاشير الجديد في فايربيس (الربط الفعلي)
+    window.saveNewCashier = async function() {
+        const name = document.getElementById('cashier-name').value;
+        const pin = document.getElementById('cashier-pin').value;
+
+        if (!name || !pin) {
+            alert("يرجى إدخال الاسم والرمز");
+            return;
+        }
+
+        try {
+            await set(ref(database, 'cashiers/' + pin), {
+                name: name,
+                pin: pin,
+                role: 'cashier',
+                createdAt: new Date().toISOString()
+            });
+            alert("✅ تم إضافة الكاشير بنجاح");
+            closeModal();
+        } catch (error) {
+            alert("حدث خطأ أثناء الحفظ: " + error.message);
+        }
+    }
+
+    // 4. وظيفة تحديث بيانات الجهاز (تفعيله بيد المدير)
+    window.updateDeviceStatus = async function(id) {
+        const newName = document.getElementById('edit-device-name').value;
+        const newBranch = document.getElementById('edit-device-branch').value;
+        const newStatus = document.getElementById('edit-device-status').value;
+
+        try {
+            await update(ref(database, 'authorized_devices/' + id), {
+                name: newName,
+                branch: newBranch,
+                status: newStatus
+            });
+            alert("✅ تم تحديث بيانات الجهاز بنجاح");
+            closeModal();
+        } catch (error) {
+            alert("خطأ في التحديث: " + error.message);
+        }
+    }
+
+    // تشغيل الفحص
+    if (sessionStorage.getItem('userRole')) {
+        checkDeviceBinding();
+    }
+
+
+
+// داخل <script type="module">
+
+// 1. التحقق من الجهاز والفرع (قفل النظام)
+async function enforceDevicePolicy() {
+    const deviceID = localStorage.getItem('fawatirr_device_id');
+    const deviceRef = ref(database, 'authorized_devices/' + deviceID);
+    const snapshot = await get(deviceRef);
+    
+    const content = document.getElementById('content-area');
+    const sidebar = document.querySelector('.sidebar');
+
+    if (snapshot.exists()) {
+        const devData = snapshot.val();
+        if (devData.branchId && devData.branchId !== "غير محدد") {
+            // الجهاز معتمد ومربوط بفرع
+            sessionStorage.setItem('deviceBranchName', devData.branchName);
+            sessionStorage.setItem('deviceBranchId', devData.branchId);
+            unlockSystem();
+        } else {
+            lockSystem("هذا الجهاز مسجل ولكنه غير مرتبط بفرع حالياً.");
+        }
+    } else {
+        // تسجيل كجهاز جديد غير معرف
+        await set(deviceRef, { id: deviceID, status: 'offline', branchId: null, branchName: 'غير محدد' });
+        lockSystem("جهاز جديد: يرجى التواصل مع المدير لربط هذا الجهاز بفرع.");
+    }
 }
 
-.modal-overlay {
-    position: fixed;
-    top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.8);
-    display: flex; justify-content: center; align-items: center;
-    z-index: 11000;
+// 2. إدارة الصلاحيات حسب الدور
+window.applyRolePermissions = function(role) {
+    const menuItems = {
+        'أمين صندوق': ['#drop-stores', '#drop-suppliers'], // العناصر المحجوبة
+        'أمين مخازن': ['#drop-admin']
+    };
+
+    // إعادة إظهار الكل أولاً
+    document.querySelectorAll('.sidebar-item, .dropdown-btn').forEach(el => el.style.display = 'block');
+
+    if (menuItems[role]) {
+        menuItems[role].forEach(selector => {
+            const el = document.querySelector(selector);
+            if (el) el.style.display = 'none';
+        });
+    }
 }
 
-.modal-box {
-    background: #16213e;
-    padding: 30px;
-    border-radius: 15px;
-    border: 1px solid var(--gold-accent);
-    width: 350px;
-    text-align: center;
+// 3. تحديث مسمى الكاشير (الاسم + الفرع)
+window.updateUserDisplay = function() {
+    const userName = sessionStorage.getItem('userName');
+    const branchName = sessionStorage.getItem('deviceBranchName');
+    const role = sessionStorage.getItem('userRole');
+    
+    const displayHTML = role === 'admin' ? userName : `${userName} (${branchName})`;
+    document.getElementById('page-title').innerHTML = `${displayHTML} <span style="font-size:12px; opacity:0.6;">- ${role}</span>`;
 }
 
-.modal-box input {
-    width: 100%;
-    padding: 10px;
-    margin-top: 10px;
-    background: #1a1a2e;
-    border: 1px solid #555;
-    color: white;
-    border-radius: 5px;
+function lockSystem(msg) {
+    document.getElementById('content-area').innerHTML = `<div class="lock-screen"><i class="fas fa-lock"></i><p>${msg}</p></div>`;
+    document.querySelector('.sidebar').style.opacity = "0.2";
+    document.querySelector('.sidebar').style.pointerEvents = "none";
 }
 
-.lock-screen {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    height: 60vh; color: #e94560; text-align: center;
-}
-.lock-screen i { font-size: 5rem; margin-bottom: 20px; }
-
-.info-card {
-    background: rgba(15, 52, 96, 0.5); padding: 15px; border-radius: 8px;
-    margin-bottom: 20px; border-inline-start: 4px solid var(--gold-accent);
+function unlockSystem() {
+    document.querySelector('.sidebar').style.opacity = "1";
+    document.querySelector('.sidebar').style.pointerEvents = "auto";
 }
 
-.status-online { color: #28a745; font-weight: bold; }
-.status-offline { color: #888; }
+</script>
+</body>
+</html>

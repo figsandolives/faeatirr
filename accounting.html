@@ -642,8 +642,44 @@ window.confirmUserUpdate = function(pin) {
     </script>
 
     <script type="module">
-    import { database, ref, onValue, set, get, update } from './firebase-config.js?v=2';
+        import { database, ref, onValue, set, get, update } from './firebase-config.js?v=2';
 
+    // 1. مراقب الفروع العام (يعمل فوراً عند تحميل الصفحة)
+    // هذا يضمن أن قائمة الفروع جاهزة دائماً قبل أن تضغط على زر "ربط"
+    onValue(ref(database, 'branches'), (snapshot) => {
+        window.availableBranches = snapshot.val();
+        console.log("تم تحميل الفروع بنجاح:", window.availableBranches);
+    });
+
+    // 2. تحديث محرك الأجهزة والكاشير
+    window.initDevicesAndCashiers = function() {
+        // مراقبة الأجهزة
+        onValue(ref(database, 'authorized_devices'), (snapshot) => {
+            const tbody = document.getElementById('devices-live-list');
+            if (!tbody) return;
+            tbody.innerHTML = "";
+            const data = snapshot.val();
+            for (let id in data) {
+                const d = data[id];
+                tbody.innerHTML += `<tr><td>${d.id}</td><td style="color:${d.status === 'online' ? '#28a745' : '#888'}">${d.status}</td><td>${d.branchName || 'غير محدد'}</td><td>${d.lastSeen || '-'}</td><td><button class="btn-main link-device-btn" data-id="${d.id}" data-name="${d.branchName}">ربط</button></td></tr>`;
+            }
+        });
+
+        // مراقبة الكاشير (تأكد من حرف s في الإيدى)
+        onValue(ref(database, 'cashiers'), (snapshot) => {
+            const tbody = document.getElementById('cashiers-list-body'); 
+            if (!tbody) return;
+            tbody.innerHTML = "";
+            const data = snapshot.val();
+            if (!data) { tbody.innerHTML = "<tr><td colspan='3'>لا يوجد كاشير مضاف</td></tr>"; return; }
+            for (let pin in data) {
+                const c = data[pin];
+                tbody.innerHTML += `<tr><td>${c.name}</td><td>${c.pin}</td><td><button class="btn-clear delete-cashier-btn" data-pin="${c.pin}">حذف</button></td></tr>`;
+            }
+        });
+    };
+
+    
     // 1. نظام الصلاحيات (محفوظ كما هو)
     window.applyRolePermissions = function(role) {
         document.querySelectorAll('.sidebar-item, .dropdown-btn').forEach(el => {

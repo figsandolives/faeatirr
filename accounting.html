@@ -573,7 +573,7 @@ window.loadUsersPage = function() {
     if(window.initUsersLogic) window.initUsersLogic();
 };
 
-// 2. نافذة إضافة مستخدم جديد
+// --- انسخ من هنا واستبدل الدالة القديمة ---
 window.openAddUserModal = function() {
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
@@ -590,19 +590,22 @@ window.openAddUserModal = function() {
                     <button class="btn-main" onclick="generateUserPin()">إنشاء</button>
                 </div>
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
-                    <button class="btn-login" id="save-user-final-btn">حفظ المستخدم</button>
+                    <button class="btn-login" onclick="confirmSaveUser()">حفظ المستخدم</button>
                     <button class="btn-clear" onclick="closeModal()">إلغاء</button>
                 </div>
             </div>
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    // ربط الزر يدوياً بالدالة الموجودة في الموديول
-    document.getElementById('save-user-final-btn').onclick = function() {
-        if(window.confirmSaveUser) window.confirmSaveUser();
-    };
 };
+
+// دالة توليد الرمز (تأكد من وجودها أيضاً)
+window.generateUserPin = function() {
+    const pin = Math.floor(100000 + Math.random() * 900000);
+    const pinInput = document.getElementById('user-pin-input');
+    if (pinInput) pinInput.value = pin;
+};
+// --- نهاية الكود ---
 
 // دالة توليد الرمز (تأكد من وجودها)
 window.generateUserPin = function() {

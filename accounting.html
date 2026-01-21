@@ -544,34 +544,38 @@ window.openAddBranchModal = function() {
         document.querySelector('.sidebar').style.pointerEvents = "auto";
     }
 
-    // 2. فحص الجهاز والربط بالفرع (النسخة الموحدة والصارمة)
+    // فحص الجهاز في قسم المحاسبة (تسجيل فقط بدون قفل)
     async function checkDeviceBinding() {
-        const deviceID = localStorage.getItem('fawatirr_device_id');
-        if (!deviceID) return;
+        let deviceID = localStorage.getItem('fawatirr_device_id');
+        // تأكيد وجود ID للجهاز في المتصفح
+        if (!deviceID) {
+            deviceID = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+            localStorage.setItem('fawatirr_device_id', deviceID);
+        }
 
         const deviceRef = ref(database, 'authorized_devices/' + deviceID);
         const snapshot = await get(deviceRef);
         
-        if (snapshot.exists()) {
-            const dev = snapshot.val();
-            if (dev.branchId && dev.branchId !== "غير محدد") {
-                sessionStorage.setItem('deviceBranchId', dev.branchId);
-                sessionStorage.setItem('deviceBranchName', dev.branchName);
-                unlockSystem();
-                if(window.updateUserDisplay) window.updateUserDisplay();
-            } else {
-                showUnauthorizedMessage("هذا الجهاز مسجل ولكنه غير مرتبط بفرع حالياً.");
-            }
-        } else {
+        if (!snapshot.exists()) {
+            // إذا كان جهازاً جديداً، سجله في القاعدة لكي يظهر للمدير في القائمة لإعداده لاحقاً
             await set(deviceRef, {
                 id: deviceID,
-                status: 'offline',
+                status: 'online',
                 branchId: "غير محدد",
                 branchName: "غير محدد",
                 lastSeen: new Date().toLocaleString()
             });
-            showUnauthorizedMessage("جهاز جديد! يرجى تفعيل الجهاز وربطه بفرع من قسم الإدارة.");
+        } else {
+            // تحديث وقت التواجد فقط
+            await update(deviceRef, { 
+                status: 'online',
+                lastSeen: new Date().toLocaleString() 
+            });
         }
+
+        // في المحاسبة: نفتح النظام دائماً لأن الدخول برمز المدير (123456)
+        unlockSystem();
+        if(window.updateUserDisplay) window.updateUserDisplay();
     }
 
     // 3. محرك الأجهزة والكاشير

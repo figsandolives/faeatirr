@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>العملاء</title>
+  <link rel="stylesheet" href="style.css" />
+
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.5/xlsx.full.min.js"></script>
+  <script src="lang.js"></script>
+  <script src="main.js" defer></script>
+</head>
+<body>
+  <div class="side-menu">
+    <div class="menu-header">
+      <img src="logo.png" class="mini-logo" />
+      <h2 data-key="customersPageTitle">العملاء</h2>
+    </div>
+    <button onclick="window.location.href='accounting.html'" class="main-btn" style="width:90%;margin:auto;">↩ العودة</button>
+  </div>
+
+  <div class="main-content">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h1 data-key="customersListTitle">قائمة العملاء</h1>
+      <div>
+        <button id="toggleLangCustomer" class="lang-btn">English</button>
+      </div>
+    </div>
+
+    <div class="table-controls">
+      <button onclick="downloadCustomers()" class="main-btn" data-key="downloadExcel">📥 تحميل Excel</button>
+      <label><input type="checkbox" id="selectAllCustomers" onchange="selectAllCustomers(this)"> <span data-key="selectAll">تحديد الكل</span></label>
+    </div>
+
+    <table id="customersTable">
+      <thead>
+        <tr>
+          <th></th>
+          <th data-key="customerName">اسم العميل</th>
+          <th data-key="phone">رقم الهاتف</th>
+          <th data-key="lastOrder">أخر طلب</th>
+          <th data-key="totalOrders">عدد الطلبات</th>
+          <th data-key="avgOrderValue">متوسط الطلب</th>
+          <th data-key="avgFrequency">متوسط الفترة</th>
+          <th data-key="category">الفئة</th>
+          <th data-key="actions">إجراءات</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    // ========= التحقق من الدخول =========
+    document.addEventListener("DOMContentLoaded", () => {
+      setTimeout(() => {
+        if (localStorage.getItem("adminLoggedIn") !== "true") {
+          window.location.href = "login.html";
+        }
+      }, 300);
+    });
+
+    // ========= إعداد Firebase =========
+    const firebaseConfig = {
+      apiKey: "AIzaSyBdDFbWuByBWsDqEmC18nSlIKG6QZ5s0wA",
+      authDomain: "fawatirr-75242.firebaseapp.com",
+      databaseURL: "https://fawatirr-75242-default-rtdb.firebaseio.com",
+      projectId: "fawatirr-75242",
+      storageBucket: "fawatirr-75242.firebasestorage.app",
+      messagingSenderId: "1059799456100",
+      appId: "1:1059799456100:web:d624eb6f98aaee78950271",
+      measurementId: "G-7SQXEJQY6Y"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const tbody = document.querySelector("#customersTable tbody");
+    let customers = [];
+
+    // ========= تحميل العملاء =========
+    db.ref("customers").on("value", snapshot => {
+      const data = snapshot.val();
+      customers = [];
+      for (const id in data) {
+        customers.push({...data[id], id});
+      }
+      renderCustomers(customers);
+    });
+
+    // ========= رسم الجدول =========
+    function renderCustomers(list) {
+      tbody.innerHTML = "";
+      list.forEach(c => {
+        const category = getCategory(c);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input type="checkbox" class="custCheck" data-id="${c.id}"></td>
+          <td style="cursor:pointer;color:#0063c6;" onclick="viewCustomerOrders('${c.id}')">${c.name || "-"}</td>
+          <td>${c.phone || "-"}</td>
+          <td>${c.lastOrder || "-"}</td>
+          <td>${c.totalOrders || 0}</td>
+          <td>${c.avgOrder || 0}</td>
+          <td>${c.avgDays || 0}</td>
+          <td>${category}</td>
+          <td>
+            <button class="editBtn" onclick="suspendCustomer('${c.id}', '${c.name||""}', '${c.suspended||""}', '${c.reason||""}')">${translations[currentLang].actions}</button>
+          </td>
+        `;
+        if (c.suspended) {
+          tr.style.background = "#ffefef";
+        }
+        tbody.appendChild(tr);
+      });
+    }
+
+    function getCategory(c) {
+      if ((c.avgOrder >= 20) && (c.avgDays <= 3)) return "VVIP";
+      if ((c.avgOrder >= 10) && (c.avgDays <= 7)) return "VIP";
+      return "عادي";
+    }
+
+    // ========= إيقاف عميل =========
+    function suspendCustomer(id, name, suspended, reason) {
+      if (suspended === "true" || suspended === true) {
+        alert(`العميل ${name} موقوف بسبب: ${reason}`);
+        return;
+      }
+      const note = prompt(`أدخل سبب إيقاف العميل ${name}:`);
+      if (!note) return;
+      db.ref("customers/" + id).update({
+        suspended: true,
+        reason: note
+      });
+      alert("✅ تم إيقاف العميل بنجاح");
+    }
+
+    // ========= اختيار الكل =========
+    function selectAllCustomers(chk) {
+      document.querySelectorAll(".custCheck").forEach(c => {
+        c.checked = chk.checked;
+      });
+    }
+
+    // ========= تحميل Excel =========
+    function downloadCustomers() {
+      const selected = Array.from(document.querySelectorAll(".custCheck:checked")).map(input =>
+        customers.find(c => c.id === input.dataset.id)
+      );
+      const list = selected.length ? selected : customers;
+      const ws = XLSX.utils.json_to_sheet(list.map(c => ({
+        "الاسم": c.name,
+        "الهاتف": c.phone,
+        "عدد الطلبات": c.totalOrders,
+        "متوسط الطلب": c.avgOrder,
+        "متوسط المدة": c.avgDays,
+        "الفئة": getCategory(c)
+      })));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Customers");
+      XLSX.writeFile(wb, "Customers_Report.xlsx");
+    }
+
+    // ========= عرض طلبات عميل =========
+    function viewCustomerOrders(id) {
+      alert("قريبًا: عرض تفاصيل طلبات العميل " + id);
+    }
+
+    // ========= اللغة =========
+    let currentLang = localStorage.getItem("lang") || "ar";
+    const langBtn = document.getElementById("toggleLangCustomer");
+    langBtn.addEventListener("click", () => {
+      currentLang = currentLang === "ar" ? "en" : "ar";
+      localStorage.setItem("lang", currentLang);
+      updateLang();
+    });
+
+    function updateLang() {
+      document.documentElement.lang = currentLang;
+      document.documentElement.dir = currentLang === "ar" ? "rtl" : "ltr";
+      document.querySelectorAll("[data-key]").forEach(el => {
+        const key = el.getAttribute("data-key");
+        if (translations[currentLang][key]) el.textContent = translations[currentLang][key];
+      });
+      langBtn.textContent = currentLang === "ar" ? "English" : "العربية";
+      renderCustomers(customers);
+    }
+
+    updateLang();
+  </script>
+</body>
+</html>

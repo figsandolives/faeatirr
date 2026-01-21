@@ -67,7 +67,17 @@ const translations = {
     confirmDelete: "هل أنت متأكد من حذف هذه الفاتورة؟",
     deletedSuccessfully: "تم حذف الفاتورة بنجاح ✅",
     editNotice: "خاصية تعديل الطلب ستُفعل لاحقًا بعد بناء نموذج التعديل",
-    orderTypes: "أنواع الطلب وطرق الدفع"
+    orderTypes: "أنواع الطلب وطرق الدفع",
+    // ==== العملاء ====
+customersPageTitle: "العملاء",
+customersListTitle: "قائمة العملاء",
+lastOrder: "آخر طلب",
+totalOrders: "عدد الطلبات",
+avgOrderValue: "متوسط الطلب",
+avgFrequency: "متوسط الفترة",
+category: "الفئة",
+actions: "إجراءات",
+downloadExcel: "تحميل Excel"
   },
   en: {
     cashier: "Cashier",
@@ -137,6 +147,15 @@ const translations = {
     confirmDelete: "Are you sure you want to delete this invoice?",
     deletedSuccessfully: "Invoice deleted successfully ✅",
     editNotice: "Edit feature will be activated later after edit form creation",
-    orderTypes: "Order Types & Payment Methods"
+    orderTypes: "Order Types & Payment Methods",
+    customersPageTitle: "Customers",
+customersListTitle: "Customers List",
+lastOrder: "Last Order",
+totalOrders: "Total Orders",
+avgOrderValue: "Average Order",
+avgFrequency: "Average Interval",
+category: "Category",
+actions: "Actions",
+downloadExcel: "Download Excel"
   }
 };

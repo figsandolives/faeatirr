@@ -601,6 +601,18 @@ window.openAddUserModal = function() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
+
+// دالة توليد رمز من 4 أرقام للمستخدمين
+
+window.generateUserPin = function() {
+
+    const pin = Math.floor(1000 + Math.random() * 9000); 
+
+    document.getElementById('user-pin-input').value = pin;
+
+};
+
+
 // 2. نافذة تعديل مستخدم (تم إصلاحها لتعمل مع المحاسبة)
 window.openEditUserModal = function(pin, currentName, currentRole) {
     let modalHtml = `
@@ -729,7 +741,7 @@ window.confirmCashierUpdate = function(pin) {
         closeModal();
     };
 
-   // محرك صيد النقرات المطور لإصلاح أزرار التعديل والحذف
+    // محرك صيد النقرات المطور لإصلاح أزرار التعديل والحذف
     document.addEventListener('click', async (e) => {
         const t = e.target;
 

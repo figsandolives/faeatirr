@@ -163,7 +163,17 @@
         type: "النوع",
         link: "ربط",
         edit: "تعديل",
-        delete: "حذف"
+        delete: "حذف",
+        roleManager: "مدير",
+        roleStorekeeper: "أمين مخازن",
+        roleCashier: "أمين صندوق",
+        modalAddUser: "إضافة مستخدم جديد",
+        placeholderName: "اسم الموظف",
+        placeholderPin: "رمز الدخول (4 أرقام)",
+        saveSuccess: "✅ تم حفظ البيانات بنجاح",
+        deleteConfirm: "هل أنت متأكد من الحذف؟",
+        mainBranchLabel: "تعيين كفرع رئيسي"
+        
             },
             en: {
                 tabTitle: "Accounting System",
@@ -223,7 +233,16 @@
         type: "Type",
         link: "Link",
         edit: "Edit",
-        delete: "Delete"
+        delete: "Delete",
+        roleManager: "Manager",
+        roleStorekeeper: "Storekeeper",
+        roleCashier: "Cashier",
+        modalAddUser: "Add New User",
+        placeholderName: "Employee Name",
+        placeholderPin: "PIN Code (4 Digits)",
+        saveSuccess: "✅ Data saved successfully",
+        deleteConfirm: "Are you sure you want to delete?",
+        mainBranchLabel: "Set as Main Branch"
             }
         };
 
@@ -491,24 +510,25 @@ if (window.listenToBranches) {
 };
 
 window.openAddBranchModal = function() {
+    const lang = translations[currentLang];
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
             <div class="modal-box">
-                <h3>إضافة فرع جديد</h3>
-                <input type="text" id="branch-ar" placeholder="اسم الفرع بالعربي">
-                <input type="text" id="branch-en" placeholder="Branch Name (English)">
+                <h3>${lang.addBranch}</h3>
+                <input type="text" id="branch-ar" placeholder="${lang.nameAr}">
+                <input type="text" id="branch-en" placeholder="${lang.nameEn}">
                 <label style="color:white; display:block; margin-top:15px; text-align:right;">
-                    <input type="checkbox" id="is-main-branch"> تعيين كفرع رئيسي
+                    <input type="checkbox" id="is-main-branch"> ${lang.mainBranchLabel}
                 </label>
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
-                    <button class="btn-login" onclick="saveNewBranch()">إضافة</button>
-                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                    <button class="btn-login" onclick="saveNewBranch()">${lang.addUser}</button>
+                    <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
                 </div>
             </div>
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
+};
     
 
 
@@ -575,25 +595,25 @@ window.loadUsersPage = function() {
     window.initUsersLogic();
 };
 
-// 1. نافذة إضافة مستخدم (تم إضافة أمين صندوق)
 window.openAddUserModal = function() {
+    const lang = translations[currentLang]; // استدعاء اللغة الحالية
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
             <div class="modal-box">
-                <h3>إضافة مستخدم جديد</h3>
-                <input type="text" id="user-name-input" placeholder="اسم الموظف">
+                <h3>${lang.addUser}</h3>
+                <input type="text" id="user-name-input" placeholder="${lang.placeholderName}">
                 <select id="user-role-select" style="width:100%; padding:10px; margin-top:15px; background:#1a1a2e; color:white;">
-                    <option value="أمين صندوق">أمين صندوق</option>
-                    <option value="أمين مخازن">أمين مخازن</option>
-                    <option value="مدير">مدير</option>
+                    <option value="أمين صندوق">${lang.roleCashier}</option>
+                    <option value="أمين مخازن">${lang.roleStorekeeper}</option>
+                    <option value="مدير">${lang.roleManager}</option>
                 </select>
                 <div style="display:flex; gap:10px; margin-top:15px;">
-                    <input type="text" id="user-pin-input" placeholder="الرمز (4 أرقام)" maxlength="4">
-                    <button class="btn-main" onclick="generateUserPin()">إنشاء رمز</button>
+                    <input type="text" id="user-pin-input" placeholder="${lang.placeholderPin}" maxlength="4">
+                    <button class="btn-main" onclick="generateUserPin()">${lang.link}</button>
                 </div>
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
-                    <button class="btn-login" onclick="confirmSaveUser()">حفظ المستخدم</button>
-                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                    <button class="btn-login" onclick="confirmSaveUser()">${lang.edit}</button>
+                    <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
                 </div>
             </div>
         </div>
@@ -874,48 +894,57 @@ window.confirmCashierUpdate = function(pin) {
 
     // محرك صيد النقرات المطور لإصلاح أزرار التعديل والحذف
     document.addEventListener('click', async (e) => {
-        const t = e.target;
+    const t = e.target;
+    // استدعاء قاموس اللغة الحالية لتسهيل الاستخدام
+    const lang = translations[currentLang];
 
-        // تعديل مستخدم (المحاسبة)
-        if (t.closest('.edit-user-btn')) {
-            const btn = t.closest('.edit-user-btn');
-            window.openEditUserModal(btn.dataset.pin, btn.dataset.name, btn.dataset.role);
-        }
+    // 1. تعديل مستخدم (المحاسبة)
+    if (t.closest('.edit-user-btn')) {
+        const btn = t.closest('.edit-user-btn');
+        window.openEditUserModal(btn.dataset.pin, btn.dataset.name, btn.dataset.role);
+    }
 
-        // تعديل كاشير (المبيعات)
-        if (t.closest('.edit-cashier-btn')) {
-            const btn = t.closest('.edit-cashier-btn');
-            window.openEditCashierModal(btn.dataset.pin, btn.dataset.name);
-        }
+    // 2. تعديل كاشير (المبيعات)
+    if (t.closest('.edit-cashier-btn')) {
+        const btn = t.closest('.edit-cashier-btn');
+        window.openEditCashierModal(btn.dataset.pin, btn.dataset.name);
+    }
 
-        // حذف كاشير
-        if (t.closest('.delete-cashier-btn')) {
-            const btn = t.closest('.delete-cashier-btn');
-            if (confirm("هل أنت متأكد من حذف هذا الكاشير؟")) await set(ref(database, 'cashiers/' + btn.dataset.pin), null);
+    // 3. حذف كاشير (استخدام الترجمة في رسالة التأكيد)
+    if (t.closest('.delete-cashier-btn')) {
+        const btn = t.closest('.delete-cashier-btn');
+        // استخدام المفتاح deleteConfirm من القاموس
+        if (confirm(lang.deleteConfirm)) { 
+            await set(ref(database, 'cashiers/' + btn.dataset.pin), null);
         }
+    }
 
-        // حذف مستخدم
-        if (t.closest('.delete-user-btn')) {
-            const btn = t.closest('.delete-user-btn');
-            if (confirm("هل أنت متأكد من حذف هذا المستخدم؟")) await set(ref(database, 'system_users/' + btn.dataset.pin), null);
+    // 4. حذف مستخدم (استخدام الترجمة في رسالة التأكيد)
+    if (t.closest('.delete-user-btn')) {
+        const btn = t.closest('.delete-user-btn');
+        if (confirm(lang.deleteConfirm)) { 
+            await set(ref(database, 'system_users/' + btn.dataset.pin), null);
         }
+    }
 
-        // ربط جهاز
-        if (t.closest('.link-device-btn')) {
-            const btn = t.closest('.link-device-btn');
-            window.openEditDeviceModal(btn.dataset.id, btn.dataset.name);
+    // 5. ربط جهاز
+    if (t.closest('.link-device-btn')) {
+        const btn = t.closest('.link-device-btn');
+        window.openEditDeviceModal(btn.dataset.id, btn.dataset.name);
+    }
+    
+    // 6. تعديل فرع وحذفه (استخدام الترجمة في رسالة التأكيد)
+    if (t.closest('.edit-branch-btn')) {
+        const btn = t.closest('.edit-branch-btn');
+        window.openEditBranchModal(btn.dataset.id, btn.dataset.ar, btn.dataset.en, btn.dataset.main);
+    }
+    if (t.closest('.delete-branch-btn')) {
+        const btn = t.closest('.delete-branch-btn');
+        if (confirm(lang.deleteConfirm)) { 
+            await set(ref(database, 'branches/' + btn.dataset.id), null);
         }
-        
-        // تعديل فرع وحذفه
-        if (t.closest('.edit-branch-btn')) {
-            const btn = t.closest('.edit-branch-btn');
-            window.openEditBranchModal(btn.dataset.id, btn.dataset.ar, btn.dataset.en, btn.dataset.main);
-        }
-        if (t.closest('.delete-branch-btn')) {
-            const btn = t.closest('.delete-branch-btn');
-            if (confirm("حذف الفرع؟")) await set(ref(database, 'branches/' + btn.dataset.id), null);
-        }
-    });
+    }
+});
 
     // 6. الصلاحيات وفحص الجهاز
     window.applyRolePermissions = function(role) {

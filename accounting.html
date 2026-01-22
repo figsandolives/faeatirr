@@ -84,7 +84,7 @@
                 <a class="sidebar-item" id="sub-prod-staff">موظفي الانتاج</a>
                 <a class="sidebar-item" id="sub-branches" onclick="loadBranchesPage()">الفروع</a>
                 <a class="sidebar-item" id="sub-delivery-areas" onclick="loadDeliveryAreasPage()">مناطق التوصيل</a>
-                <a class="sidebar-item" id="sub-delivery-prices">أسعار التوصيل</a>
+<a class="sidebar-item" id="sub-delivery-prices" onclick="loadDeliveryPricesPage()">أسعار التوصيل</a>
                 <a class="sidebar-item" id="sub-discounts">خصومات</a>
                 <a class="sidebar-item" id="sub-payment-types">انواع الطلب وطرق الدفع</a>
             </div>
@@ -181,7 +181,11 @@
     modalAddArea: "إضافة منطقة توصيل جديدة",
     modalEditArea: "تعديل منطقة التوصيل",
     placeholderPrice: "0.000",
-    saveBtn: "حفظ المنطقة"
+    saveBtn: "حفظ المنطقة",
+areaName: "المنطقة",
+    customerCount: "عدد الزبائن",
+    addArea: "إضافة منطقة جديدة",
+    goToCustomers: "عرض الزبائن"
         
             },
             en: {
@@ -260,7 +264,11 @@
     modalAddArea: "Add New Delivery Area",
     modalEditArea: "Edit Delivery Area",
     placeholderPrice: "0.000",
-    saveBtn: "Save Area"
+    saveBtn: "Save Area",
+    areaName: "Area",
+    customerCount: "Customer Count",
+    addArea: "Add New Area",
+    goToCustomers: "View Customers"
             }
         };
 
@@ -536,6 +544,111 @@ if (window.listenToBranches) {
     // إذا لم يحمل الموديول بعد، انتظر ثانية وحاول مجدداً
     setTimeout(() => { if(window.listenToBranches) window.listenToBranches(); }, 1000);
 }
+};
+
+window.openAddPriceModal = function() {
+    const lang = translations[currentLang];
+    // جلب المناطق لعرضها كخيارات (Checkboxes)
+    get(ref(database, 'delivery_areas')).then((snap) => {
+        const areas = snap.val() || {};
+        let areasCheckboxes = "";
+        for (let id in areas) {
+            areasCheckboxes += `
+                <label style="display:block; margin:5px 0;">
+                    <input type="checkbox" class="area-checkbox" value="${id}"> 
+                    ${currentLang === 'ar' ? areas[id].nameAr : areas[id].nameEn}
+                </label>`;
+        }
+
+        let modalHtml = `
+            <div id="modal-overlay" class="modal-overlay">
+                <div class="modal-box">
+                    <h3>إضافة سعر توصيل</h3>
+                    <input type="number" id="price-value" placeholder="0.000 KD" step="0.005">
+                    <div style="text-align:right; max-height:200px; overflow-y:auto; margin:15px 0; border:1px solid #444; padding:10px;">
+                        <p>اختر المناطق المشمولة بهذا السعر:</p>
+                        ${areasCheckboxes}
+                    </div>
+                    <button class="btn-login" onclick="confirmSavePrice()">إضافة السعر</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    });
+};
+
+window.confirmSavePrice = async function() {
+    const price = document.getElementById('price-value').value;
+    const selectedCheckboxes = document.querySelectorAll('.area-checkbox:checked');
+    const areaIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+    if (!price || areaIds.length === 0) return alert("يرجى إدخال السعر واختيار منطقة واحدة على الأقل");
+
+    const priceId = Date.now();
+    await set(ref(database, 'delivery_prices/' + priceId), {
+        price: price,
+        areaIds: areaIds // مصفوفة الـ IDs للمناطق المشمولة
+    });
+    closeModal();
+};
+
+window.openEditPriceModal = function(id, currentPrice, currentAreaIds) {
+    const lang = translations[currentLang];
+    
+    // جلب جميع المناطق لعرضها كخيارات
+    get(ref(database, 'delivery_areas')).then((snap) => {
+        const areas = snap.val() || {};
+        let areasCheckboxes = "";
+        
+        for (let areaId in areas) {
+            // فحص إذا كانت هذه المنطقة مضافة مسبقاً لهذا السعر
+            const isChecked = currentAreaIds.includes(areaId) ? 'checked' : '';
+            
+            areasCheckboxes += `
+                <label style="display:block; margin:5px 0; color:white; font-size:14px;">
+                    <input type="checkbox" class="edit-area-checkbox" value="${areaId}" ${isChecked}> 
+                    ${currentLang === 'ar' ? areas[areaId].nameAr : areas[areaId].nameEn}
+                </label>`;
+        }
+
+        let modalHtml = `
+            <div id="modal-overlay" class="modal-overlay">
+                <div class="modal-box">
+                    <h3>${lang.delPricesTitle}</h3>
+                    <div style="margin-bottom:15px;">
+                        <label style="color:#aaa; display:block; margin-bottom:5px;">${lang.deliveryPrice}</label>
+                        <input type="number" id="edit-price-value" value="${currentPrice}" placeholder="0.000" step="0.005">
+                    </div>
+                    
+                    <div style="text-align:right; max-height:200px; overflow-y:auto; margin:15px 0; border:1px solid #444; padding:10px; background:#1a1a2e; border-radius:5px;">
+                        <p style="color:#f39c12; margin-bottom:10px; font-weight:bold;">${currentLang === 'ar' ? 'تعديل المناطق المشمولة:' : 'Edit Included Areas:'}</p>
+                        ${areasCheckboxes}
+                    </div>
+
+                    <div style="margin-top:20px; display:flex; justify-content: space-around; gap:10px;">
+                        <button class="btn-login" onclick="confirmPriceUpdate('${id}')">${lang.edit}</button>
+                        <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
+                    </div>
+                </div>
+            </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    });
+};
+
+// وظيفة جمع البيانات الجديدة وإرسالها للموديول
+window.confirmPriceUpdate = function(id) {
+    const newPrice = document.getElementById('edit-price-value').value;
+    const selectedCheckboxes = document.querySelectorAll('.edit-area-checkbox:checked');
+    const newAreaIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+    if (!newPrice || newAreaIds.length === 0) {
+        alert(currentLang === 'ar' ? "يرجى إدخال السعر واختيار منطقة واحدة على الأقل" : "Please enter price and select at least one area");
+        return;
+    }
+
+    if (window.updatePriceInFirebase) {
+        window.updatePriceInFirebase(id, newPrice, newAreaIds);
+    }
 };
 
 window.openAddBranchModal = function() {
@@ -1099,42 +1212,38 @@ window.openAddAreaModal = function() {
 
 // --- دالة عرض البيانات الموحدة والمترجمة ---
 window.initDeliveryAreasLogic = function() {
-    const lang = translations[currentLang]; // استدعاء القاموس لترجمة الأزرار
+    const lang = translations[currentLang];
     
-    onValue(ref(database, 'delivery_areas'), (snapshot) => {
-        const tbody = document.getElementById('delivery-areas-list');
-        if (!tbody) return;
-        tbody.innerHTML = "";
-        const data = snapshot.val();
+    // جلب العملاء أولاً للحساب
+    get(ref(database, 'customers')).then((custSnap) => {
+        const allCustomers = custSnap.val() || {};
         
-        // فحص حالة قاعدة البيانات الفارغة
-        if (!data) {
-            tbody.innerHTML = `<tr><td colspan="4">${currentLang === 'ar' ? 'لا توجد مناطق مضافة' : 'No areas added'}</td></tr>`;
-            return;
-        }
+        onValue(ref(database, 'delivery_areas'), (snapshot) => {
+            const tbody = document.getElementById('delivery-areas-list');
+            if (!tbody) return;
+            tbody.innerHTML = "";
+            const areas = snapshot.val() || {};
 
-        for (let id in data) {
-            const area = data[id];
-            tbody.innerHTML += `
-                <tr>
-                    <td>${area.nameAr}</td>
-                    <td>${area.nameEn}</td>
-                    <td>${parseFloat(area.price).toFixed(3)} ${currentLang === 'ar' ? 'د.ك' : 'KD'}</td>
-                    <td>
-                        <button class="btn-main edit-area-btn" 
-                                data-id="${id}" 
-                                data-ar="${area.nameAr}" 
-                                data-en="${area.nameEn}" 
-                                data-price="${area.price}">
-                            ${lang.edit}
-                        </button>
-                        <button class="btn-clear delete-area-btn" data-id="${id}">
-                            ${lang.delete}
-                        </button>
-                    </td>
-                </tr>`;
-        }
+            for (let id in areas) {
+                const area = areas[id];
+                // حساب عدد الزبائن المندرجين تحت هذه المنطقة
+                const count = Object.values(allCustomers).filter(c => c.areaId === id).length;
+
+                tbody.innerHTML += `
+                    <tr style="cursor:pointer" onclick="viewAreaCustomers('${id}')">
+                        <td>${currentLang === 'ar' ? area.nameAr : area.nameEn}</td>
+                        <td style="font-weight:bold; color:#f39c12;">${count}</td>
+                        <td><button class="btn-main">${lang.goToCustomers}</button></td>
+                    </tr>`;
+            }
+        });
     });
+};
+
+// وظيفة الانتقال لصفحة العملاء مع فلتر
+window.viewAreaCustomers = function(areaId) {
+    sessionStorage.setItem('filterByArea', areaId); // حفظ الفلتر في الجلسة
+    loadPage('customers'); // الانتقال لصفحة العملاء
 };
 
 // وظيفة حفظ المنطقة في فايربيس
@@ -1160,6 +1269,19 @@ window.updateAreaInFirebase = async function(id, nameAr, nameEn, price) {
     } catch (e) { alert("Error: " + e.message); }
 };
 
+window.updatePriceInFirebase = async function(id, price, areaIds) {
+    try {
+        await update(ref(database, 'delivery_prices/' + id), {
+            price: price,
+            areaIds: areaIds
+        });
+        alert(translations[currentLang].saveSuccess);
+        closeModal();
+    } catch (e) {
+        console.error("Error updating price:", e);
+        alert("Error: " + e.message);
+    }
+};
 
 </script>
 </body>

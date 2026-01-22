@@ -858,6 +858,32 @@ window.loadDeliveryAreasPage = function() {
     if (window.initDeliveryAreasLogic) window.initDeliveryAreasLogic();
 };
 
+
+window.loadDeliveryPricesPage = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-tags"></i> ${lang.delPricesTitle}</h3>
+                <button class="btn-main" onclick="openAddPriceModal()">${lang.addPriceBtn}</button>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>${lang.deliveryPrice}</th>
+                        <th>${lang.areaName}</th>
+                        <th>${lang.actions}</th>
+                    </tr>
+                </thead>
+                <tbody id="delivery-prices-list">
+                    <tr><td colspan="3">${currentLang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</td></tr>
+                </tbody>
+            </table>
+        </div>`;
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initDeliveryPricesLogic) window.initDeliveryPricesLogic();
+};
+
 // دالة نافذة التعديل (يجب إضافتها هنا)
 window.openEditAreaModal = function(id, nameAr, nameEn, price) {
     const lang = translations[currentLang];
@@ -1173,6 +1199,20 @@ window.openAddAreaModal = function() {
             await set(ref(database, 'branches/' + btn.dataset.id), null);
         }
     }
+
+// أضف هذه داخل document.addEventListener('click')
+if (t.closest('.edit-price-btn')) {
+    const btn = t.closest('.edit-price-btn');
+    window.openEditPriceModal(btn.dataset.id, btn.dataset.price, JSON.parse(btn.dataset.areas));
+}
+
+if (t.closest('.delete-price-btn')) {
+    const btn = t.closest('.delete-price-btn');
+    if (confirm(lang.deleteConfirm)) {
+        await set(ref(database, 'delivery_prices/' + btn.dataset.id), null);
+    }
+}
+
 });
 
     // 6. الصلاحيات وفحص الجهاز
@@ -1281,6 +1321,46 @@ window.updatePriceInFirebase = async function(id, price, areaIds) {
         console.error("Error updating price:", e);
         alert("Error: " + e.message);
     }
+};
+
+window.initDeliveryPricesLogic = function() {
+    const lang = translations[currentLang];
+    // نحتاج لجلب المناطق أولاً لعرض أسمائها بدلاً من الـ IDs
+    get(ref(database, 'delivery_areas')).then((areaSnap) => {
+        const areasData = areaSnap.val() || {};
+
+        onValue(ref(database, 'delivery_prices'), (snapshot) => {
+            const tbody = document.getElementById('delivery-prices-list');
+            if (!tbody) return;
+            tbody.innerHTML = "";
+            const prices = snapshot.val() || {};
+
+            for (let id in prices) {
+                const item = prices[id];
+                // تحويل مصفوفة الـ IDs إلى أسماء مناطق مفهومة
+                const areaNames = item.areaIds.map(aId => 
+                    areasData[aId] ? (currentLang === 'ar' ? areasData[aId].nameAr : areasData[aId].nameEn) : ''
+                ).join(' - ');
+
+                tbody.innerHTML += `
+                    <tr>
+                        <td style="font-weight:bold; color:#28a745;">${parseFloat(item.price).toFixed(3)} KD</td>
+                        <td style="font-size:13px; color:#ccc;">${areaNames}</td>
+                        <td>
+                            <button class="btn-main edit-price-btn" 
+                                    data-id="${id}" 
+                                    data-price="${item.price}" 
+                                    data-areas='${JSON.stringify(item.areaIds)}'>
+                                ${lang.edit}
+                            </button>
+                            <button class="btn-clear delete-price-btn" data-id="${id}">
+                                ${lang.delete}
+                            </button>
+                        </td>
+                    </tr>`;
+            }
+        });
+    });
 };
 
 </script>

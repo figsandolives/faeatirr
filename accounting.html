@@ -172,7 +172,16 @@
         placeholderPin: "رمز الدخول (4 أرقام)",
         saveSuccess: "✅ تم حفظ البيانات بنجاح",
         deleteConfirm: "هل أنت متأكد من الحذف؟",
-        mainBranchLabel: "تعيين كفرع رئيسي"
+        mainBranchLabel: "تعيين كفرع رئيسي",
+        delAreasTitle: "إدارة مناطق وأسعار التوصيل",
+    addAreaBtn: "+ إضافة منطقة جديدة",
+    areaNameAr: "اسم المنطقة (عربي)",
+    areaNameEn: "اسم المنطقة (En)",
+    deliveryPrice: "سعر التوصيل",
+    modalAddArea: "إضافة منطقة توصيل جديدة",
+    modalEditArea: "تعديل منطقة التوصيل",
+    placeholderPrice: "0.000",
+    saveBtn: "حفظ المنطقة"
         
             },
             en: {
@@ -242,7 +251,16 @@
         placeholderPin: "PIN Code (4 Digits)",
         saveSuccess: "✅ Data saved successfully",
         deleteConfirm: "Are you sure you want to delete?",
-        mainBranchLabel: "Set as Main Branch"
+        mainBranchLabel: "Set as Main Branch",
+        delAreasTitle: "Delivery Areas & Prices",
+    addAreaBtn: "+ Add New Area",
+    areaNameAr: "Area Name (Ar)",
+    areaNameEn: "Area Name (En)",
+    deliveryPrice: "Delivery Fee",
+    modalAddArea: "Add New Delivery Area",
+    modalEditArea: "Edit Delivery Area",
+    placeholderPrice: "0.000",
+    saveBtn: "Save Area"
             }
         };
 
@@ -688,6 +706,51 @@ window.confirmCashierUpdate = function(pin) {
     if (window.updateCashierInFirebase) window.updateCashierInFirebase(pin, name);
 };
 
+window.loadDeliveryAreasPage = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-truck"></i> ${lang.delAreasTitle}</h3>
+                <button class="btn-main" onclick="openAddAreaModal()">${lang.addAreaBtn}</button>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>${lang.areaNameAr}</th>
+                        <th>${lang.areaNameEn}</th>
+                        <th>${lang.deliveryPrice}</th>
+                        <th>${lang.actions}</th>
+                    </tr>
+                </thead>
+                <tbody id="delivery-areas-list">
+                    <tr><td colspan="4">...</td></tr>
+                </tbody>
+            </table>
+        </div>`;
+    document.getElementById('content-area').innerHTML = html;
+    // استدعاء محرك البيانات من الموديول
+    if(window.initDeliveryAreasLogic) window.initDeliveryAreasLogic();
+};
+
+window.openAddAreaModal = function() {
+    const lang = translations[currentLang];
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>${lang.modalAddArea}</h3>
+                <input type="text" id="area-name-ar" placeholder="${lang.areaNameAr}">
+                <input type="text" id="area-name-en" placeholder="${lang.areaNameEn}">
+                <input type="number" id="area-price" placeholder="${lang.deliveryPrice}" step="0.001">
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="confirmSaveArea()">${lang.saveBtn}</button>
+                    <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
     </script>
 
     <script type="module">
@@ -979,6 +1042,45 @@ window.confirmCashierUpdate = function(pin) {
             closeModal();
         } catch (e) { alert("خطأ في التحديث: " + e.message); }
     };
+
+
+    // 1. مراقب مناطق التوصيل
+window.initDeliveryAreasLogic = function() {
+    onValue(ref(database, 'delivery_areas'), (snapshot) => {
+        const tbody = document.getElementById('delivery-areas-list');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const lang = translations[currentLang];
+        const data = snapshot.val();
+        
+        for (let id in data) {
+            const area = data[id];
+            tbody.innerHTML += `
+                <tr>
+                    <td>${area.nameAr}</td>
+                    <td>${area.nameEn}</td>
+                    <td>${parseFloat(area.price).toFixed(3)}</td>
+                    <td>
+                        <button class="btn-main edit-area-btn" data-id="${id}" data-ar="${area.nameAr}" data-en="${area.nameEn}" data-price="${area.price}">${lang.edit}</button>
+                        <button class="btn-clear delete-area-btn" data-id="${id}">${lang.delete}</button>
+                    </td>
+                </tr>`;
+        }
+    });
+};
+
+// 2. وظيفة حفظ المنطقة الجديدة
+window.confirmSaveArea = async function() {
+    const nameAr = document.getElementById('area-name-ar').value;
+    const nameEn = document.getElementById('area-name-en').value;
+    const price = document.getElementById('area-price').value;
+    
+    if(!nameAr || !price) return alert("يرجى إكمال البيانات");
+    
+    const id = Date.now();
+    await set(ref(database, 'delivery_areas/' + id), { nameAr, nameEn, price });
+    closeModal();
+};
 
 </script>
 </body>

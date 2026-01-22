@@ -138,7 +138,32 @@
                 delAreas: "مناطق التوصيل",
                 delPrices: "أسعار التوصيل",
                 discounts: "خصومات",
-                paymentTypes: "انواع الطلب وطرق الدفع"
+                paymentTypes: "انواع الطلب وطرق الدفع",
+                posTitle: "إدارة الأجهزة والفروع",
+        posInfo: "هنا تظهر جميع الأجهزة التي فتحت النظام. يجب تحديد فرع لكل جهاز لكي يعمل.",
+        deviceId: "ID الجهاز",
+        status: "الحالة",
+        assignedBranch: "الفرع المخصص",
+        lastSeen: "آخر ظهور",
+        actions: "إجراءات",
+        cashierTitle: "إدارة الكاشير",
+        addCashier: "+ إضافة كاشير جديد",
+        cashierName: "اسم الكاشير",
+        pin: "الرمز (PIN)",
+        userTitle: "إدارة المستخدمين والصلاحيات",
+        addUser: "+ إضافة مستخدم جديد",
+        userName: "الاسم",
+        userRole: "الدور (الصلاحية)",
+        userPin: "رمز الدخول",
+        branchTitle: "إدارة الفروع",
+        addBranch: "+ إضافة فرع جديد",
+        branchInfo: "يجب تحديد فرع واحد فقط كـ 'فرع رئيسي' ليكون مركز استلام المشتريات والمخزون الأولي.",
+        nameAr: "الاسم (عربي)",
+        nameEn: "الاسم (En)",
+        type: "النوع",
+        link: "ربط",
+        edit: "تعديل",
+        delete: "حذف"
             },
             en: {
                 tabTitle: "Accounting System",
@@ -173,7 +198,32 @@
                 delAreas: "Delivery Areas",
                 delPrices: "Delivery Prices",
                 discounts: "Discounts",
-                paymentTypes: "Payment & Order Types"
+                paymentTypes: "Payment & Order Types",
+                posTitle: "Devices & Branches Management",
+        posInfo: "All devices that accessed the system. A branch must be assigned to each device to work.",
+        deviceId: "Device ID",
+        status: "Status",
+        assignedBranch: "Assigned Branch",
+        lastSeen: "Last Seen",
+        actions: "Actions",
+        cashierTitle: "Cashier Management",
+        addCashier: "+ Add New Cashier",
+        cashierName: "Cashier Name",
+        pin: "PIN Code",
+        userTitle: "Users & Permissions",
+        addUser: "+ Add New User",
+        userName: "Name",
+        userRole: "Role",
+        userPin: "Entry PIN",
+        branchTitle: "Branch Management",
+        addBranch: "+ Add New Branch",
+        branchInfo: "Only one branch must be set as 'Main Branch' for receiving inventory.",
+        nameAr: "Name (Ar)",
+        nameEn: "Name (En)",
+        type: "Type",
+        link: "Link",
+        edit: "Edit",
+        delete: "Delete"
             }
         };
 
@@ -327,75 +377,36 @@ window.generateRandomPin = function() {
 
     // أضف هذه الدوال في السكربت العادي (الدوال العامة)
 
-// 1. واجهة الأجهزة والكاشير (المطورة)
 window.loadPOSDevicesPage = function() {
-    const lang = translations[currentLang];
+    const lang = translations[currentLang]; // استدعاء اللغة الحالية
     let html = `
         <div class="admin-section">
-            <h3><i class="fas fa-network-wired"></i> إدارة الأجهزة والفروع</h3>
-            <div class="info-card">هنا تظهر جميع الأجهزة التي فتحت النظام. يجب تحديد فرع لكل جهاز لكي يعمل.</div>
-            
+            <h3><i class="fas fa-network-wired"></i> ${lang.posTitle}</h3>
+            <div class="info-card">${lang.posInfo}</div>
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>ID الجهاز</th>
-                        <th>الحالة</th>
-                        <th>الفرع المخصص</th>
-                        <th>آخر ظهور</th>
-                        <th>إجراءات</th>
+                        <th>${lang.deviceId}</th><th>${lang.status}</th><th>${lang.assignedBranch}</th><th>${lang.lastSeen}</th><th>${lang.actions}</th>
                     </tr>
                 </thead>
-                <tbody id="devices-live-list">
-                    <tr><td colspan="5">جاري مراقبة الأجهزة...</td></tr>
-                </tbody>
+                <tbody id="devices-live-list"></tbody>
             </table>
-
-            <hr style="margin: 40px 0; border: 0; border-top: 1px dashed rgba(255,255,255,0.1);">
-
+            <hr>
             <div class="header-flex">
-                <h3><i class="fas fa-users-cog"></i> إدارة الكاشير</h3>
-                <button class="btn-main" onclick="openAddCashierModal()">+ إضافة كاشير جديد</button>
+                <h3><i class="fas fa-users-cog"></i> ${lang.cashierTitle}</h3>
+                <button class="btn-main" onclick="openAddCashierModal()">${lang.addCashier}</button>
             </div>
             <table class="data-table">
                 <thead>
-                    <tr>
-                        <th>اسم الكاشير</th>
-                        <th>الرمز (PIN)</th>
-                        <th>إجراءات</th>
-                    </tr>
+                    <tr><th>${lang.cashierName}</th><th>${lang.pin}</th><th>${lang.actions}</th></tr>
                 </thead>
                 <tbody id="cashiers-list-body"></tbody>
             </table>
-        </div>
-    `;
+        </div>`;
     document.getElementById('content-area').innerHTML = html;
-    if(window.initDevicesAndCashiers) window.initDevicesAndCashiers();
+    window.initDevicesAndCashiers();
 };
 
-// 2. واجهة المستخدمين (الأدوار)
-window.loadUsersPage = function() {
-    let html = `
-        <div class="admin-section">
-            <div class="header-flex">
-                <h3><i class="fas fa-user-shield"></i> إدارة المستخدمين والصلاحيات</h3>
-                <button class="btn-main" onclick="openAddUserModal()">+ إضافة مستخدم جديد</button>
-            </div>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>الاسم</th>
-                        <th>الدور</th>
-                        <th>الرمز</th>
-                        <th>إجراءات</th>
-                    </tr>
-                </thead>
-                <tbody id="users-list-body"></tbody>
-            </table>
-        </div>
-    `;
-    document.getElementById('content-area').innerHTML = html;
-    if(window.initUsersLogic) window.initUsersLogic();
-};
 
 
 
@@ -450,36 +461,33 @@ window.confirmLink = function(deviceId) {
 
 
 window.loadBranchesPage = function() {
-    const lang = translations[currentLang];
+    const lang = translations[currentLang]; // أضف هذا السطر
     let html = `
         <div class="admin-section">
-            <div class="header-flex" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3><i class="fas fa-store"></i> إدارة الفروع</h3>
-                <button class="btn-main" onclick="openAddBranchModal()">+ إضافة فرع جديد</button>
-            </div>
-            
+            <div class="header-flex">
+                <h3><i class="fas fa-store"></i> ${lang.branchTitle}</h3> <button class="btn-main" onclick="openAddBranchModal()">${lang.addBranch}</button> </div>
             <div class="info-card" style="margin-top:10px;">
-                <i class="fas fa-info-circle"></i> يجب تحديد فرع واحد فقط كـ "فرع رئيسي" ليكون مركز استلام المشتريات والمخزون الأولي.
-            </div>
-
+                <i class="fas fa-info-circle"></i> ${lang.branchInfo} </div>
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>الاسم (عربي)</th>
-                        <th>الاسم (En)</th>
-                        <th>النوع</th>
-                        <th>إجراءات</th>
+                        <th>${lang.nameAr}</th><th>${lang.nameEn}</th><th>${lang.type}</th><th>${lang.actions}</th>
                     </tr>
                 </thead>
                 <tbody id="branches-list-body">
-                    <tr><td colspan="4">جاري تحميل الفروع...</td></tr>
+                    <tr><td colspan="4">...</td></tr>
                 </tbody>
             </table>
-        </div>
-    `;
+        </div>`;
     document.getElementById('content-area').innerHTML = html;
     // استدعاء دالة جلب البيانات من الموديول
-    if(window.listenToBranches) window.listenToBranches();
+    // استبدل السطر الأخير في دالة loadBranchesPage بهذا الكود الذكي:
+if (window.listenToBranches) {
+    window.listenToBranches();
+} else {
+    // إذا لم يحمل الموديول بعد، انتظر ثانية وحاول مجدداً
+    setTimeout(() => { if(window.listenToBranches) window.listenToBranches(); }, 1000);
+}
 };
 
 window.openAddBranchModal = function() {
@@ -549,30 +557,22 @@ window.confirmBranchUpdate = function(id) {
 
 // 1. واجهة إدارة المستخدمين
 window.loadUsersPage = function() {
+    const lang = translations[currentLang];
     let html = `
         <div class="admin-section">
-            <div class="header-flex" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3><i class="fas fa-user-shield"></i> إدارة المستخدمين والصلاحيات</h3>
-                <button class="btn-main" onclick="openAddUserModal()">+ إضافة مستخدم جديد</button>
+            <div class="header-flex">
+                <h3><i class="fas fa-user-shield"></i> ${lang.userTitle}</h3>
+                <button class="btn-main" onclick="openAddUserModal()">${lang.addUser}</button>
             </div>
-            
-            <table class="data-table" style="margin-top:20px;">
+            <table class="data-table">
                 <thead>
-                    <tr>
-                        <th>الاسم</th>
-                        <th>الدور (الصلاحية)</th>
-                        <th>رمز الدخول</th>
-                        <th>إجراءات</th>
-                    </tr>
+                    <tr><th>${lang.userName}</th><th>${lang.userRole}</th><th>${lang.userPin}</th><th>${lang.actions}</th></tr>
                 </thead>
-                <tbody id="users-list-body">
-                    <tr><td colspan="4">جاري تحميل المستخدمين...</td></tr>
-                </tbody>
+                <tbody id="users-list-body"></tbody>
             </table>
-        </div>
-    `;
+        </div>`;
     document.getElementById('content-area').innerHTML = html;
-    if(window.initUsersLogic) window.initUsersLogic();
+    window.initUsersLogic();
 };
 
 // 1. نافذة إضافة مستخدم (تم إضافة أمين صندوق)
@@ -652,7 +652,21 @@ window.openEditCashierModal = function(pin, name) {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
+window.confirmUserUpdate = function(pin) {
+    const name = document.getElementById('edit-user-name').value;
+    const role = document.getElementById('edit-user-role').value;
+    if (!name) return alert("يرجى إدخال الاسم");
+    // استدعاء دالة التحديث الموجودة داخل الموديول
+    if (window.updateUserInFirebase) window.updateUserInFirebase(pin, name, role);
+};
 
+// 2. جسر تعديل الكاشير
+window.confirmCashierUpdate = function(pin) {
+    const name = document.getElementById('edit-cashier-name').value;
+    if (!name) return alert("يرجى إدخال الاسم");
+    // استدعاء دالة التحديث الموجودة داخل الموديول
+    if (window.updateCashierInFirebase) window.updateCashierInFirebase(pin, name);
+};
 
     </script>
 
@@ -665,46 +679,153 @@ window.openEditCashierModal = function(pin, name) {
         console.log("قاعدة بيانات الفروع جاهزة");
     });
 
-    // 2. المحرك الموحد (جلب بيانات الأجهزة والكاشير والمستخدمين)
     window.initDevicesAndCashiers = function() {
-        // مراقبة الأجهزة
-        onValue(ref(database, 'authorized_devices'), (snapshot) => {
-            const tbody = document.getElementById('devices-live-list');
-            if (!tbody) return;
-            tbody.innerHTML = "";
-            const data = snapshot.val();
-            for (let id in data) {
-                const d = data[id];
-                tbody.innerHTML += `<tr><td>${d.id}</td><td style="color:${d.status === 'online' ? '#28a745' : '#888'}">${d.status}</td><td>${d.branchName || 'غير محدد'}</td><td>${d.lastSeen || '-'}</td><td><button class="btn-main link-device-btn" data-id="${d.id}" data-name="${d.branchName}">ربط</button></td></tr>`;
-            }
-        });
+    const lang = translations[currentLang]; // جلب اللغة الحالية
 
-        // مراقبة الكاشير
-        onValue(ref(database, 'cashiers'), (snapshot) => {
-            const tbody = document.getElementById('cashiers-list-body'); 
-            if (!tbody) return;
-            tbody.innerHTML = "";
-            const data = snapshot.val();
-            if (!data) { tbody.innerHTML = "<tr><td colspan='3'>لا يوجد كاشير مضاف</td></tr>"; return; }
-            for (let pin in data) {
-                const c = data[pin];
-                tbody.innerHTML += `<tr><td>${c.name}</td><td>${c.pin}</td><td><button class="btn-main edit-cashier-btn" data-pin="${c.pin}" data-name="${c.name}">تعديل</button> <button class="btn-clear delete-cashier-btn" data-pin="${c.pin}">حذف</button></td></tr>`;
-            }
-        });
-    };
+    // 1. مراقبة الأجهزة (Authorized Devices)
+    onValue(ref(database, 'authorized_devices'), (snapshot) => {
+        const tbody = document.getElementById('devices-live-list');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const data = snapshot.val();
+        
+        for (let id in data) {
+            const d = data[id];
+            // ترجمة اسم الفرع في حال لم يكن محدداً
+            const branchDisplayName = d.branchName && d.branchName !== "غير محدد" 
+                ? d.branchName 
+                : (currentLang === 'ar' ? 'غير محدد' : 'Not Assigned');
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${d.id}</td>
+                    <td style="color:${d.status === 'online' ? '#28a745' : '#888'}">${d.status}</td>
+                    <td>${branchDisplayName}</td>
+                    <td>${d.lastSeen || '-'}</td>
+                    <td>
+                        <button class="btn-main link-device-btn" 
+                                data-id="${d.id}" 
+                                data-name="${d.branchName}">
+                            ${lang.link}
+                        </button>
+                    </td>
+                </tr>`;
+        }
+    });
+
+    // 2. مراقبة الكاشير (Cashiers)
+    onValue(ref(database, 'cashiers'), (snapshot) => {
+        const tbody = document.getElementById('cashiers-list-body'); 
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const data = snapshot.val();
+
+        if (!data) {
+            const noDataMsg = currentLang === 'ar' ? 'لا يوجد كاشير مضاف' : 'No cashiers added';
+            tbody.innerHTML = `<tr><td colspan="3">${noDataMsg}</td></tr>`;
+            return;
+        }
+
+        for (let pin in data) {
+            const c = data[pin];
+            tbody.innerHTML += `
+                <tr>
+                    <td>${c.name}</td>
+                    <td>${c.pin}</td>
+                    <td>
+                        <button class="btn-main edit-cashier-btn" 
+                                data-pin="${c.pin}" 
+                                data-name="${c.name}">
+                            ${lang.edit}
+                        </button> 
+                        <button class="btn-clear delete-cashier-btn" 
+                                data-pin="${c.pin}">
+                            ${lang.delete}
+                        </button>
+                    </td>
+                </tr>`;
+        }
+    });
+};
 
     window.initUsersLogic = function() {
-        onValue(ref(database, 'system_users'), (snapshot) => {
-            const tbody = document.getElementById('users-list-body');
-            if (!tbody) return;
-            tbody.innerHTML = "";
-            const data = snapshot.val();
-            for (let pin in data) {
-                const u = data[pin];
-                tbody.innerHTML += `<tr><td>${u.name}</td><td>${u.role}</td><td>${u.pin}</td><td><button class="btn-main edit-user-btn" data-pin="${u.pin}" data-name="${u.name}" data-role="${u.role}">تعديل</button> <button class="btn-clear delete-user-btn" data-pin="${u.pin}">حذف</button></td></tr>`;
-            }
-        });
-    };
+    onValue(ref(database, 'system_users'), (snapshot) => {
+        const tbody = document.getElementById('users-list-body');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+
+        // 1. استدعاء اللغة الحالية من القاموس
+        const lang = translations[currentLang]; 
+
+        const data = snapshot.val();
+        for (let pin in data) {
+            const u = data[pin];
+            tbody.innerHTML += `
+                <tr>
+                    <td>${u.name}</td>
+                    <td>${u.role}</td>
+                    <td>${u.pin}</td>
+                    <td>
+                        <button class="btn-main edit-user-btn" 
+                                data-pin="${u.pin}" 
+                                data-name="${u.name}" 
+                                data-role="${u.role}">
+                            ${lang.edit}
+                        </button> 
+                        
+                        <button class="btn-clear delete-user-btn" 
+                                data-pin="${u.pin}">
+                            ${lang.delete}
+                        </button>
+                    </td>
+                </tr>`;
+        }
+    });
+};
+
+    window.listenToBranches = function() {
+    onValue(ref(database, 'branches'), (snapshot) => {
+        const tbody = document.getElementById('branches-list-body');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+
+        const lang = translations[currentLang]; 
+
+        const data = snapshot.val();
+        if (!data) { 
+            tbody.innerHTML = `<tr><td colspan='4'>${currentLang === 'ar' ? 'لا توجد فروع مضافة' : 'No branches added'}</td></tr>`; 
+            return; 
+        }
+
+        for (let id in data) {
+            const b = data[id];
+            // تحديد النص بناءً على نوع الفرع واللغة
+            const branchType = b.isMain 
+                ? (currentLang === 'ar' ? 'رئيسي ★' : 'Main ★') 
+                : (currentLang === 'ar' ? 'فرعي' : 'Sub-Branch');
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${b.nameAr}</td>
+                    <td>${b.nameEn}</td>
+                    <td>${branchType}</td>
+                    <td>
+                        <button class="btn-main edit-branch-btn" 
+                                data-id="${id}" 
+                                data-ar="${b.nameAr}" 
+                                data-en="${b.nameEn}" 
+                                data-main="${b.isMain}">
+                            ${lang.edit}
+                        </button>
+                        <button class="btn-clear delete-branch-btn" 
+                                data-id="${id}">
+                            ${lang.delete}
+                        </button>
+                    </td>
+                </tr>`;
+        }
+    });
+};
 
     // 3. محرك تسجيل الدخول (فحص الرموز من 4 أرقام)
     window.verifyUserLogin = async function(enteredPin) {
@@ -829,30 +950,6 @@ window.openEditCashierModal = function(pin, name) {
             closeModal();
         } catch (e) { alert("خطأ في التحديث: " + e.message); }
     };
-
-window.confirmUserUpdate = function(pin) {
-    const name = document.getElementById('edit-user-name').value;
-    const role = document.getElementById('edit-user-role').value;
-    
-    if (!name) return alert("يرجى إدخال الاسم");
-    
-    // استدعاء وظيفة التحديث الموجودة داخل الموديول
-    if (window.updateUserInFirebase) {
-        window.updateUserInFirebase(pin, name, role);
-    }
-};
-
-// 2. وظيفة تأكيد تعديل الكاشير (تجمع الاسم الجديد وترسله لفايربيس)
-window.confirmCashierUpdate = function(pin) {
-    const name = document.getElementById('edit-cashier-name').value;
-    
-    if (!name) return alert("يرجى إدخال الاسم");
-    
-    // استدعاء وظيفة التحديث الموجودة داخل الموديول
-    if (window.updateCashierInFirebase) {
-        window.updateCashierInFirebase(pin, name);
-    }
-};
 
 </script>
 </body>

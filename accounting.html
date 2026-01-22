@@ -707,7 +707,7 @@ window.confirmCashierUpdate = function(pin) {
 };
 
 window.loadDeliveryAreasPage = function() {
-    const lang = translations[currentLang]; // جلب الترجمة
+    const lang = translations[currentLang]; // استدعاء القاموس
     let html = `
         <div class="admin-section">
             <div class="header-flex">
@@ -729,14 +729,35 @@ window.loadDeliveryAreasPage = function() {
             </table>
         </div>`;
     document.getElementById('content-area').innerHTML = html;
-    
-    // تشغيل محرك البيانات من الموديول
-    if (window.initDeliveryAreasLogic) {
-        window.initDeliveryAreasLogic();
-    } else {
-        setTimeout(() => { if(window.initDeliveryAreasLogic) window.initDeliveryAreasLogic(); }, 500);
-    }
+    if(window.initDeliveryAreasLogic) window.initDeliveryAreasLogic();
 };
+
+// دالة نافذة التعديل (يجب إضافتها هنا)
+window.openEditAreaModal = function(id, nameAr, nameEn, price) {
+    const lang = translations[currentLang];
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>${lang.modalEditArea}</h3>
+                <input type="text" id="edit-area-ar" value="${nameAr}" placeholder="${lang.areaNameAr}">
+                <input type="text" id="edit-area-en" value="${nameEn}" placeholder="${lang.areaNameEn}">
+                <input type="number" id="edit-area-price" value="${price}" placeholder="${lang.deliveryPrice}" step="0.001">
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="confirmAreaUpdate('${id}')">${lang.edit}</button>
+                    <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.confirmAreaUpdate = function(id) {
+    const nameAr = document.getElementById('edit-area-ar').value;
+    const nameEn = document.getElementById('edit-area-en').value;
+    const price = document.getElementById('edit-area-price').value;
+    if (window.updateAreaInFirebase) window.updateAreaInFirebase(id, nameAr, nameEn, price);
+};
+
 
 window.openAddAreaModal = function() {
     const lang = translations[currentLang];
@@ -966,6 +987,20 @@ window.openAddAreaModal = function() {
     // استدعاء قاموس اللغة الحالية لتسهيل الاستخدام
     const lang = translations[currentLang];
 
+    // تعديل منطقة توصيل
+    if (t.closest('.edit-area-btn')) {
+        const btn = t.closest('.edit-area-btn');
+        window.openEditAreaModal(btn.dataset.id, btn.dataset.ar, btn.dataset.en, btn.dataset.price);
+    }
+
+    // حذف منطقة توصيل
+    if (t.closest('.delete-area-btn')) {
+        const btn = t.closest('.delete-area-btn');
+        if (confirm(lang.deleteConfirm)) {
+            await set(ref(database, 'delivery_areas/' + btn.dataset.id), null);
+        }
+    }
+
     // 1. تعديل مستخدم (المحاسبة)
     if (t.closest('.edit-user-btn')) {
         const btn = t.closest('.edit-user-btn');
@@ -1090,6 +1125,37 @@ window.confirmSaveArea = async function() {
     await set(ref(database, 'delivery_areas/' + id), { nameAr, nameEn, price });
     alert(translations[currentLang].saveSuccess);
     closeModal();
+};
+
+
+window.updateAreaInFirebase = async function(id, nameAr, nameEn, price) {
+    try {
+        await update(ref(database, 'delivery_areas/' + id), { nameAr, nameEn, price });
+        alert(translations[currentLang].saveSuccess);
+        closeModal();
+    } catch (e) { alert("Error: " + e.message); }
+};
+
+// 3. تأكد أن دالة العرض تستخدم الترجمة للأزرار
+window.initDeliveryAreasLogic = function() {
+    onValue(ref(database, 'delivery_areas'), (snapshot) => {
+        const tbody = document.getElementById('delivery-areas-list');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const lang = translations[currentLang];
+        const data = snapshot.val();
+        for (let id in data) {
+            const area = data[id];
+            tbody.innerHTML += `
+                <tr>
+                    <td>${area.nameAr}</td><td>${area.nameEn}</td><td>${parseFloat(area.price).toFixed(3)}</td>
+                    <td>
+                        <button class="btn-main edit-area-btn" data-id="${id}" data-ar="${area.nameAr}" data-en="${area.nameEn}" data-price="${area.price}">${lang.edit}</button>
+                        <button class="btn-clear delete-area-btn" data-id="${id}">${lang.delete}</button>
+                    </td>
+                </tr>`;
+        }
+    });
 };
 
 </script>

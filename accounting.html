@@ -415,33 +415,44 @@ window.generateRandomPin = function() {
     // أضف هذه الدوال في السكربت العادي (الدوال العامة)
 
 window.loadPOSDevicesPage = function() {
-    const lang = translations[currentLang]; // استدعاء اللغة الحالية
+    const lang = translations[currentLang]; 
     let html = `
         <div class="admin-section">
             <h3><i class="fas fa-network-wired"></i> ${lang.posTitle}</h3>
             <div class="info-card">${lang.posInfo}</div>
+            
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>${lang.deviceId}</th><th>${lang.status}</th><th>${lang.assignedBranch}</th><th>${lang.lastSeen}</th><th>${lang.actions}</th>
+                        <th>${lang.deviceId}</th>
+                        <th>${lang.status}</th>
+                        <th>${lang.assignedBranch}</th>
+                        <th>${lang.lastSeen}</th>
+                        <th>${lang.actions}</th>
                     </tr>
                 </thead>
                 <tbody id="devices-live-list"></tbody>
             </table>
-            <hr>
+
+            <hr style="margin: 40px 0; border: 0; border-top: 1px dashed rgba(255,255,255,0.1);">
+
             <div class="header-flex">
                 <h3><i class="fas fa-users-cog"></i> ${lang.cashierTitle}</h3>
                 <button class="btn-main" onclick="openAddCashierModal()">${lang.addCashier}</button>
             </div>
             <table class="data-table">
                 <thead>
-                    <tr><th>${lang.cashierName}</th><th>${lang.pin}</th><th>${lang.actions}</th></tr>
+                    <tr>
+                        <th>${lang.cashierName}</th>
+                        <th>${lang.pin}</th>
+                        <th>${lang.actions}</th>
+                    </tr>
                 </thead>
                 <tbody id="cashiers-list-body"></tbody>
             </table>
         </div>`;
     document.getElementById('content-area').innerHTML = html;
-    window.initDevicesAndCashiers();
+    if(window.initDevicesAndCashiers) window.initDevicesAndCashiers();
 };
 
 
@@ -707,7 +718,7 @@ window.confirmCashierUpdate = function(pin) {
 };
 
 window.loadDeliveryAreasPage = function() {
-    const lang = translations[currentLang]; // استدعاء القاموس
+    const lang = translations[currentLang]; // جلب اللغة الحالية
     let html = `
         <div class="admin-section">
             <div class="header-flex">
@@ -729,7 +740,9 @@ window.loadDeliveryAreasPage = function() {
             </table>
         </div>`;
     document.getElementById('content-area').innerHTML = html;
-    if(window.initDeliveryAreasLogic) window.initDeliveryAreasLogic();
+    
+    // تشغيل محرك البيانات
+    if (window.initDeliveryAreasLogic) window.initDeliveryAreasLogic();
 };
 
 // دالة نافذة التعديل (يجب إضافتها هنا)
@@ -1084,14 +1097,17 @@ window.openAddAreaModal = function() {
     };
 
 
+// --- دالة عرض البيانات الموحدة والمترجمة ---
 window.initDeliveryAreasLogic = function() {
-    const lang = translations[currentLang];
+    const lang = translations[currentLang]; // استدعاء القاموس لترجمة الأزرار
+    
     onValue(ref(database, 'delivery_areas'), (snapshot) => {
         const tbody = document.getElementById('delivery-areas-list');
         if (!tbody) return;
         tbody.innerHTML = "";
         const data = snapshot.val();
         
+        // فحص حالة قاعدة البيانات الفارغة
         if (!data) {
             tbody.innerHTML = `<tr><td colspan="4">${currentLang === 'ar' ? 'لا توجد مناطق مضافة' : 'No areas added'}</td></tr>`;
             return;
@@ -1103,10 +1119,18 @@ window.initDeliveryAreasLogic = function() {
                 <tr>
                     <td>${area.nameAr}</td>
                     <td>${area.nameEn}</td>
-                    <td>${parseFloat(area.price).toFixed(3)} KD</td>
+                    <td>${parseFloat(area.price).toFixed(3)} ${currentLang === 'ar' ? 'د.ك' : 'KD'}</td>
                     <td>
-                        <button class="btn-main edit-area-btn" data-id="${id}" data-ar="${area.nameAr}" data-en="${area.nameEn}" data-price="${area.price}">${lang.edit}</button>
-                        <button class="btn-clear delete-area-btn" data-id="${id}">${lang.delete}</button>
+                        <button class="btn-main edit-area-btn" 
+                                data-id="${id}" 
+                                data-ar="${area.nameAr}" 
+                                data-en="${area.nameEn}" 
+                                data-price="${area.price}">
+                            ${lang.edit}
+                        </button>
+                        <button class="btn-clear delete-area-btn" data-id="${id}">
+                            ${lang.delete}
+                        </button>
                     </td>
                 </tr>`;
         }
@@ -1136,27 +1160,7 @@ window.updateAreaInFirebase = async function(id, nameAr, nameEn, price) {
     } catch (e) { alert("Error: " + e.message); }
 };
 
-// 3. تأكد أن دالة العرض تستخدم الترجمة للأزرار
-window.initDeliveryAreasLogic = function() {
-    onValue(ref(database, 'delivery_areas'), (snapshot) => {
-        const tbody = document.getElementById('delivery-areas-list');
-        if (!tbody) return;
-        tbody.innerHTML = "";
-        const lang = translations[currentLang];
-        const data = snapshot.val();
-        for (let id in data) {
-            const area = data[id];
-            tbody.innerHTML += `
-                <tr>
-                    <td>${area.nameAr}</td><td>${area.nameEn}</td><td>${parseFloat(area.price).toFixed(3)}</td>
-                    <td>
-                        <button class="btn-main edit-area-btn" data-id="${id}" data-ar="${area.nameAr}" data-en="${area.nameEn}" data-price="${area.price}">${lang.edit}</button>
-                        <button class="btn-clear delete-area-btn" data-id="${id}">${lang.delete}</button>
-                    </td>
-                </tr>`;
-        }
-    });
-};
+
 
 </script>
 </body>

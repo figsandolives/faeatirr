@@ -83,7 +83,7 @@
                 <a class="sidebar-item" id="sub-store-staff" onclick="loadUsersPage()">المستخدمين</a>
                 <a class="sidebar-item" id="sub-prod-staff">موظفي الانتاج</a>
                 <a class="sidebar-item" id="sub-branches" onclick="loadBranchesPage()">الفروع</a>
-                <a class="sidebar-item" id="sub-delivery-areas">مناطق التوصيل</a>
+                <a class="sidebar-item" id="sub-delivery-areas" onclick="loadDeliveryAreasPage()">مناطق التوصيل</a>
                 <a class="sidebar-item" id="sub-delivery-prices">أسعار التوصيل</a>
                 <a class="sidebar-item" id="sub-discounts">خصومات</a>
                 <a class="sidebar-item" id="sub-payment-types">انواع الطلب وطرق الدفع</a>
@@ -707,7 +707,7 @@ window.confirmCashierUpdate = function(pin) {
 };
 
 window.loadDeliveryAreasPage = function() {
-    const lang = translations[currentLang];
+    const lang = translations[currentLang]; // جلب الترجمة
     let html = `
         <div class="admin-section">
             <div class="header-flex">
@@ -724,13 +724,18 @@ window.loadDeliveryAreasPage = function() {
                     </tr>
                 </thead>
                 <tbody id="delivery-areas-list">
-                    <tr><td colspan="4">...</td></tr>
+                    <tr><td colspan="4">${currentLang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</td></tr>
                 </tbody>
             </table>
         </div>`;
     document.getElementById('content-area').innerHTML = html;
-    // استدعاء محرك البيانات من الموديول
-    if(window.initDeliveryAreasLogic) window.initDeliveryAreasLogic();
+    
+    // تشغيل محرك البيانات من الموديول
+    if (window.initDeliveryAreasLogic) {
+        window.initDeliveryAreasLogic();
+    } else {
+        setTimeout(() => { if(window.initDeliveryAreasLogic) window.initDeliveryAreasLogic(); }, 500);
+    }
 };
 
 window.openAddAreaModal = function() {
@@ -1044,22 +1049,26 @@ window.openAddAreaModal = function() {
     };
 
 
-    // 1. مراقب مناطق التوصيل
 window.initDeliveryAreasLogic = function() {
+    const lang = translations[currentLang];
     onValue(ref(database, 'delivery_areas'), (snapshot) => {
         const tbody = document.getElementById('delivery-areas-list');
         if (!tbody) return;
         tbody.innerHTML = "";
-        const lang = translations[currentLang];
         const data = snapshot.val();
         
+        if (!data) {
+            tbody.innerHTML = `<tr><td colspan="4">${currentLang === 'ar' ? 'لا توجد مناطق مضافة' : 'No areas added'}</td></tr>`;
+            return;
+        }
+
         for (let id in data) {
             const area = data[id];
             tbody.innerHTML += `
                 <tr>
                     <td>${area.nameAr}</td>
                     <td>${area.nameEn}</td>
-                    <td>${parseFloat(area.price).toFixed(3)}</td>
+                    <td>${parseFloat(area.price).toFixed(3)} KD</td>
                     <td>
                         <button class="btn-main edit-area-btn" data-id="${id}" data-ar="${area.nameAr}" data-en="${area.nameEn}" data-price="${area.price}">${lang.edit}</button>
                         <button class="btn-clear delete-area-btn" data-id="${id}">${lang.delete}</button>
@@ -1069,16 +1078,17 @@ window.initDeliveryAreasLogic = function() {
     });
 };
 
-// 2. وظيفة حفظ المنطقة الجديدة
+// وظيفة حفظ المنطقة في فايربيس
 window.confirmSaveArea = async function() {
     const nameAr = document.getElementById('area-name-ar').value;
     const nameEn = document.getElementById('area-name-en').value;
     const price = document.getElementById('area-price').value;
     
-    if(!nameAr || !price) return alert("يرجى إكمال البيانات");
+    if(!nameAr || !price) return alert(currentLang === 'ar' ? "أكمل البيانات" : "Complete data");
     
     const id = Date.now();
     await set(ref(database, 'delivery_areas/' + id), { nameAr, nameEn, price });
+    alert(translations[currentLang].saveSuccess);
     closeModal();
 };
 

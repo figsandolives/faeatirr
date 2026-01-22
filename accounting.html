@@ -829,7 +829,31 @@ window.openEditCashierModal = function(pin, name) {
             closeModal();
         } catch (e) { alert("خطأ في التحديث: " + e.message); }
     };
+
+window.confirmUserUpdate = function(pin) {
+    const name = document.getElementById('edit-user-name').value;
+    const role = document.getElementById('edit-user-role').value;
     
+    if (!name) return alert("يرجى إدخال الاسم");
+    
+    // استدعاء وظيفة التحديث الموجودة داخل الموديول
+    if (window.updateUserInFirebase) {
+        window.updateUserInFirebase(pin, name, role);
+    }
+};
+
+// 2. وظيفة تأكيد تعديل الكاشير (تجمع الاسم الجديد وترسله لفايربيس)
+window.confirmCashierUpdate = function(pin) {
+    const name = document.getElementById('edit-cashier-name').value;
+    
+    if (!name) return alert("يرجى إدخال الاسم");
+    
+    // استدعاء وظيفة التحديث الموجودة داخل الموديول
+    if (window.updateCashierInFirebase) {
+        window.updateCashierInFirebase(pin, name);
+    }
+};
+
 </script>
 </body>
 </html>

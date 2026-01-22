@@ -575,14 +575,15 @@ window.loadUsersPage = function() {
     if(window.initUsersLogic) window.initUsersLogic();
 };
 
-// نافذة إضافة مستخدم (محاسبة/مخازن) - 4 أرقام
+// 1. نافذة إضافة مستخدم (تم إعادة "أمين صندوق")
 window.openAddUserModal = function() {
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
             <div class="modal-box">
-                <h3>إضافة مستخدم (محاسبة/مخازن)</h3>
+                <h3>إضافة مستخدم جديد</h3>
                 <input type="text" id="user-name-input" placeholder="اسم الموظف">
                 <select id="user-role-select" style="width:100%; padding:10px; margin-top:15px; background:#1a1a2e; color:white;">
+                    <option value="أمين صندوق">أمين صندوق</option>
                     <option value="أمين مخازن">أمين مخازن</option>
                     <option value="مدير">مدير</option>
                 </select>
@@ -600,15 +601,7 @@ window.openAddUserModal = function() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
-// دالة توليد رمز من 4 أرقام للمستخدمين
-window.generateUserPin = function() {
-    const pin = Math.floor(1000 + Math.random() * 9000); 
-    document.getElementById('user-pin-input').value = pin;
-};
-
-
-
-
+// 2. نافذة تعديل مستخدم (تم إصلاحها لتعمل مع المحاسبة)
 window.openEditUserModal = function(pin, currentName, currentRole) {
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
@@ -622,7 +615,7 @@ window.openEditUserModal = function(pin, currentName, currentRole) {
                     <option value="مدير" ${currentRole === 'مدير' ? 'selected' : ''}>مدير</option>
                 </select>
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
-                    <button class="btn-login" onclick="confirmUserUpdate('${pin}')">حفظ</button>
+                    <button class="btn-login" onclick="confirmUserUpdate('${pin}')">حفظ التغييرات</button>
                     <button class="btn-clear" onclick="closeModal()">إلغاء</button>
                 </div>
             </div>
@@ -631,10 +624,10 @@ window.openEditUserModal = function(pin, currentName, currentRole) {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
-window.confirmUserUpdate = function(pin) {
-    const name = document.getElementById('edit-user-name').value;
-    const role = document.getElementById('edit-user-role').value;
-    if (window.updateUserInFirebase) window.updateUserInFirebase(pin, name, role);
+// 3. دالة تأكيد تعديل الكاشير (المبيعات)
+window.confirmCashierUpdate = function(pin) {
+    const newName = document.getElementById('edit-cashier-name').value;
+    if (window.updateCashierInFirebase) window.updateCashierInFirebase(pin, newName);
 };
 
 
@@ -736,19 +729,49 @@ window.confirmUserUpdate = function(pin) {
         closeModal();
     };
 
-    // 5. صيد النقرات العام (لحل مشكلة CSP والتحميل)
+   // محرك صيد النقرات المطور لإصلاح أزرار التعديل والحذف
     document.addEventListener('click', async (e) => {
         const t = e.target;
-        if (t.classList.contains('delete-cashier-btn')) {
-            if (confirm("حذف الكاشير؟")) await set(ref(database, 'cashiers/' + t.dataset.pin), null);
+
+        // تعديل مستخدم (المحاسبة)
+        if (t.closest('.edit-user-btn')) {
+            const btn = t.closest('.edit-user-btn');
+            window.openEditUserModal(btn.dataset.pin, btn.dataset.name, btn.dataset.role);
         }
-        if (t.classList.contains('delete-user-btn')) {
-            if (confirm("حذف المستخدم؟")) await set(ref(database, 'system_users/' + t.dataset.pin), null);
+
+        // تعديل كاشير (المبيعات)
+        if (t.closest('.edit-cashier-btn')) {
+            const btn = t.closest('.edit-cashier-btn');
+            window.openEditCashierModal(btn.dataset.pin, btn.dataset.name);
         }
-        if (t.classList.contains('link-device-btn')) {
-            window.openEditDeviceModal(t.dataset.id, t.dataset.name);
+
+        // حذف كاشير
+        if (t.closest('.delete-cashier-btn')) {
+            const btn = t.closest('.delete-cashier-btn');
+            if (confirm("هل أنت متأكد من حذف هذا الكاشير؟")) await set(ref(database, 'cashiers/' + btn.dataset.pin), null);
         }
-        // ... (بقية أزرار الفروع بنفس النمط)
+
+        // حذف مستخدم
+        if (t.closest('.delete-user-btn')) {
+            const btn = t.closest('.delete-user-btn');
+            if (confirm("هل أنت متأكد من حذف هذا المستخدم؟")) await set(ref(database, 'system_users/' + btn.dataset.pin), null);
+        }
+
+        // ربط جهاز
+        if (t.closest('.link-device-btn')) {
+            const btn = t.closest('.link-device-btn');
+            window.openEditDeviceModal(btn.dataset.id, btn.dataset.name);
+        }
+        
+        // تعديل فرع وحذفه
+        if (t.closest('.edit-branch-btn')) {
+            const btn = t.closest('.edit-branch-btn');
+            window.openEditBranchModal(btn.dataset.id, btn.dataset.ar, btn.dataset.en, btn.dataset.main);
+        }
+        if (t.closest('.delete-branch-btn')) {
+            const btn = t.closest('.delete-branch-btn');
+            if (confirm("حذف الفرع؟")) await set(ref(database, 'branches/' + btn.dataset.id), null);
+        }
     });
 
     // 6. الصلاحيات وفحص الجهاز

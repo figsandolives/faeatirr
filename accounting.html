@@ -575,7 +575,7 @@ window.loadUsersPage = function() {
     if(window.initUsersLogic) window.initUsersLogic();
 };
 
-// 1. نافذة إضافة مستخدم (تم إعادة "أمين صندوق")
+// 1. نافذة إضافة مستخدم (تم إضافة أمين صندوق)
 window.openAddUserModal = function() {
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
@@ -601,7 +601,6 @@ window.openAddUserModal = function() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
-
 // دالة توليد رمز من 4 أرقام للمستخدمين
 
 window.generateUserPin = function() {
@@ -612,22 +611,21 @@ window.generateUserPin = function() {
 
 };
 
-
-// 2. نافذة تعديل مستخدم (تم إصلاحها لتعمل مع المحاسبة)
-window.openEditUserModal = function(pin, currentName, currentRole) {
+// 2. نافذة تعديل مستخدم (أصلحت لتستقبل البيانات)
+window.openEditUserModal = function(pin, name, role) {
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
             <div class="modal-box">
-                <h3>تعديل بيانات المستخدم</h3>
-                <p style="color:#aaa;">رمز الدخول: ${pin}</p>
-                <input type="text" id="edit-user-name" value="${currentName}" placeholder="الاسم">
+                <h3>تعديل مستخدم</h3>
+                <p>الرمز: ${pin}</p>
+                <input type="text" id="edit-user-name" value="${name}">
                 <select id="edit-user-role" style="width:100%; padding:10px; margin-top:10px; background:#1a1a2e; color:white;">
-                    <option value="أمين صندوق" ${currentRole === 'أمين صندوق' ? 'selected' : ''}>أمين صندوق</option>
-                    <option value="أمين مخازن" ${currentRole === 'أمين مخازن' ? 'selected' : ''}>أمين مخازن</option>
-                    <option value="مدير" ${currentRole === 'مدير' ? 'selected' : ''}>مدير</option>
+                    <option value="أمين صندوق" ${role === 'أمين صندوق' ? 'selected' : ''}>أمين صندوق</option>
+                    <option value="أمين مخازن" ${role === 'أمين مخازن' ? 'selected' : ''}>أمين مخازن</option>
+                    <option value="مدير" ${role === 'مدير' ? 'selected' : ''}>مدير</option>
                 </select>
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
-                    <button class="btn-login" onclick="confirmUserUpdate('${pin}')">حفظ التغييرات</button>
+                    <button class="btn-login" onclick="confirmUserUpdate('${pin}')">تعديل</button>
                     <button class="btn-clear" onclick="closeModal()">إلغاء</button>
                 </div>
             </div>
@@ -636,7 +634,7 @@ window.openEditUserModal = function(pin, currentName, currentRole) {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
-
+// 3. نافذة تعديل الكاشير (التي كانت تسبب الخطأ)
 window.openEditCashierModal = function(pin, name) {
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
@@ -652,12 +650,6 @@ window.openEditCashierModal = function(pin, name) {
         </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-};
-
-// 3. دالة تأكيد تعديل الكاشير (المبيعات)
-window.confirmCashierUpdate = function(pin) {
-    const newName = document.getElementById('edit-cashier-name').value;
-    if (window.updateCashierInFirebase) window.updateCashierInFirebase(pin, newName);
 };
 
 
@@ -818,6 +810,26 @@ window.confirmCashierUpdate = function(pin) {
         localStorage.setItem('fawatirr_device_id', deviceID);
         update(ref(database, 'authorized_devices/' + deviceID), { status: 'online', lastSeen: new Date().toLocaleString() });
     }
+
+
+     // دالة التحديث الفعلي للمستخدم في Firebase
+    window.updateUserInFirebase = async function(pin, name, role) {
+        try {
+            await update(ref(database, 'system_users/' + pin), { name, role });
+            alert("✅ تم تحديث بيانات المستخدم بنجاح");
+            closeModal();
+        } catch (e) { alert("خطأ في التحديث: " + e.message); }
+    };
+
+    // دالة التحديث الفعلي للكاشير في Firebase
+    window.updateCashierInFirebase = async function(pin, name) {
+        try {
+            await update(ref(database, 'cashiers/' + pin), { name });
+            alert("✅ تم تحديث بيانات الكاشير بنجاح");
+            closeModal();
+        } catch (e) { alert("خطأ في التحديث: " + e.message); }
+    };
+    
 </script>
 </body>
 </html>

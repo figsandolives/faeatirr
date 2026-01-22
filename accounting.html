@@ -636,6 +636,24 @@ window.openEditUserModal = function(pin, currentName, currentRole) {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
+
+window.openEditCashierModal = function(pin, name) {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>تعديل بيانات الكاشير</h3>
+                <p>الرمز: ${pin}</p>
+                <input type="text" id="edit-cashier-name" value="${name}">
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="confirmCashierUpdate('${pin}')">حفظ</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
 // 3. دالة تأكيد تعديل الكاشير (المبيعات)
 window.confirmCashierUpdate = function(pin) {
     const newName = document.getElementById('edit-cashier-name').value;

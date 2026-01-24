@@ -42,7 +42,7 @@
                 <img src="logo.png" alt="Logo" style="width: 80px;">
             </div>
 
-            <a class="sidebar-item" id="menu-orders" onclick="loadPage('orders')">الطلبات</a>
+            <a href="#" class="sidebar-item" id="menu-orders" onclick="loadPage('orders')"><i class="fas fa-receipt"></i> الطلبات</a>
             <a class="sidebar-item" id="menu-customers" onclick="loadPage('customers')">العملاء</a>
             <a class="sidebar-item" id="menu-products" onclick="loadPage('products')">المنتجات</a>
             <a class="sidebar-item" id="menu-categories" onclick="loadPage('categories')">التصنيفات</a>
@@ -384,15 +384,22 @@ areaName: "المنطقة",
 
         // سيتم برمجة وظيفة تحميل الصفحات حبة حبة
         window.loadPage = function(pageId) {
-    // 1. إزالة التحديد من جميع العناصر
+    // 1. إزالة التحديد من جميع العناصر (للمحافظة على شكل القائمة الجانبية)
     document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
     
-    // 2. إضافة التحديد للعنصر المختار (سواء كان في القائمة الرئيسية أو المنسدلة)
+    // 2. إضافة التحديد للعنصر المختار (ليظهر باللون البنفسجي المختار)
     const activeItem = document.getElementById('menu-' + pageId) || document.getElementById('sub-' + pageId);
     if (activeItem) activeItem.classList.add('active');
 
-    // 3. تحميل محتوى الصفحة (سنبرمج صفحة العملاء الآن)
-    if (pageId === 'customers') loadCustomersPage();
+    // 3. توجيه الأوامر لفتح الصفحات بناءً على الـ ID
+    if (pageId === 'customers') {
+        loadCustomersPage();
+    } 
+    else if (pageId === 'orders') {
+        // تشغيل دالة الطلبات التي برمجناها لمخبز Figs & Olives
+        loadOrdersPage(); 
+    }
+    // يمكنك إضافة باقي الصفحات هنا بنفس الطريقة (مثل الفروع أو المخازن)
 };
 
         // --- كود نظام الدخول والتعرف على الجهاز ---

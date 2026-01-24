@@ -185,7 +185,19 @@
 areaName: "المنطقة",
     customerCount: "عدد الزبائن",
     addArea: "إضافة منطقة جديدة",
-    goToCustomers: "عرض الزبائن"
+    goToCustomers: "عرض الزبائن",
+    delAreasTitle: "إدارة مناطق التوصيل",
+    delPricesTitle: "إدارة أسعار التوصيل",
+    addAreaBtn: "+ إضافة منطقة جديدة",
+    addPriceBtn: "+ إضافة سعر جديد",
+    areaNameAr: "اسم المنطقة (عربي)",
+    areaNameEn: "اسم المنطقة (En)",
+    customerCount: "عدد الزبائن",
+    deliveryPrice: "سعر التوصيل",
+    areaName: "المناطق المشمولة",
+    viewCustomers: "عرض الزبائن",
+    saveArea: "حفظ المنطقة",
+    savePrice: "حفظ السعر"
         
             },
             en: {
@@ -268,7 +280,19 @@ areaName: "المنطقة",
     areaName: "Area",
     customerCount: "Customer Count",
     addArea: "Add New Area",
-    goToCustomers: "View Customers"
+    goToCustomers: "View Customers",
+    delAreasTitle: "Delivery Areas",
+    delPricesTitle: "Delivery Prices",
+    addAreaBtn: "+ Add New Area",
+    addPriceBtn: "+ Add New Price",
+    areaNameAr: "Area Name (Ar)",
+    areaNameEn: "Area Name (En)",
+    customerCount: "Customers",
+    deliveryPrice: "Delivery Fee",
+    areaName: "Included Areas",
+    viewCustomers: "View Customers",
+    saveArea: "Save Area",
+    savePrice: "Save Price"
             }
         };
 
@@ -548,13 +572,12 @@ if (window.listenToBranches) {
 
 window.openAddPriceModal = function() {
     const lang = translations[currentLang];
-    // جلب المناطق لعرضها كخيارات (Checkboxes)
     get(ref(database, 'delivery_areas')).then((snap) => {
         const areas = snap.val() || {};
         let areasCheckboxes = "";
         for (let id in areas) {
             areasCheckboxes += `
-                <label style="display:block; margin:5px 0;">
+                <label style="display:block; margin:5px 0; color:white;">
                     <input type="checkbox" class="area-checkbox" value="${id}"> 
                     ${currentLang === 'ar' ? areas[id].nameAr : areas[id].nameEn}
                 </label>`;
@@ -563,14 +586,14 @@ window.openAddPriceModal = function() {
         let modalHtml = `
             <div id="modal-overlay" class="modal-overlay">
                 <div class="modal-box">
-                    <h3>إضافة سعر توصيل</h3>
-                    <input type="number" id="price-value" placeholder="0.000 KD" step="0.005">
+                    <h3>${lang.addPriceBtn}</h3>
+                    <input type="number" id="price-value" placeholder="0.000" step="0.005">
                     <div style="text-align:right; max-height:200px; overflow-y:auto; margin:15px 0; border:1px solid #444; padding:10px;">
-                        <p>اختر المناطق المشمولة بهذا السعر:</p>
+                        <p style="color:#aaa; margin-bottom:10px;">${currentLang === 'ar' ? 'اختر المناطق المشمولة:' : 'Select included areas:'}</p>
                         ${areasCheckboxes}
                     </div>
-                    <button class="btn-login" onclick="confirmSavePrice()">إضافة السعر</button>
-                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                    <button class="btn-login" onclick="confirmSavePrice()">${lang.savePrice}</button>
+                    <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
                 </div>
             </div>`;
         document.body.insertAdjacentHTML('beforeend', modalHtml);
@@ -831,11 +854,11 @@ window.confirmCashierUpdate = function(pin) {
 };
 
 window.loadDeliveryAreasPage = function() {
-    const lang = translations[currentLang]; // جلب اللغة الحالية
+    const lang = translations[currentLang];
     let html = `
         <div class="admin-section">
             <div class="header-flex">
-                <h3><i class="fas fa-truck"></i> ${lang.delAreasTitle}</h3>
+                <h3><i class="fas fa-map-marker-alt"></i> ${lang.delAreasTitle}</h3>
                 <button class="btn-main" onclick="openAddAreaModal()">${lang.addAreaBtn}</button>
             </div>
             <table class="data-table">
@@ -843,19 +866,15 @@ window.loadDeliveryAreasPage = function() {
                     <tr>
                         <th>${lang.areaNameAr}</th>
                         <th>${lang.areaNameEn}</th>
-                        <th>${lang.deliveryPrice}</th>
+                        <th>${lang.customerCount}</th>
                         <th>${lang.actions}</th>
                     </tr>
                 </thead>
-                <tbody id="delivery-areas-list">
-                    <tr><td colspan="4">${currentLang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</td></tr>
-                </tbody>
+                <tbody id="delivery-areas-list"></tbody>
             </table>
         </div>`;
     document.getElementById('content-area').innerHTML = html;
-    
-    // تشغيل محرك البيانات
-    if (window.initDeliveryAreasLogic) window.initDeliveryAreasLogic();
+    if(window.initDeliveryAreasLogic) window.initDeliveryAreasLogic();
 };
 
 
@@ -875,9 +894,7 @@ window.loadDeliveryPricesPage = function() {
                         <th>${lang.actions}</th>
                     </tr>
                 </thead>
-                <tbody id="delivery-prices-list">
-                    <tr><td colspan="3">${currentLang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</td></tr>
-                </tbody>
+                <tbody id="delivery-prices-list"></tbody>
             </table>
         </div>`;
     document.getElementById('content-area').innerHTML = html;
@@ -919,9 +936,8 @@ window.openAddAreaModal = function() {
                 <h3>${lang.modalAddArea}</h3>
                 <input type="text" id="area-name-ar" placeholder="${lang.areaNameAr}">
                 <input type="text" id="area-name-en" placeholder="${lang.areaNameEn}">
-                <input type="number" id="area-price" placeholder="${lang.deliveryPrice}" step="0.001">
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
-                    <button class="btn-login" onclick="confirmSaveArea()">${lang.saveBtn}</button>
+                    <button class="btn-login" onclick="confirmSaveArea()">${lang.saveArea}</button>
                     <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
                 </div>
             </div>
@@ -1253,27 +1269,22 @@ if (t.closest('.delete-price-btn')) {
 // --- دالة عرض البيانات الموحدة والمترجمة ---
 window.initDeliveryAreasLogic = function() {
     const lang = translations[currentLang];
-    
-    // جلب العملاء أولاً للحساب
     get(ref(database, 'customers')).then((custSnap) => {
         const allCustomers = custSnap.val() || {};
-        
         onValue(ref(database, 'delivery_areas'), (snapshot) => {
             const tbody = document.getElementById('delivery-areas-list');
             if (!tbody) return;
             tbody.innerHTML = "";
             const areas = snapshot.val() || {};
-
             for (let id in areas) {
                 const area = areas[id];
-                // حساب عدد الزبائن المندرجين تحت هذه المنطقة
                 const count = Object.values(allCustomers).filter(c => c.areaId === id).length;
-
                 tbody.innerHTML += `
-                    <tr style="cursor:pointer" onclick="viewAreaCustomers('${id}')">
-                        <td>${currentLang === 'ar' ? area.nameAr : area.nameEn}</td>
+                    <tr>
+                        <td>${area.nameAr}</td>
+                        <td>${area.nameEn}</td>
                         <td style="font-weight:bold; color:#f39c12;">${count}</td>
-                        <td><button class="btn-main">${lang.goToCustomers}</button></td>
+                        <td><button class="btn-main" onclick="viewAreaCustomers('${id}')">${lang.viewCustomers}</button></td>
                     </tr>`;
             }
         });
@@ -1325,37 +1336,26 @@ window.updatePriceInFirebase = async function(id, price, areaIds) {
 
 window.initDeliveryPricesLogic = function() {
     const lang = translations[currentLang];
-    // نحتاج لجلب المناطق أولاً لعرض أسمائها بدلاً من الـ IDs
     get(ref(database, 'delivery_areas')).then((areaSnap) => {
         const areasData = areaSnap.val() || {};
-
         onValue(ref(database, 'delivery_prices'), (snapshot) => {
             const tbody = document.getElementById('delivery-prices-list');
             if (!tbody) return;
             tbody.innerHTML = "";
             const prices = snapshot.val() || {};
-
             for (let id in prices) {
                 const item = prices[id];
-                // تحويل مصفوفة الـ IDs إلى أسماء مناطق مفهومة
                 const areaNames = item.areaIds.map(aId => 
                     areasData[aId] ? (currentLang === 'ar' ? areasData[aId].nameAr : areasData[aId].nameEn) : ''
-                ).join(' - ');
+                ).filter(n => n !== '').join(' - ');
 
                 tbody.innerHTML += `
                     <tr>
                         <td style="font-weight:bold; color:#28a745;">${parseFloat(item.price).toFixed(3)} KD</td>
-                        <td style="font-size:13px; color:#ccc;">${areaNames}</td>
+                        <td style="font-size:12px; color:#aaa;">${areaNames}</td>
                         <td>
-                            <button class="btn-main edit-price-btn" 
-                                    data-id="${id}" 
-                                    data-price="${item.price}" 
-                                    data-areas='${JSON.stringify(item.areaIds)}'>
-                                ${lang.edit}
-                            </button>
-                            <button class="btn-clear delete-price-btn" data-id="${id}">
-                                ${lang.delete}
-                            </button>
+                            <button class="btn-main edit-price-btn" data-id="${id}" data-price="${item.price}" data-areas='${JSON.stringify(item.areaIds)}'>${lang.edit}</button>
+                            <button class="btn-clear delete-price-btn" data-id="${id}">${lang.delete}</button>
                         </td>
                     </tr>`;
             }

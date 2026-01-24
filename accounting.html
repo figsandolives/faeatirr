@@ -404,6 +404,9 @@ areaName: "المنطقة",
         // تذكر: تم نقل الكاشير لملف مستقل، تأكد من استدعائه بشكل صحيح
         loadCashierMain(); 
     }
+    else if (pageId === 'units') {
+    loadUnitsPage();
+}
 };
 
         // --- كود نظام الدخول والتعرف على الجهاز ---
@@ -1607,6 +1610,124 @@ window.updateImportProgress = function(current, total) {
     }
 };
 
+// 1. دالة جلب الوحدات المضافة مسبقاً لوضعها في قائمة المنتج
+window.populateUnitsDropdown = function() {
+    const select = document.getElementById('p-unit-select');
+    if (!select) return;
+    
+    // جلب البيانات من مصفوفة الوحدات العالمية التي سنعرفها في الموديول
+    if (window.availableUnits) {
+        select.innerHTML = '<option value="">-- اختر الوحدة --</option>';
+        for (let id in window.availableUnits) {
+            const unit = window.availableUnits[id];
+            select.innerHTML += `<option value="${unit.nameAr}">${unit.nameAr}</option>`;
+        }
+    } else {
+        select.innerHTML = '<option>لا توجد وحدات مضافة</option>';
+    }
+};
+
+// 2. دالة حفظ المنتج الجديد
+window.saveNewProduct = function() {
+    const nameAr = document.getElementById('p-name-ar').value;
+    const nameEn = document.getElementById('p-name-en').value;
+    const cost = document.getElementById('p-cost').value;
+    const price = document.getElementById('p-price').value;
+    const unit = document.getElementById('p-unit-select').value;
+    const reorder = document.getElementById('p-reorder').value;
+    let barcode = document.getElementById('p-barcode').value;
+
+    // التحقق من البيانات الأساسية
+    if (!nameAr || !price || !unit) {
+        alert("يرجى إكمال الحقول الأساسية: الاسم، سعر البيع، والوحدة");
+        return;
+    }
+
+    // توليد باركود آلي إذا كان الحقل فارغاً
+    if (!barcode) {
+        barcode = "FIGS" + Date.now().toString().slice(-8);
+    }
+
+    const productData = {
+        nameAr,
+        nameEn,
+        cost: parseFloat(cost) || 0,
+        price: parseFloat(price) || 0,
+        unit,
+        reorderPoint: parseFloat(reorder) || 5,
+        barcode,
+        stock: 0, // يبدأ بـ 0 ويتم تحديثه من خلال "حركات المخزون" أو الاستيراد
+        salesCount: 0,
+        createdAt: new Date().toISOString()
+    };
+
+    // إرسال البيانات للمحرك في الموديول
+    if (window.addProductToFirebase) {
+        window.addProductToFirebase(productData);
+    }
+};
+
+// 1. دالة بناء صفحة الوحدات
+window.loadUnitsPage = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-balance-scale"></i> إدارة الوحدات</h3>
+                <button class="btn-main" onclick="openAddUnitModal()">+ وحدة جديدة</button>
+            </div>
+            <div class="info-card" style="margin-top:10px;">
+                <i class="fas fa-info-circle"></i> اضغط على اسم الوحدة لعرض كافة المنتجات المرتبطة بها.
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>الاسم العربي</th>
+                        <th>الاسم الإنجليزي</th>
+                        <th>عدد المنتجات المرتبطة</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="units-list-body">
+                    </tbody>
+            </table>
+        </div>`;
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initUnitsLogic) window.initUnitsLogic();
+};
+
+// 2. دالة فتح نافذة إضافة وحدة جديدة
+window.openAddUnitModal = function() {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>إضافة وحدة قياس جديدة</h3>
+                <input type="text" id="u-name-ar" placeholder="الاسم العربي (مثل: حبة، كيلو، كرتون)">
+                <input type="text" id="u-name-en" placeholder="English Name (e.g., Piece, KG, Box)">
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveNewUnit()">إضافة الوحدة</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+// 3. دالة جمع البيانات وإرسالها للموديول
+window.saveNewUnit = function() {
+    const nameAr = document.getElementById('u-name-ar').value;
+    const nameEn = document.getElementById('u-name-en').value;
+
+    if (!nameAr || !nameEn) {
+        alert("يرجى إدخال الاسمين العربي والإنجليزي للوحدة");
+        return;
+    }
+
+    if (window.addUnitToFirebase) {
+        window.addUnitToFirebase({ nameAr, nameEn });
+    }
+};
+
     </script>
 
     <script type="module">
@@ -2550,6 +2671,110 @@ window.handleBulkProductImport = async function(event) {
         }
     };
     reader.readAsArrayBuffer(file);
+};
+
+// 1. مراقب الوحدات لضمان جاهزيتها للقائمة المنسدلة
+onValue(ref(database, 'units'), (snapshot) => {
+    window.availableUnits = snapshot.val();
+});
+
+// 2. دالة الإضافة الفعلية في Firebase
+window.addProductToFirebase = async function(data) {
+    const productId = Date.now();
+    try {
+        // حفظ بيانات المنتج الأساسية
+        await set(ref(database, 'products/' + productId), { ...data, id: productId });
+        
+        // إنشاء سجل مخزون أولي في الفرع الرئيسي
+        await set(ref(database, 'inventory/main_branch/' + productId), 0);
+        
+        alert("✅ تم إضافة المنتج بنجاح");
+        closeModal(); // إغلاق النافذة
+    } catch (e) {
+        alert("خطأ أثناء الحفظ: " + e.message);
+    }
+};
+
+// 3. دالة الفلترة حسب المبيعات (الأعلى مبيعاً)
+window.filterProductsTable = function() {
+    const sortBy = document.getElementById('sort-product-sales').value;
+    get(ref(database, 'products')).then(snap => {
+        let products = Object.values(snap.val() || {});
+        
+        if (sortBy === 'high') products.sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0));
+        if (sortBy === 'low') products.sort((a, b) => (a.salesCount || 0) - (b.salesCount || 0));
+        
+        // إعادة رسم الجدول بالبيانات المرتبة
+        renderProductsTable(products);
+    });
+};
+
+
+
+// 1. محرك عرض الوحدات ومراقبة التغييرات
+window.initUnitsLogic = function() {
+    // جلب المنتجات أولاً لحساب عدد المرات التي استُخدمت فيها الوحدة
+    get(ref(database, 'products')).then((prodSnap) => {
+        const allProducts = prodSnap.val() || {};
+
+        onValue(ref(database, 'units'), (snapshot) => {
+            const tbody = document.getElementById('units-list-body');
+            if (!tbody) return;
+            tbody.innerHTML = "";
+            const data = snapshot.val() || {};
+
+            for (let id in data) {
+                const u = data[id];
+                // حساب عدد المنتجات التي تستخدم هذه الوحدة
+                const count = Object.values(allProducts).filter(p => p.unit === u.nameAr).length;
+
+                tbody.innerHTML += `
+                    <tr>
+                        <td onclick="window.viewUnitProducts('${u.nameAr}')" style="cursor:pointer; color:var(--gold-accent); font-weight:bold;">
+                            ${u.nameAr} <i class="fas fa-external-link-alt" style="font-size:10px;"></i>
+                        </td>
+                        <td>${u.nameEn}</td>
+                        <td><span class="rank-badge" style="background:#444;">${count} منتج</span></td>
+                        <td>
+                            <button class="btn-clear" style="padding:5px 10px;" onclick="window.deleteUnit('${id}')">حذف</button>
+                        </td>
+                    </tr>`;
+            }
+        });
+    });
+};
+
+// 2. دالة حفظ الوحدة في Firebase
+window.addUnitToFirebase = async function(unitData) {
+    const id = Date.now();
+    try {
+        await set(ref(database, 'units/' + id), unitData);
+        alert("✅ تم إضافة الوحدة بنجاح");
+        closeModal();
+    } catch (e) {
+        alert("خطأ: " + e.message);
+    }
+};
+
+// 3. دالة عرض المنتجات المرتبطة بوحدة محددة (تظهر في مودال)
+window.viewUnitProducts = async function(unitName) {
+    const snap = await get(ref(database, 'products'));
+    const products = snap.val() || {};
+    const filtered = Object.values(products).filter(p => p.unit === unitName);
+
+    let listHtml = filtered.length > 0 
+        ? filtered.map(p => `<li>${p.nameAr} (${p.price} د.ك)</li>`).join('')
+        : "<li>لا توجد منتجات مرتبطة بهذه الوحدة حالياً</li>";
+
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>منتجات وحدة: ${unitName}</h3>
+                <ul style="text-align:right; margin-top:15px; color:#fff;">${listHtml}</ul>
+                <button class="btn-main" style="margin-top:20px;" onclick="closeModal()">إغلاق</button>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
 </script>

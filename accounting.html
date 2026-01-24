@@ -6,6 +6,7 @@
     <title id="tab-title">المحاسبة والمخازن</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body class="rtl" id="body-tag">
 
@@ -197,7 +198,12 @@ areaName: "المنطقة",
     areaName: "المناطق المشمولة",
     viewCustomers: "عرض الزبائن",
     saveArea: "حفظ المنطقة",
-    savePrice: "حفظ السعر"
+    savePrice: "حفظ السعر",
+    importBtn: "استيراد من إكسل",
+    downloadTemplate: "تحميل النموذج",
+    searchArea: "ابحث عن اسم المنطقة...",
+    importProgress: "تم إضافة {count} من {total} منطقة",
+    duplicateSkip: "تم تخطي المناطق الموجودة مسبقاً"
         
             },
             en: {
@@ -292,7 +298,12 @@ areaName: "المنطقة",
     areaName: "Included Areas",
     viewCustomers: "View Customers",
     saveArea: "Save Area",
-    savePrice: "Save Price"
+    savePrice: "Save Price",
+    importBtn: "Import from Excel",
+    downloadTemplate: "Download Template",
+    searchArea: "Search for area name...",
+    importProgress: "Added {count} of {total} areas",
+    duplicateSkip: "Pre-existing areas were skipped"
             }
         };
 
@@ -572,32 +583,64 @@ if (window.listenToBranches) {
 
 window.openAddPriceModal = function() {
     const lang = translations[currentLang];
+    
+    // جلب المناطق من قاعدة البيانات لبناء القائمة
     get(ref(database, 'delivery_areas')).then((snap) => {
         const areas = snap.val() || {};
         let areasCheckboxes = "";
+        
         for (let id in areas) {
-    areasCheckboxes += `
-        <label style="display:flex; align-items:center; gap:12px; padding:10px; margin-bottom:8px; background:rgba(255,255,255,0.05); border-radius:5px; cursor:pointer; direction:rtl;">
-            <input type="checkbox" class="area-checkbox" value="${id}" style="width:18px; height:18px; accent-color:#f39c12;"> 
-            <span style="color:white; font-size:14px;">${currentLang === 'ar' ? areas[id].nameAr : areas[id].nameEn}</span>
-        </label>`;
-}
+            // تنسيق احترافي لكل خيار منطقة مع Flexbox
+            areasCheckboxes += `
+                <label style="display:flex; align-items:center; gap:12px; padding:10px; margin-bottom:8px; background:rgba(255,255,255,0.05); border-radius:5px; cursor:pointer; direction:rtl;">
+                    <input type="checkbox" class="area-checkbox" value="${id}" style="width:18px; height:18px; accent-color:#f39c12;"> 
+                    <span style="color:white; font-size:14px;">${currentLang === 'ar' ? areas[id].nameAr : areas[id].nameEn}</span>
+                </label>`;
+        }
 
         let modalHtml = `
             <div id="modal-overlay" class="modal-overlay">
                 <div class="modal-box">
                     <h3>${lang.addPriceBtn}</h3>
-                    <input type="number" id="price-value" placeholder="0.000" step="0.005">
-                    <div style="text-align:right; max-height:200px; overflow-y:auto; margin:15px 0; border:1px solid #444; padding:10px;">
-                        <p style="color:#aaa; margin-bottom:10px;">${currentLang === 'ar' ? 'اختر المناطق المشمولة:' : 'Select included areas:'}</p>
+                    
+                    <input type="number" id="price-value" placeholder="0.000" step="0.005" style="margin-bottom:15px;">
+                    
+                    <div style="margin-bottom:10px;">
+                        <input type="text" id="area-search" oninput="filterAreasInModal()" 
+                               placeholder="${lang.searchArea || 'ابحث عن المنطقة...'}" 
+                               style="width:100%; padding:10px; background:#0f0f1e; border:1px solid #444; color:white; border-radius:5px; outline:none;">
+                    </div>
+
+                    <div id="areas-container" style="text-align:right; max-height:200px; overflow-y:auto; margin:15px 0; border:1px solid #444; padding:10px; background: #16213e; border-radius:5px;">
+                        <p style="color:#aaa; margin-bottom:10px; font-size:13px;">${currentLang === 'ar' ? 'اختر المناطق المشمولة:' : 'Select included areas:'}</p>
                         ${areasCheckboxes}
                     </div>
-                    <button class="btn-login" onclick="confirmSavePrice()">${lang.savePrice}</button>
-                    <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
+
+                    <div style="margin-top:20px; display:flex; justify-content: space-around; gap:10px;">
+                        <button class="btn-login" onclick="confirmSavePrice()">${lang.savePrice}</button>
+                        <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
+                    </div>
                 </div>
             </div>`;
         document.body.insertAdjacentHTML('beforeend', modalHtml);
     });
+};
+
+// لا تنسَ إضافة دالة الفلترة هذه أيضاً في السكربت العادي لكي يعمل البحث
+window.filterAreasInModal = function() {
+    const searchValue = document.getElementById('area-search').value.toLowerCase();
+    const container = document.getElementById('areas-container');
+    const labels = container.getElementsByTagName('label');
+
+    for (let label of labels) {
+        const areaName = label.innerText.toLowerCase();
+        // إظهار أو إخفاء المنطقة بناءً على نص البحث
+        if (areaName.includes(searchValue)) {
+            label.style.display = "flex";
+        } else {
+            label.style.display = "none";
+        }
+    }
 };
 
 window.confirmSavePrice = async function() {
@@ -867,18 +910,21 @@ window.loadDeliveryAreasPage = function() {
     const lang = translations[currentLang];
     let html = `
         <div class="admin-section">
-            <div class="header-flex">
+            <div class="header-flex" style="gap:10px;">
                 <h3><i class="fas fa-map-marker-alt"></i> ${lang.delAreasTitle}</h3>
-                <button class="btn-main" onclick="openAddAreaModal()">${lang.addAreaBtn}</button>
+                <div>
+                    <button class="btn-main" onclick="openAddAreaModal()">${lang.addAreaBtn}</button>
+                    <button class="btn-main" style="background:#27ae60;" onclick="triggerExcelUpload()">
+                        <i class="fas fa-file-excel"></i> ${lang.importBtn}
+                    </button>
+                    <button class="btn-clear" onclick="downloadExcelTemplate()" style="font-size:12px;">${lang.downloadTemplate}</button>
+                    <input type="file" id="excel-upload" style="display:none" accept=".xlsx, .xls" onchange="handleExcelImport(event)">
+                </div>
             </div>
+            <div id="import-status" style="margin:10px 0; color:#f39c12; font-weight:bold;"></div>
             <table class="data-table">
                 <thead>
-                    <tr>
-                        <th>${lang.areaNameAr}</th>
-                        <th>${lang.areaNameEn}</th>
-                        <th>${lang.customerCount}</th>
-                        <th>${lang.actions}</th>
-                    </tr>
+                    <tr><th>${lang.areaNameAr}</th><th>${lang.areaNameEn}</th><th>${lang.customerCount}</th><th>${lang.actions}</th></tr>
                 </thead>
                 <tbody id="delivery-areas-list"></tbody>
             </table>
@@ -954,6 +1000,8 @@ window.openAddAreaModal = function() {
         </div>`;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
+
+
 
     </script>
 
@@ -1393,6 +1441,52 @@ window.initDeliveryPricesLogic = function() {
             }
         });
     });
+};
+
+window.triggerExcelUpload = () => document.getElementById('excel-upload').click();
+
+window.handleExcelImport = async function(event) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+    const statusDiv = document.getElementById('import-status');
+    const lang = translations[currentLang];
+
+    reader.onload = async (e) => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet);
+
+        // جلب المناطق الحالية للفحص
+        const existingSnap = await get(ref(database, 'delivery_areas'));
+        const existingAreas = existingSnap.val() || {};
+        const existingNames = Object.values(existingAreas).map(a => a.nameAr.trim());
+
+        let addedCount = 0;
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const nameAr = row['الاسم بالعربي'] || row['Name Ar'];
+            const nameEn = row['الاسم بالانجليزي'] || row['Name En'];
+
+            if (nameAr && !existingNames.includes(nameAr.trim())) {
+                const id = Date.now() + i;
+                await set(ref(database, 'delivery_areas/' + id), { nameAr, nameEn });
+                addedCount++;
+            }
+            statusDiv.innerText = lang.importProgress.replace('{count}', i + 1).replace('{total}', rows.length);
+        }
+        alert(lang.saveSuccess + " - " + lang.duplicateSkip);
+        statusDiv.innerText = "";
+    };
+    reader.readAsArrayBuffer(file);
+};
+
+window.downloadExcelTemplate = function() {
+    const data = [["الاسم بالعربي", "الاسم بالانجليزي"]];
+    const worksheet = XLSX.utils.aoa_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Template");
+    XLSX.utils.writeFile(workbook, "Delivery_Areas_Template.xlsx");
 };
 
 </script>

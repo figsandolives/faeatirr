@@ -353,3 +353,12 @@ body.ltr { direction: ltr; }
 
 .status-online { color: #28a745; font-weight: bold; }
 .status-offline { color: #888; }
+
+
+/* تمييز القسم النشط */
+.sidebar-item.active {
+    background: var(--gold-accent) !important;
+    color: white !important;
+    border-inline-start: 4px solid white;
+    font-weight: bold;
+}

@@ -576,12 +576,12 @@ window.openAddPriceModal = function() {
         const areas = snap.val() || {};
         let areasCheckboxes = "";
         for (let id in areas) {
-            areasCheckboxes += `
-                <label style="display:block; margin:5px 0; color:white;">
-                    <input type="checkbox" class="area-checkbox" value="${id}"> 
-                    ${currentLang === 'ar' ? areas[id].nameAr : areas[id].nameEn}
-                </label>`;
-        }
+    areasCheckboxes += `
+        <label style="display:flex; align-items:center; gap:12px; padding:10px; margin-bottom:8px; background:rgba(255,255,255,0.05); border-radius:5px; cursor:pointer; direction:rtl;">
+            <input type="checkbox" class="area-checkbox" value="${id}" style="width:18px; height:18px; accent-color:#f39c12;"> 
+            <span style="color:white; font-size:14px;">${currentLang === 'ar' ? areas[id].nameAr : areas[id].nameEn}</span>
+        </label>`;
+}
 
         let modalHtml = `
             <div id="modal-overlay" class="modal-overlay">
@@ -601,18 +601,28 @@ window.openAddPriceModal = function() {
 };
 
 window.confirmSavePrice = async function() {
-    const price = document.getElementById('price-value').value;
+    const priceInput = document.getElementById('price-value');
+    const price = priceInput.value;
     const selectedCheckboxes = document.querySelectorAll('.area-checkbox:checked');
     const areaIds = Array.from(selectedCheckboxes).map(cb => cb.value);
 
-    if (!price || areaIds.length === 0) return alert("يرجى إدخال السعر واختيار منطقة واحدة على الأقل");
+    if (!price || areaIds.length === 0) {
+        alert(currentLang === 'ar' ? "يرجى إدخال السعر واختيار منطقة واحدة على الأقل" : "Please enter price and select at least one area");
+        return;
+    }
 
     const priceId = Date.now();
-    await set(ref(database, 'delivery_prices/' + priceId), {
-        price: price,
-        areaIds: areaIds // مصفوفة الـ IDs للمناطق المشمولة
-    });
-    closeModal();
+    try {
+        // نستخدم window.set التي جعلناها عالمية
+        await set(ref(database, 'delivery_prices/' + priceId), {
+            price: price,
+            areaIds: areaIds
+        });
+        alert(translations[currentLang].saveSuccess);
+        closeModal();
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
 };
 
 window.openEditPriceModal = function(id, currentPrice, currentAreaIds) {
@@ -949,9 +959,11 @@ window.openAddAreaModal = function() {
 
     <script type="module">
     import { database, ref, onValue, set, get, update } from './firebase-config.js?v=2';
-window.get = get;
+window.set = set;
 window.ref = ref;
 window.database = database;
+window.get = get;
+window.update = update;
 
     // 1. مراقب الفروع العام (يعمل فوراً لضمان جاهزية قائمة الربط)
     onValue(ref(database, 'branches'), (snapshot) => {

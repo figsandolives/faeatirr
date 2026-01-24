@@ -1482,11 +1482,20 @@ window.handleExcelImport = async function(event) {
 };
 
 window.downloadExcelTemplate = function() {
+    // 1. تجهيز البيانات (رؤوس الأعمدة)
     const data = [["الاسم بالعربي", "الاسم بالانجليزي"]];
+    
+    // 2. تحويل البيانات إلى "شيت" (Worksheet)
     const worksheet = XLSX.utils.aoa_to_sheet(data);
+    
+    // 3. إنشاء كتاب عمل جديد (Workbook)
     const workbook = XLSX.utils.book_new();
+    
+    // 4. إضافة الشيت إلى كتاب العمل
     XLSX.utils.book_append_sheet(workbook, worksheet, "Template");
-    XLSX.utils.writeFile(workbook, "Delivery_Areas_Template.xlsx");
+    
+    // 5. الأمر الصحيح لتحميل الملف (بدون كلمة utils)
+    XLSX.writeFile(workbook, "Delivery_Areas_Template.xlsx");
 };
 
 </script>

@@ -363,9 +363,17 @@ areaName: "المنطقة",
         };
 
         // سيتم برمجة وظيفة تحميل الصفحات حبة حبة
-        window.loadPage = function(page) {
-            console.log("جاري تحميل صفحة: " + page);
-        };
+        window.loadPage = function(pageId) {
+    // 1. إزالة التحديد من جميع العناصر
+    document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+    
+    // 2. إضافة التحديد للعنصر المختار (سواء كان في القائمة الرئيسية أو المنسدلة)
+    const activeItem = document.getElementById('menu-' + pageId) || document.getElementById('sub-' + pageId);
+    if (activeItem) activeItem.classList.add('active');
+
+    // 3. تحميل محتوى الصفحة (سنبرمج صفحة العملاء الآن)
+    if (pageId === 'customers') loadCustomersPage();
+};
 
         // --- كود نظام الدخول والتعرف على الجهاز ---
     let pinCode = "";
@@ -1026,6 +1034,102 @@ window.openAddAreaModal = function() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
+window.loadCustomersPage = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3><i class="fas fa-users"></i> ${lang.customers}</h3>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn-main" style="background:#27ae60;" onclick="exportCustomersToExcel()">
+                        <i class="fas fa-file-download"></i> تحميل التقرير (Excel)
+                    </button>
+                </div>
+            </div>
+            
+            <div style="margin:20px 0; display:flex; gap:10px;">
+                <button class="btn-main" onclick="filterCustomers('all')">الكل</button>
+                <button class="btn-main" style="background:#ffd700; color:#000;" onclick="filterCustomers('vvip')">VVIP ★</button>
+                <button class="btn-main" style="background:#c0c0c0; color:#000;" onclick="filterCustomers('vip')">VIP</button>
+                <button class="btn-main" style="background:#e94560;" onclick="filterCustomers('blocked')">الموقوفين</button>
+            </div>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="select-all-cust" onclick="toggleSelectAllCustomers(this)"></th>
+                        <th>الزبون / الهاتف</th>
+                        <th>التصنيف</th>
+                        <th>الإحصائيات</th>
+                        <th>آخر طلب</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="customers-list-body"></tbody>
+            </table>
+        </div>`;
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initCustomersLogic) window.initCustomersLogic();
+};
+
+window.openBlockModal = function(id, name) {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>إيقاف العميل: ${name}</h3>
+                <textarea id="block-reason" placeholder="اكتب سبب الإيقاف هنا..." style="width:100%; height:80px; background:#1a1a2e; color:white; border:1px solid #e94560; border-radius:8px; padding:10px;"></textarea>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-clear" onclick="confirmBlockCustomer('${id}')">تأكيد الإيقاف</button>
+                    <button class="btn-main" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.exportCustomersToExcel = function() {
+    const lang = translations[currentLang];
+    
+    // 1. جلب جميع الصفوف التي تم تحديدها (Checkboxes)
+    const selectedCheckboxes = document.querySelectorAll('.cust-checkbox:checked');
+    
+    if (selectedCheckboxes.length === 0) {
+        alert(currentLang === 'ar' ? "يرجى تحديد عميل واحد على الأقل" : "Please select at least one customer");
+        return;
+    }
+
+    // 2. تجهيز رأس الجدول (Headers)
+    const data = [
+        ["الاسم", "رقم الهاتف", "التصنيف", "عدد الطلبات", "متوسط الفاتورة", "آخر ظهور"]
+    ];
+
+    // 3. استخراج البيانات من الصفوف المختارة
+    selectedCheckboxes.forEach(cb => {
+        const row = cb.closest('tr');
+        const name = row.querySelector('td:nth-child(2) div:first-child').innerText;
+        const phone = row.querySelector('td:nth-child(2) div:last-child').innerText;
+        const rank = row.querySelector('.rank-badge').innerText;
+        const stats = row.querySelector('td:nth-child(4)').innerText.replace(/\n/g, ' ');
+        const lastOrder = row.querySelector('td:nth-child(5)').innerText;
+
+        data.push([name, phone, rank, stats, "", lastOrder]);
+    });
+
+    // 4. تحويل البيانات إلى ملف إكسل باستخدام مكتبة XLSX
+    const worksheet = XLSX.utils.aoa_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Customers Report");
+
+    // 5. تحميل الملف باسم المخبز
+    XLSX.writeFile(workbook, `Figs_Olives_Customers_${Date.now()}.xlsx`);
+};
+
+
+window.toggleSelectAllCustomers = function(source) {
+    const checkboxes = document.querySelectorAll('.cust-checkbox');
+    checkboxes.forEach(cb => cb.checked = source.checked);
+};
+
 
 
     </script>
@@ -1567,6 +1671,85 @@ window.downloadExcelTemplate = function() {
     
     // 5. الأمر الصحيح لتحميل الملف (بدون كلمة utils)
     XLSX.writeFile(workbook, "Delivery_Areas_Template.xlsx");
+};
+
+window.initCustomersLogic = async function() {
+    const ordersSnap = await get(ref(database, 'orders'));
+    const allOrders = ordersSnap.val() || {};
+    
+    onValue(ref(database, 'customers'), (snapshot) => {
+        const tbody = document.getElementById('customers-list-body');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const customers = snapshot.val() || {};
+
+        for (let id in customers) {
+            const cust = customers[id];
+            const custOrders = Object.values(allOrders).filter(o => o.phone === cust.phone);
+            
+            // حساب الإحصائيات
+            const orderCount = custOrders.length;
+            const totalSpent = custOrders.reduce((sum, o) => sum + parseFloat(o.total), 0);
+            const avgBill = orderCount > 0 ? (totalSpent / orderCount) : 0;
+            
+            // حساب متوسط الأيام (بين أول وآخر طلب)
+            let avgDays = 0;
+            if (orderCount > 1) {
+                const dates = custOrders.map(o => new Date(o.date).getTime()).sort();
+                const diffTime = dates[dates.length-1] - dates[0];
+                avgDays = (diffTime / (1000 * 60 * 60 * 24)) / (orderCount - 1);
+            }
+
+            // تصنيف العميل
+            let rank = "عادي";
+            let rankClass = "";
+            if (avgBill >= 20 && avgDays <= 3 && orderCount > 1) { rank = "VVIP ★"; rankClass = "vvip-tag"; }
+            else if (avgBill >= 10 && avgDays <= 7 && orderCount > 1) { rank = "VIP"; rankClass = "vip-tag"; }
+            
+            if (cust.status === 'blocked') { rank = "موقوف ⛔"; rankClass = "blocked-tag"; }
+
+            tbody.innerHTML += `
+                <tr class="cust-row" data-rank="${rank.toLowerCase()}">
+                    <td><input type="checkbox" class="cust-checkbox" data-id="${id}"></td>
+                    <td onclick="viewCustomerOrders('${cust.phone}')" style="cursor:pointer">
+                        <div style="font-weight:bold">${cust.name}</div>
+                        <div style="font-size:12px; color:#aaa">${cust.phone}</div>
+                    </td>
+                    <td><span class="rank-badge ${rankClass}">${rank}</span></td>
+                    <td style="font-size:12px; text-align:right">
+                        عدد: ${orderCount} | متوسط: ${avgBill.toFixed(2)} د.ك<br>
+                        كل: ${avgDays.toFixed(1)} يوم
+                    </td>
+                    <td>${custOrders.length > 0 ? custOrders[custOrders.length-1].date : '-'}</td>
+                    <td>
+                        <button class="btn-clear" onclick="openBlockModal('${id}', '${cust.name}')">إيقاف</button>
+                    </td>
+                </tr>`;
+        }
+    });
+};
+
+window.checkCustomerStatus = async function(phone) {
+    if (!phone) return true; // إذا لم يتم إدخال رقم، أكمل بشكل عادي
+
+    try {
+        const snap = await get(ref(database, 'customers'));
+        const customers = snap.val() || {};
+        
+        // البحث عن الزبون بواسطة رقم الهاتف
+        const found = Object.values(customers).find(c => c.phone === phone);
+        
+        if (found && found.status === 'blocked') {
+            // تنبيه الكاشير في مخبز Figs & Olives
+            alert(`⚠️ تحذير هام: هذا الزبون موقوف!\nالسبب: ${found.blockReason || 'لم يذكر سبب'}`);
+            return false; // العميل موقوف
+        }
+        
+        return true; // العميل سليم أو غير موجود مسبقاً
+    } catch (e) {
+        console.error("خطأ أثناء فحص حالة الزبون:", e);
+        return true; 
+    }
 };
 
 </script>

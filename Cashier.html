@@ -197,14 +197,45 @@ window.updateBasketUI = function() {
         
         // فحص تفعيل الجهاز فور التحميل
         async function initDevice() {
-            const deviceId = localStorage.getItem('figs_pos_id');
-            const snap = await get(ref(database, 'authorized_devices/' + deviceId));
-            if (!snap.exists() || !snap.val().active) {
-                document.body.innerHTML = "<h1>هذا الجهاز غير مفعل</h1>";
-                return;
-            }
-            document.getElementById('branch-display').innerText = snap.val().branchName;
-        }
+    // 1. الحصول على الهوية الموحدة
+    let deviceId = localStorage.getItem('figs_pos_id');
+    if (!deviceId) {
+        deviceId = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+        localStorage.setItem('figs_pos_id', deviceId);
+    }
+
+    const deviceRef = ref(database, 'authorized_devices/' + deviceId);
+    const snap = await get(deviceRef);
+
+    // 2. إذا كان الجهاز غير مسجل نهائياً، يسجل نفسه كـ "غير مفعل"
+    if (!snap.exists()) {
+        await set(deviceRef, {
+            id: deviceId,
+            active: false,
+            branchName: "غير محدد",
+            status: "online",
+            lastSeen: new Date().toLocaleString()
+        });
+    }
+
+    // 3. فحص التفعيل
+    const data = snap.exists() ? snap.val() : { active: false };
+    if (!data.active) {
+        document.body.innerHTML = `
+            <div class="lock-screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background:#1a1a2e; color:#fff; text-align:center;">
+                <i class="fas fa-lock" style="font-size:4rem; color:#e94560; margin-bottom:20px;"></i>
+                <h2>هذا الجهاز غير مفعل</h2>
+                <p>يرجى تزويد الإدارة بالرمز التالي لتفعيل الجهاز:</p>
+                <h1 style="background:#0f3460; padding:10px 20px; border-radius:10px;">${deviceId}</h1>
+                <button onclick="location.reload()" class="btn-main" style="margin-top:20px;">تحديث الصفحة بعد الربط</button>
+            </div>`;
+        return;
+    }
+
+    document.getElementById('branch-display').innerText = data.branchName;
+    window.currentBranchId = data.branchId;
+}
+
         initDevice();
 
         // دالة التحقق من الكاشير

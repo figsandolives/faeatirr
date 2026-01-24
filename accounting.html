@@ -1727,6 +1727,19 @@ window.saveNewUnit = function() {
     }
 };
 
+// أضف هذه الدالة داخل السكربت الأول لكي تعمل القوائم الجانبية
+window.toggleDropdown = function(id) {
+    const dropdown = document.getElementById(id);
+    if (dropdown) {
+        dropdown.classList.toggle('show');
+        
+        // إغلاق باقي القوائم المفتوحة ليكون الشكل أرتب (اختياري)
+        document.querySelectorAll('.dropdown-container').forEach(el => {
+            if (el.id !== id) el.classList.remove('show');
+        });
+    }
+};
+
     </script>
 
     <script type="module">

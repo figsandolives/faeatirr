@@ -1001,8 +1001,11 @@ window.openEditAreaModal = function(id, nameAr, nameEn) {
 window.confirmAreaUpdate = function(id) {
     const nameAr = document.getElementById('edit-area-ar').value;
     const nameEn = document.getElementById('edit-area-en').value;
-    const price = document.getElementById('edit-area-price').value;
-    if (window.updateAreaInFirebase) window.updateAreaInFirebase(id, nameAr, nameEn, price);
+
+    // تأكد من أننا نرسل الاسمين فقط للموديول
+    if (window.updateAreaInFirebase) {
+        window.updateAreaInFirebase(id, nameAr, nameEn);
+    }
 };
 
 
@@ -1443,12 +1446,20 @@ window.confirmSaveArea = async function() {
 };
 
 
-window.updateAreaInFirebase = async function(id, nameAr, nameEn, price) {
+window.updateAreaInFirebase = async function(id, nameAr, nameEn) {
     try {
-        await update(ref(database, 'delivery_areas/' + id), { nameAr, nameEn, price });
+        // تحديث الاسم العربي والإنجليزي فقط في قاعدة البيانات
+        await update(ref(database, 'delivery_areas/' + id), { 
+            nameAr: nameAr, 
+            nameEn: nameEn 
+        });
+        
         alert(translations[currentLang].saveSuccess);
         closeModal();
-    } catch (e) { alert("Error: " + e.message); }
+    } catch (e) {
+        console.error("Error updating area:", e);
+        alert("Error: " + e.message);
+    }
 };
 
 window.updatePriceInFirebase = async function(id, price, areaIds) {

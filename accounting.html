@@ -203,7 +203,17 @@ areaName: "المنطقة",
     downloadTemplate: "تحميل النموذج",
     searchArea: "ابحث عن اسم المنطقة...",
     importProgress: "تم إضافة {count} من {total} منطقة",
-    duplicateSkip: "تم تخطي المناطق الموجودة مسبقاً"
+    duplicateSkip: "تم تخطي المناطق الموجودة مسبقاً",
+        orderNo: "رقم الفاتورة",
+    orderNet: "صافي الفاتورة",
+    orderDelivery: "قيمة التوصيل",
+    orderTotal: "إجمالي الفاتورة",
+    payMethod: "طريقة الدفع",
+    filterFrom: "من تاريخ",
+    filterTo: "إلى تاريخ",
+    printInvoices: "طباعة الفواتير",
+    exportOrders: "تحميل تقرير الطلبات",
+    noOrders: "لا توجد طلبات متوافقة مع البحث"
         
             },
             en: {
@@ -303,7 +313,17 @@ areaName: "المنطقة",
     downloadTemplate: "Download Template",
     searchArea: "Search for area name...",
     importProgress: "Added {count} of {total} areas",
-    duplicateSkip: "Pre-existing areas were skipped"
+    duplicateSkip: "Pre-existing areas were skipped",
+        orderNo: "Invoice #",
+    orderNet: "Net Amount",
+    orderDelivery: "Delivery Fee",
+    orderTotal: "Total Amount",
+    payMethod: "Payment Method",
+    filterFrom: "From Date",
+    filterTo: "To Date",
+    printInvoices: "Print Invoices",
+    exportOrders: "Export Orders Report",
+    noOrders: "No orders matching search criteria"
             }
         };
 
@@ -1131,6 +1151,135 @@ window.toggleSelectAllCustomers = function(source) {
 };
 
 
+window.loadOrdersPage = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex no-print" style="margin-bottom:20px;">
+                <h3><i class="fas fa-receipt"></i> ${lang.orders}</h3>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn-main" style="background:#27ae60;" onclick="exportOrdersToExcel()">
+                        <i class="fas fa-file-excel"></i> ${lang.exportOrders}
+                    </button>
+                    <button class="btn-main" onclick="printSelectedInvoices()">
+                        <i class="fas fa-print"></i> ${lang.printInvoices}
+                    </button>
+                </div>
+            </div>
+
+            <div class="info-card no-print" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:15px; background:#fff;">
+                <div>
+                    <label style="font-size:12px; color:var(--text-muted);">${lang.filterFrom}</label>
+                    <input type="date" id="filter-date-from" onchange="filterOrders()">
+                </div>
+                <div>
+                    <label style="font-size:12px; color:var(--text-muted);">${lang.filterTo}</label>
+                    <input type="date" id="filter-date-to" onchange="filterOrders()">
+                </div>
+                <select id="filter-cashier" onchange="filterOrders()">
+                    <option value="">-- كل الكاشير --</option>
+                </select>
+                <select id="filter-branch" onchange="filterOrders()">
+                    <option value="">-- كل الفروع --</option>
+                </select>
+                <select id="filter-area" onchange="filterOrders()">
+                    <option value="">-- كل المناطق --</option>
+                </select>
+            </div>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" onclick="toggleSelectAllOrders(this)"></th>
+                        <th>${lang.orderNo}</th>
+                        <th>العميل / المنطقة</th>
+                        <th>التاريخ / الكاشير / الفرع</th>
+                        <th>المبالغ (د.ك)</th>
+                        <th>الدفع</th>
+                        <th class="no-print">إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="orders-list-body"></tbody>
+            </table>
+        </div>
+        <div id="print-area" class="only-print" style="display:none;"></div>`;
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initOrdersLogic) window.initOrdersLogic();
+};
+
+
+
+window.printSelectedInvoices = function() {
+    const selected = document.querySelectorAll('.order-checkbox:checked');
+    if (selected.length === 0) return alert("اختر طلبات للطباعة");
+
+    let printHtml = `
+        <style>
+            @media print {
+                .invoice-page { page-break-after: always; padding: 20px; direction: rtl; font-family: 'Cairo', sans-serif; }
+                .no-print { display: none !important; }
+            }
+        </style>`;
+
+    selected.forEach(cb => {
+        const orderId = cb.dataset.id;
+        const order = window.allOrdersData[orderId];
+        printHtml += `
+            <div class="invoice-page">
+                <center>
+                    <img src="logo.png" style="width:80px;">
+                    <h2>Figs & Olives Bakery</h2>
+                    <p>فاتورة رقم: #${order.invoiceNo}</p>
+                </center>
+                <hr>
+                <p>التاريخ: ${order.date} ${order.time}</p>
+                <p>العميل: ${order.custName} (${order.phone})</p>
+                <p>العنوان: ${order.areaName}</p>
+                <table style="width:100%; border-collapse: collapse; margin-top:20px;">
+                    <thead><tr style="border-bottom:1px solid #000;"><th>المنتج</th><th>الكمية</th><th>السعر</th></tr></thead>
+                    <tbody>
+                        ${order.items.map(i => `<tr><td>${i.name}</td><td>${i.qty}</td><td>${parseFloat(i.price).toFixed(3)}</td></tr>`).join('')}
+                    </tbody>
+                </table>
+                <hr>
+                <div style="text-align:left;">
+                    <p>الصافي: ${parseFloat(order.net).toFixed(3)} د.ك</p>
+                    <p>التوصيل: ${parseFloat(order.delivery).toFixed(3)} د.ك</p>
+                    <h3>الإجمالي: ${parseFloat(order.total).toFixed(3)} د.ك</h3>
+                </div>
+            </div>`;
+    });
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(printHtml);
+    printWindow.document.close();
+    printWindow.print();
+};
+
+
+
+window.filterOrders = function() {
+    const from = document.getElementById('filter-date-from').value;
+    const to = document.getElementById('filter-date-to').value;
+    const cashier = document.getElementById('filter-cashier').value;
+    const branch = document.getElementById('filter-branch').value;
+    const area = document.getElementById('filter-area').value;
+
+    let filtered = Object.entries(window.allOrdersData).filter(([id, order]) => {
+        let match = true;
+        if (from && order.date < from) match = false;
+        if (to && order.date > to) match = false;
+        if (cashier && order.cashierId !== cashier) match = false;
+        if (branch && order.branchId !== branch) match = false;
+        if (area && order.areaId !== area) match = false;
+        return match;
+    });
+
+    renderOrdersTable(Object.fromEntries(filtered));
+};
+
+
+
 
     </script>
 
@@ -1751,6 +1900,58 @@ window.checkCustomerStatus = async function(phone) {
         return true; 
     }
 };
+
+window.initOrdersLogic = async function() {
+    // جلب البيانات اللازمة للفلاتر
+    const [pricesSnap, branchesSnap, cashiersSnap] = await Promise.all([
+        get(ref(database, 'delivery_areas')),
+        get(ref(database, 'branches')),
+        get(ref(database, 'cashiers'))
+    ]);
+    
+    // تعبئة قوائم الفلترة
+    populateFilter('filter-area', pricesSnap.val(), 'nameAr');
+    populateFilter('filter-branch', branchesSnap.val(), 'nameAr');
+    populateFilter('filter-cashier', cashiersSnap.val(), 'name');
+
+    onValue(ref(database, 'orders'), (snapshot) => {
+        window.allOrdersData = snapshot.val() || {}; // حفظ البيانات للفلترة والطباعة
+        renderOrdersTable(window.allOrdersData);
+    });
+};
+
+function renderOrdersTable(data) {
+    const tbody = document.getElementById('orders-list-body');
+    if (!tbody) return;
+    tbody.innerHTML = "";
+    
+    for (let id in data) {
+        const order = data[id];
+        tbody.innerHTML += `
+            <tr id="row-${id}">
+                <td><input type="checkbox" class="order-checkbox" data-id="${id}"></td>
+                <td style="font-weight:bold;">#${order.invoiceNo}</td>
+                <td style="text-align:right;">
+                    <div>${order.custName}</div>
+                    <div style="font-size:11px; color:var(--text-muted);">${order.areaName} | ${order.phone}</div>
+                </td>
+                <td style="font-size:12px;">
+                    <div>${order.date} | ${order.time}</div>
+                    <div style="color:var(--primary-blue)">${order.cashierName} - ${order.branchName}</div>
+                </td>
+                <td style="text-align:right;">
+                    صافي: ${parseFloat(order.net).toFixed(3)}<br>
+                    توصيل: ${parseFloat(order.delivery).toFixed(3)}<br>
+                    <b>الإجمالي: ${parseFloat(order.total).toFixed(3)}</b>
+                </td>
+                <td><span class="rank-badge" style="background:#e2e8f0; color:#1e293b;">${order.paymentMethod}</span></td>
+                <td class="no-print">
+                    <button class="btn-main" onclick="openEditOrderModal('${id}')"><i class="fas fa-edit"></i></button>
+                    <button class="btn-clear" onclick="confirmDeleteOrder('${id}')"><i class="fas fa-trash"></i></button>
+                </td>
+            </tr>`;
+    }
+}
 
 </script>
 </body>

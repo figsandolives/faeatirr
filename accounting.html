@@ -381,26 +381,27 @@ areaName: "المنطقة",
         };
 
         // وظيفة القوائم المنسدلة
-        window.toggleDropdown = function(id) {
-            document.getElementById(id).classList.toggle('show');
-        };
-
-        // سيتم برمجة وظيفة تحميل الصفحات حبة حبة
         window.loadPage = function(pageId) {
-    // 1. إزالة التحديد من جميع العناصر
+    // 1. إزالة التحديد من جميع العناصر (للمحافظة على شكل القائمة الجانبية)
     document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
     
-    // 2. إضافة التحديد للعنصر المختار
+    // 2. إضافة التحديد للعنصر المختار (ليظهر باللون النشط)
     const activeItem = document.getElementById('menu-' + pageId) || document.getElementById('sub-' + pageId);
     if (activeItem) activeItem.classList.add('active');
 
-    // 3. توجيه الصفحات
-    if (pageId === 'customers') {
+    // 3. توجيه الأوامر لفتح الصفحات بناءً على الـ ID
+    if (pageId === 'products') {
+        // تفعيل صفحة المنتجات والمخزون
+        loadProductsPage(); 
+    } 
+    else if (pageId === 'customers') {
         loadCustomersPage();
-    } else if (pageId === 'orders') {
+    } 
+    else if (pageId === 'orders') {
         loadOrdersPage();
-    } else if (pageId === 'cashier') {
-        // تشغيل شاشة الكاشير الرئيسية لمخبز Figs & Olives
+    } 
+    else if (pageId === 'cashier') {
+        // تذكر: تم نقل الكاشير لملف مستقل، تأكد من استدعائه بشكل صحيح
         loadCashierMain(); 
     }
 };

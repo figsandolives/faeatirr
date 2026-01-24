@@ -90,32 +90,45 @@ body.ltr { direction: ltr; }
 .login-screen {
     position: fixed;
     top: 0; left: 0; width: 100%; height: 100%;
-    background: #f1f5f9;
+    background: #f8fafc; /* خلفية فاتحة رسمية */
     display: flex; justify-content: center; align-items: center;
     z-index: 10000;
 }
 
 .login-box {
-    background: var(--main-white);
+    background: #ffffff !important; /* أبيض ناصع وغير شفاف */
     padding: 40px;
-    border-radius: 20px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+    border-radius: 24px;
+    border: 1px solid #e2e8f0; /* حدود خفيفة لتحديده */
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
     text-align: center;
     width: 100%;
-    max-width: 380px;
+    max-width: 400px;
+    z-index: 10001;
+}
+
+.login-screen::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: url('logo.png') no-repeat center;
+    background-size: 50%;
+    opacity: 0.05; /* تقليل الشفافية جداً لعدم التشويش */
+    z-index: 0;
 }
 
 .pin-display input {
     width: 100%;
-    background: #f8fafc !important;
-    border: 2px solid var(--border-color) !important;
-    border-radius: 10px;
+    background: #f1f5f9 !important;
+    border: 2px solid #e2e8f0 !important;
+    border-radius: 12px;
     height: 60px;
     text-align: center;
     font-size: 2.5rem;
-    color: var(--primary-blue) !important;
+    color: #2563eb !important; /* اللون الأزرق الرسمي للنظام */
     letter-spacing: 12px;
     margin-bottom: 25px;
+    outline: none;
 }
 
 .pin-pad {
@@ -129,17 +142,21 @@ body.ltr { direction: ltr; }
     font-size: 1.5rem;
     font-weight: bold;
     background: #f8fafc;
-    border: 1px solid var(--border-color);
+    border: 1px solid #e2e8f0;
     border-radius: 12px;
-    color: var(--text-dark);
+    color: #1e293b;
     cursor: pointer;
-    transition: 0.2s;
+    transition: all 0.2s ease;
 }
 
+
 .pin-pad button:hover {
-    background: var(--primary-blue);
-    color: white;
+    background: #2563eb;
+    color: #ffffff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
 }
+
 
 /* --- الجداول والنوافذ (Tables & Modals) --- */
 .data-table {
@@ -205,9 +222,17 @@ body.ltr { direction: ltr; }
 .btn-main:hover { background: #1d4ed8; }
 
 .btn-clear {
-    background: var(--danger-red) !important;
-    color: white !important;
+    background: #fee2e2 !important; /* أحمر فاتح جداً */
+    color: #ef4444 !important;
+    border-color: #fecaca !important;
 }
+
+.btn-login {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    border: none;
+}
+
 
 .info-card {
     background: #eff6ff;

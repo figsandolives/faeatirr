@@ -390,3 +390,6 @@ body.ltr { direction: ltr; }
 /* شاشة الجهاز غير المفعل */
 .lock-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: #e94560; text-align: center; }
 .lock-screen i { font-size: 5rem; margin-bottom: 20px; }
+
+.dropdown-container { display: none; }
+.dropdown-container.show { display: block; }

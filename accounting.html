@@ -401,9 +401,8 @@ areaName: "المنطقة",
         loadOrdersPage();
     } 
     else if (pageId === 'cashier') {
-        // تذكر: تم نقل الكاشير لملف مستقل، تأكد من استدعائه بشكل صحيح
-        loadCashierMain(); 
-    }
+    window.location.href = 'Cashier.html'; // الانتقال للملف الجديد بدلاً من تحميل دالة مفقودة
+}
     else if (pageId === 'units') {
     loadUnitsPage();
 }
@@ -2775,6 +2774,74 @@ window.viewUnitProducts = async function(unitName) {
             </div>
         </div>`;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+
+// 1. دالة حذف الوحدة
+window.deleteUnit = async function(id) {
+    if (confirm(translations[currentLang].deleteConfirm)) {
+        try {
+            await set(ref(database, 'units/' + id), null);
+            alert("✅ تم حذف الوحدة بنجاح");
+        } catch (e) { alert("خطأ في الحذف: " + e.message); }
+    }
+};
+
+// 2. دالة تحميل باركود واحد فقط
+window.downloadSingleBarcode = function(id, nameAr) {
+    const canvas = document.getElementById(`bc-${id}`);
+    if (canvas) {
+        const link = document.createElement('a');
+        link.download = `${nameAr}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+    }
+};
+
+// 3. دالة تعديل المنتج (فتحة نافذة التعديل)
+window.editProduct = async function(id) {
+    const snap = await get(ref(database, 'products/' + id));
+    const p = snap.val();
+    if (p) {
+        // يمكننا برمجة نافذة التعديل هنا بنفس نمط إضافة المنتج
+        alert("سيتم فتح نافذة تعديل المنتج: " + p.nameAr);
+    }
+};
+
+// 4. دالة تحميل تقرير المنتجات إكسل
+window.exportProductsExcel = async function() {
+    const snap = await get(ref(database, 'products'));
+    const products = Object.values(snap.val() || {});
+    
+    if (products.length === 0) return alert("لا توجد منتجات لتصديرها");
+
+    const data = products.map(p => ({
+        "الاسم": p.nameAr,
+        "التكلفة": p.cost,
+        "سعر البيع": p.price,
+        "المخزون": p.stock,
+        "الوحدة": p.unit,
+        "الباركود": p.barcode,
+        "مرات البيع": p.salesCount || 0
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Products Report");
+    XLSX.writeFile(workbook, `Figs_Olives_Inventory_${Date.now()}.xlsx`);
+};
+
+// 5. دالة تحديد الكل في جدول المنتجات
+window.toggleAllProducts = function(source) {
+    const checkboxes = document.querySelectorAll('.product-checkbox');
+    checkboxes.forEach(cb => cb.checked = source.checked);
+};
+
+window.refreshProductStock = async function() {
+    const branchId = document.getElementById('filter-product-branch').value;
+    // هنا يمكن تحديث عرض المخزون بناءً على الفرع المختار
+    console.log("تغيير عرض المخزون للفرع:", branchId);
+    window.initProductsLogic(); // إعادة تحميل البيانات
 };
 
 </script>

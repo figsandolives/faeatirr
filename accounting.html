@@ -898,7 +898,7 @@ window.loadDeliveryPricesPage = function() {
             </table>
         </div>`;
     document.getElementById('content-area').innerHTML = html;
-    if(window.initDeliveryPricesLogic) window.initDeliveryPricesLogic();
+    if(window.initDeliveryPricesLogic) window.initDeliveryPricesLogic(); // استدعاء المحرك
 };
 
 // دالة نافذة التعديل (يجب إضافتها هنا)
@@ -949,6 +949,9 @@ window.openAddAreaModal = function() {
 
     <script type="module">
     import { database, ref, onValue, set, get, update } from './firebase-config.js?v=2';
+window.get = get;
+window.ref = ref;
+window.database = database;
 
     // 1. مراقب الفروع العام (يعمل فوراً لضمان جاهزية قائمة الربط)
     onValue(ref(database, 'branches'), (snapshot) => {
@@ -1301,7 +1304,6 @@ window.viewAreaCustomers = function(areaId) {
 window.confirmSaveArea = async function() {
     const nameAr = document.getElementById('area-name-ar').value;
     const nameEn = document.getElementById('area-name-en').value;
-    const price = document.getElementById('area-price').value;
     
     if(!nameAr || !price) return alert(currentLang === 'ar' ? "أكمل البيانات" : "Complete data");
     
@@ -1336,15 +1338,19 @@ window.updatePriceInFirebase = async function(id, price, areaIds) {
 
 window.initDeliveryPricesLogic = function() {
     const lang = translations[currentLang];
+    // جلب أسماء المناطق أولاً
     get(ref(database, 'delivery_areas')).then((areaSnap) => {
         const areasData = areaSnap.val() || {};
+
         onValue(ref(database, 'delivery_prices'), (snapshot) => {
             const tbody = document.getElementById('delivery-prices-list');
             if (!tbody) return;
             tbody.innerHTML = "";
             const prices = snapshot.val() || {};
+
             for (let id in prices) {
                 const item = prices[id];
+                // تحويل مصفوفة الـ IDs لأسماء مفهومة
                 const areaNames = item.areaIds.map(aId => 
                     areasData[aId] ? (currentLang === 'ar' ? areasData[aId].nameAr : areasData[aId].nameEn) : ''
                 ).filter(n => n !== '').join(' - ');
@@ -1354,7 +1360,12 @@ window.initDeliveryPricesLogic = function() {
                         <td style="font-weight:bold; color:#28a745;">${parseFloat(item.price).toFixed(3)} KD</td>
                         <td style="font-size:12px; color:#aaa;">${areaNames}</td>
                         <td>
-                            <button class="btn-main edit-price-btn" data-id="${id}" data-price="${item.price}" data-areas='${JSON.stringify(item.areaIds)}'>${lang.edit}</button>
+                            <button class="btn-main edit-price-btn" 
+                                    data-id="${id}" 
+                                    data-price="${item.price}" 
+                                    data-areas='${JSON.stringify(item.areaIds)}'>
+                                ${lang.edit}
+                            </button>
                             <button class="btn-clear delete-price-btn" data-id="${id}">${lang.delete}</button>
                         </td>
                     </tr>`;

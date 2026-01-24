@@ -1295,22 +1295,31 @@ window.initDeliveryAreasLogic = function() {
 };
 
 // وظيفة الانتقال لصفحة العملاء مع فلتر
-window.viewAreaCustomers = function(areaId) {
-    sessionStorage.setItem('filterByArea', areaId); // حفظ الفلتر في الجلسة
-    loadPage('customers'); // الانتقال لصفحة العملاء
-};
-
-// وظيفة حفظ المنطقة في فايربيس
 window.confirmSaveArea = async function() {
+    // 1. جلب الأسماء فقط (حذفنا سطر جلب السعر)
     const nameAr = document.getElementById('area-name-ar').value;
     const nameEn = document.getElementById('area-name-en').value;
-    
-    if(!nameAr || !price) return alert(currentLang === 'ar' ? "أكمل البيانات" : "Complete data");
+
+    // 2. التحقق من إدخال الأسماء
+    if(!nameAr || !nameEn) {
+        alert(currentLang === 'ar' ? "يرجى إكمال أسماء المنطقة" : "Please complete area names");
+        return;
+    }
     
     const id = Date.now();
-    await set(ref(database, 'delivery_areas/' + id), { nameAr, nameEn, price });
-    alert(translations[currentLang].saveSuccess);
-    closeModal();
+
+    // 3. الحفظ في Firebase (لاحظ حذفنا المتغير price من هنا)
+    try {
+        await set(ref(database, 'delivery_areas/' + id), { 
+            nameAr: nameAr, 
+            nameEn: nameEn 
+        });
+        
+        alert(translations[currentLang].saveSuccess);
+        closeModal();
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
 };
 
 

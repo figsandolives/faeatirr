@@ -384,22 +384,22 @@ areaName: "المنطقة",
 
         // سيتم برمجة وظيفة تحميل الصفحات حبة حبة
         window.loadPage = function(pageId) {
-    // 1. إزالة التحديد من جميع العناصر (للمحافظة على شكل القائمة الجانبية)
+    // 1. إزالة التحديد من جميع العناصر
     document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
     
-    // 2. إضافة التحديد للعنصر المختار (ليظهر باللون البنفسجي المختار)
+    // 2. إضافة التحديد للعنصر المختار
     const activeItem = document.getElementById('menu-' + pageId) || document.getElementById('sub-' + pageId);
     if (activeItem) activeItem.classList.add('active');
 
-    // 3. توجيه الأوامر لفتح الصفحات بناءً على الـ ID
+    // 3. توجيه الصفحات
     if (pageId === 'customers') {
         loadCustomersPage();
-    } 
-    else if (pageId === 'orders') {
-        // تشغيل دالة الطلبات التي برمجناها لمخبز Figs & Olives
-        loadOrdersPage(); 
+    } else if (pageId === 'orders') {
+        loadOrdersPage();
+    } else if (pageId === 'cashier') {
+        // تشغيل شاشة الكاشير الرئيسية لمخبز Figs & Olives
+        loadCashierMain(); 
     }
-    // يمكنك إضافة باقي الصفحات هنا بنفس الطريقة (مثل الفروع أو المخازن)
 };
 
         // --- كود نظام الدخول والتعرف على الجهاز ---

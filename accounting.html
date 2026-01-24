@@ -2223,7 +2223,23 @@ window.handleProductClick = async function(productId) {
     window.openQuantityModal(pSnap.val(), sSnap.val() || 0);
 };
 
-
+// إضافة هذه الدالة داخل <script type="module">
+window.updateDeviceLink = async function(deviceId, branchId, branchName) {
+    try {
+        // تحديث بيانات الجهاز في Firebase وتفعيله تلقائياً عند الربط
+        await update(ref(database, 'authorized_devices/' + deviceId), {
+            branchId: branchId,
+            branchName: branchName,
+            active: true // تفعيل الجهاز لكي يتمكن الكاشير من الدخول
+        });
+        
+        alert("✅ تم ربط الجهاز بفرع " + branchName + " بنجاح");
+        closeModal(); // إغلاق النافذة المنبثقة
+    } catch (e) {
+        console.error("خطأ في عملية الربط:", e);
+        alert("عذراً، حدث خطأ أثناء الربط: " + e.message);
+    }
+};
 
 
 </script>

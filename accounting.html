@@ -2127,15 +2127,6 @@ async function checkDeviceActivation() {
     return true;
 }
 
-// مستمع لحدث الباركود في خانة البحث
-document.getElementById('product-search').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        const barcode = e.target.value;
-        const product = findProductByBarcode(barcode); // دالة تبحث في قائمة المنتجات
-        if (product) openQuantityModal(product);
-        e.target.value = ''; // مسح الخانة للعملية التالية
-    }
-});
 
 // 1. التحقق من تفعيل الجهاز عند الدخول
 // استبدل validateDevice في الموديول بهذا الكود

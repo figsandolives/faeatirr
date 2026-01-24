@@ -1286,7 +1286,191 @@ window.filterOrders = function() {
 };
 
 
+// تُضاف في السكربت العلوي (العام)
+window.loadCashierMain = function() {
+    const lang = translations[currentLang];
+    
+    // بناء واجهة الكاشير (عرض الطلبات وزر الفاتورة الجديدة)
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <div>
+                    <span class="branch-tag" id="active-branch-name">${window.currentBranchName || 'جاري التحميل...'}</span>
+                    <button class="btn-main" onclick="openNewInvoiceModal()" style="font-size:1.2rem; padding:12px 25px;">
+                        <i class="fas fa-plus-circle"></i> فاتورة جديدة
+                    </button>
+                </div>
+                <h3><i class="fas fa-cash-register"></i> نظام المبيعات</h3>
+            </div>
 
+            <div class="info-card" style="background: rgba(255,255,255,0.05); margin-bottom:20px;">
+                <p style="margin:0; font-size:14px; color:#aaa;">قائمة الطلبات الأخيرة (من الأحدث إلى الأقدم)</p>
+            </div>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>رقم الفاتورة</th>
+                        <th>العميل</th>
+                        <th>التاريخ والوقت</th>
+                        <th>الإجمالي</th>
+                        <th>الدفع</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="recent-orders-list">
+                    </tbody>
+            </table>
+        </div>`;
+
+    document.getElementById('content-area').innerHTML = html;
+
+    // تشغيل محرك جلب البيانات من الموديول
+    if(window.renderRecentOrders) {
+        window.renderRecentOrders();
+    }
+};
+
+// دالة فتح مودال الكمية (تظهر عند الضغط على منتج أو عمل سكان للباركود)
+window.openQuantityModal = function(product, currentStock) {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <p style="color:#aaa; font-size:12px;">المخزون المتوفر (الرئيسي): ${currentStock}</p>
+                <h3 style="color:var(--gold-accent)">${product.nameAr}</h3>
+                <input type="number" id="qty-input" class="pin-display" placeholder="0" step="0.001">
+                <div class="qty-pin-pad">
+                    ${[1,2,3,4,5,6,7,8,9,0,'.'].map(n => `<button onclick="appendQty('${n}')">${n}</button>`).join('')}
+                    <button class="btn-clear" onclick="appendQty('clear')">⌫</button>
+                </div>
+                <textarea id="item-note" placeholder="إضافة ملاحظة للمنتج..." style="width:100%; margin-top:10px; background:#1a1a2e; color:white; border-radius:5px; border:1px solid #444;"></textarea>
+                <div style="margin-top:15px; display:flex; gap:10px;">
+                    <button class="btn-main" onclick="addItemToBasket('${product.id}')">إضافة المنتج</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+// دالة طباعة الفاتورة بالتنسيق المطلوب (مخبز ومطعم التين)
+window.printThermalInvoice = function(order) {
+    let printContent = `
+        <div id="print-receipt-area">
+            <img src="Logo.png" class="receipt-logo">
+            <div class="receipt-header">
+                <div style="width:48%">
+                    <b>مخبز التين والزيتون</b><br>
+                    <small>اليرموك، ق٢ شارع ٢<br>22085889 | 65162277</small>
+                </div>
+                <div style="width:48%; text-align:left;">
+                    <b>مطعم التين الطبيعي</b><br>
+                    <small>أبو الحصانية، مول ٣٠<br>22085886 | 99176512</small>
+                </div>
+            </div>
+            <p style="text-align:center; font-size:10px;">@figsolives.kw | @natural_figs</p>
+            <hr>
+            <table style="width:100%; font-size:12px;">
+                ${order.items.map(item => `
+                    <tr><td>${item.nameAr} x ${item.qty}</td><td style="text-align:left;">${(item.qty * item.price).toFixed(3)}</td></tr>
+                    ${item.note ? `<tr><td colspan="2" style="font-size:10px; color:#555;">- ${item.note}</td></tr>` : ''}
+                `).join('')}
+            </table>
+            <hr>
+            <p>الصافي: ${order.net} د.ك</p>
+            <p>التوصيل: ${order.delivery} د.ك</p>
+            ${order.discount > 0 ? `<p>الخصم: ${order.discount} د.ك</p>` : ''}
+            <h3 style="text-align:center;">الإجمالي الكلي: ${order.total} د.ك</h3>
+            <div class="footer-msg">صحتك أغلى ماتملك.. فتناول شيئاً صحياً</div>
+        </div>`;
+    
+    const printDiv = document.createElement('div');
+    printDiv.innerHTML = printContent;
+    document.body.appendChild(printDiv);
+    window.print();
+    printDiv.remove();
+};
+
+
+// مصفوفة السلة (تكون فارغة عند فتح فاتورة جديدة)
+window.currentBasket = [];
+
+window.openNewInvoiceModal = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div id="invoice-overlay" class="modal-overlay" style="align-items: flex-start; padding-top: 20px;">
+            <div class="modal-box" style="width: 95%; max-width: 1200px; height: 90vh; display: flex; flex-direction: row; gap: 20px; position: relative;">
+                
+                <button onclick="closeInvoiceModal()" style="position: absolute; top: 10px; right: 10px; background: none; border: none; color: #e94560; font-size: 24px; cursor: pointer;">&times;</button>
+
+                <div style="width: 35%; display: flex; flex-direction: column; border-inline-end: 1px solid #444; padding-inline-end: 15px;">
+                    <h4 style="border-bottom: 1px solid var(--gold-accent); padding-bottom: 10px;">سلة المشتريات</h4>
+                    <div id="basket-items" style="flex-grow: 1; overflow-y: auto; margin-top: 10px;">
+                        <p id="empty-basket-msg" style="color: #666; text-align: center; margin-top: 50px;">السلة فارغة</p>
+                    </div>
+                    <div style="padding-top: 15px; border-top: 1px solid #444;">
+                        <div style="display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 15px;">
+                            <span>الإجمالي:</span>
+                            <span id="basket-total">0.000 د.ك</span>
+                        </div>
+                        <button id="btn-next-step" class="btn-main" style="width: 100%; opacity: 0.5;" disabled onclick="goToCustomerStep()">التالي</button>
+                    </div>
+                </div>
+
+                <div style="width: 65%; display: flex; flex-direction: column;">
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                        <input type="text" id="cashier-search" placeholder="ابحث بالاسم أو الباركود..." style="flex-grow: 1; padding: 12px; background: #1a1a2e; color: white; border: 1px solid #444; border-radius: 8px;" onkeypress="handleCashierSearch(event)">
+                        <button class="btn-main" onclick="searchProduct()"><i class="fas fa-search"></i></button>
+                    </div>
+
+                    <div id="cashier-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; overflow-y: auto;">
+                        </div>
+                </div>
+
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    // تشغيل جلب الأقسام فور الفتح
+    if(window.loadCashierCategories) window.loadCashierCategories();
+};
+
+window.closeInvoiceModal = function() {
+    const modal = document.getElementById('invoice-overlay');
+    if(modal) modal.remove();
+    window.currentBasket = []; // تصفير السلة عند الإغلاق
+};
+
+// تحديث شكل السلة وزر "التالي"
+window.updateBasketUI = function() {
+    const container = document.getElementById('basket-items');
+    const nextBtn = document.getElementById('btn-next-step');
+    const totalEl = document.getElementById('basket-total');
+    
+    if (window.currentBasket.length > 0) {
+        nextBtn.disabled = false;
+        nextBtn.style.opacity = "1";
+        document.getElementById('empty-basket-msg')?.remove();
+        
+        let total = 0;
+        container.innerHTML = window.currentBasket.map((item, index) => {
+            total += item.price * item.qty;
+            return `
+                <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                    <div onclick="editItemInBasket(${index})" style="cursor: pointer;">
+                        <div style="font-weight: bold;">${item.nameAr}</div>
+                        <div style="font-size: 11px; color: #aaa;">${item.qty} x ${item.price} ${item.note ? `| ${item.note}` : ''}</div>
+                    </div>
+                    <button onclick="removeFromBasket(${index})" style="background: none; border: none; color: #e94560; cursor: pointer;">&times;</button>
+                </div>`;
+        }).join('');
+        totalEl.innerText = total.toFixed(3) + " د.ك";
+    } else {
+        nextBtn.disabled = true;
+        nextBtn.style.opacity = "0.5";
+        container.innerHTML = `<p id="empty-basket-msg" style="color: #666; text-align: center; margin-top: 50px;">السلة فارغة</p>`;
+        totalEl.innerText = "0.000 د.ك";
+    }
+};
 
     </script>
 
@@ -1959,6 +2143,183 @@ function renderOrdersTable(data) {
             </tr>`;
     }
 }
+
+// فحص حالة الجهاز عند التحميل
+async function checkDeviceActivation() {
+    const deviceId = localStorage.getItem('pos_device_id');
+    const snap = await get(ref(database, 'authorized_devices/' + deviceId));
+    
+    if (!snap.exists() || !snap.val().active) {
+        document.body.innerHTML = `<div class="lock-screen">
+            <i class="fas fa-lock"></i>
+            <h2>عذراً، هذا الجهاز غير مفعل</h2>
+            <p>يرجى التواصل مع الإدارة لتفعيل الجهاز رقم: ${deviceId}</p>
+        </div>`;
+        return false;
+    }
+    window.currentBranch = snap.val().branchName; // حفظ اسم الفرع المعتمد للجهاز
+    return true;
+}
+
+// مستمع لحدث الباركود في خانة البحث
+document.getElementById('product-search').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        const barcode = e.target.value;
+        const product = findProductByBarcode(barcode); // دالة تبحث في قائمة المنتجات
+        if (product) openQuantityModal(product);
+        e.target.value = ''; // مسح الخانة للعملية التالية
+    }
+});
+
+// 1. التحقق من تفعيل الجهاز عند الدخول
+async function validateDevice() {
+    const deviceId = localStorage.getItem('figs_device_token');
+    if (!deviceId) {
+        promptActivation(); // دالة تطلب كود التفعيل لأول مرة
+        return;
+    }
+    const snap = await get(ref(database, 'authorized_devices/' + deviceId));
+    if (!snap.exists() || !snap.val().active) {
+        showLockScreen(); // عرض شاشة الجهاز غير المفعل
+        return false;
+    }
+    window.currentBranchName = snap.val().branch; // حفظ اسم الفرع
+    return true;
+}
+
+// 2. تطبيق الخصم بكلمة مرور المدير فقط
+window.applyManagerDiscount = async function() {
+    const password = prompt("يرجى إدخال كلمة مرور المدير للموافقة على الخصم:");
+    const settingsSnap = await get(ref(database, 'settings/admin_password'));
+    
+    if (password === settingsSnap.val()) {
+        openDiscountPanel(); // فتح خيارات الخصم (نسبة أو قيمة)
+    } else {
+        alert("كلمة مرور خاطئة! لا يمكن تطبيق الخصم.");
+    }
+};
+
+// 3. البحث بالباركود (السكانر)
+window.handleBarcodeScan = async function(barcode) {
+    const productsSnap = await get(ref(database, 'products'));
+    const products = productsSnap.val() || {};
+    const found = Object.values(products).find(p => p.barcode === barcode);
+    
+    if (found) {
+        // جلب مخزون الفرع الرئيسي فقط كما طلبت
+        const stockSnap = await get(ref(database, 'inventory/main_branch/' + found.id));
+        window.openQuantityModal(found, stockSnap.val() || 0);
+    }
+};
+
+
+// تُضاف في الموديول السفلي
+window.renderRecentOrders = function() {
+    onValue(ref(database, 'orders'), (snapshot) => {
+        const tbody = document.getElementById('recent-orders-list');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        
+        const data = snapshot.val() || {};
+        // تحويل البيانات لمصفوفة وترتيبها من الأحدث للأقدم
+        const sortedOrders = Object.entries(data).reverse(); 
+
+        sortedOrders.forEach(([id, order]) => {
+            tbody.innerHTML += `
+                <tr>
+                    <td style="font-weight:bold; color:var(--gold-accent)">#${order.invoiceNo}</td>
+                    <td>${order.custName}</td>
+                    <td style="font-size:12px;">${order.date} | ${order.time}</td>
+                    <td style="font-weight:bold;">${parseFloat(order.total).toFixed(3)} د.ك</td>
+                    <td><span class="rank-badge" style="background:#444;">${order.paymentMethod}</span></td>
+                    <td>
+                        <button class="btn-main" style="padding:5px 10px;" onclick="viewOrderDetails('${id}')">عرض</button>
+                        <button class="btn-main" style="background:#28a745; padding:5px 10px;" onclick="reprintInvoice('${id}')">طباعة</button>
+                    </td>
+                </tr>`;
+        });
+    });
+};
+
+
+
+// جلب الأقسام الرئيسية لعرضها كمربعات
+window.loadCashierCategories = async function() {
+    const snap = await get(ref(database, 'categories'));
+    const categories = snap.val() || {};
+    const grid = document.getElementById('cashier-grid');
+    if(!grid) return;
+    grid.innerHTML = "";
+
+    for (let id in categories) {
+        grid.innerHTML += `
+            <div class="category-card" onclick="loadCashierProducts('${id}')" style="background: var(--accent-color); padding: 20px; border-radius: 12px; text-align: center; cursor: pointer; transition: 0.3s;">
+                <i class="fas fa-folder" style="font-size: 24px; margin-bottom: 10px;"></i>
+                <div style="font-size: 14px; font-weight: bold;">${categories[id].nameAr}</div>
+            </div>`;
+    }
+};
+
+// جلب المنتجات داخل قسم معين
+window.loadCashierProducts = async function(catId) {
+    const snap = await get(ref(database, 'products'));
+    const allProducts = snap.val() || {};
+    const grid = document.getElementById('cashier-grid');
+    grid.innerHTML = `<div onclick="loadCashierCategories()" style="grid-column: 1/-1; color: var(--gold-accent); cursor: pointer; margin-bottom: 10px;"><i class="fas fa-arrow-right"></i> العودة للأقسام</div>`;
+
+    const filtered = Object.entries(allProducts).filter(([id, p]) => p.categoryId === catId);
+    
+    filtered.forEach(([id, p]) => {
+        grid.innerHTML += `
+            <div class="product-card" onclick="handleProductClick('${id}')" style="background: var(--secondary-bg); border: 1px solid #444; padding: 15px; border-radius: 12px; text-align: center; cursor: pointer;">
+                <div style="font-weight: bold;">${p.nameAr}</div>
+                <div style="color: var(--gold-accent); margin-top: 5px;">${parseFloat(p.price).toFixed(3)}</div>
+            </div>`;
+    });
+};
+
+// التعامل مع الباركود
+window.handleCashierSearch = async function(e) {
+    if (e.key === 'Enter') {
+        const value = e.target.value;
+        const snap = await get(ref(database, 'products'));
+        const products = snap.val() || {};
+        const found = Object.values(products).find(p => p.barcode === value || p.nameAr.includes(value));
+        
+        if (found) {
+            handleProductClick(found.id);
+            e.target.value = ""; // مسح الخانة بعد الإيجاد
+        }
+    }
+};
+
+// دالة الضغط على المنتج لجلب المخزون الرئيسي
+window.handleProductClick = async function(productId) {
+    const pSnap = await get(ref(database, 'products/' + productId));
+    const sSnap = await get(ref(database, 'inventory/main_branch/' + productId));
+    window.openQuantityModal(pSnap.val(), sSnap.val() || 0);
+};
+
+// إضافة المنتج فعلياً للسلة
+window.addItemToBasket = function(productId) {
+    const qty = document.getElementById('qty-input').value;
+    const note = document.getElementById('item-note').value;
+    if(!qty || qty <= 0) return alert("يرجى إدخال كمية صحيحة");
+
+    get(ref(database, 'products/' + productId)).then(snap => {
+        const p = snap.val();
+        window.currentBasket.push({
+            id: productId,
+            nameAr: p.nameAr,
+            price: parseFloat(p.price),
+            qty: parseFloat(qty),
+            note: note
+        });
+        closeModal();
+        updateBasketUI();
+    });
+};
+
 
 </script>
 </body>

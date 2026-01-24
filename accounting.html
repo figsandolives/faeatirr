@@ -671,44 +671,55 @@ window.confirmSavePrice = async function() {
 window.openEditPriceModal = function(id, currentPrice, currentAreaIds) {
     const lang = translations[currentLang];
     
-    // جلب جميع المناطق لعرضها كخيارات
     get(ref(database, 'delivery_areas')).then((snap) => {
         const areas = snap.val() || {};
         let areasCheckboxes = "";
         
         for (let areaId in areas) {
-            // فحص إذا كانت هذه المنطقة مضافة مسبقاً لهذا السعر
             const isChecked = currentAreaIds.includes(areaId) ? 'checked' : '';
-            
             areasCheckboxes += `
-                <label style="display:block; margin:5px 0; color:white; font-size:14px;">
-                    <input type="checkbox" class="edit-area-checkbox" value="${areaId}" ${isChecked}> 
-                    ${currentLang === 'ar' ? areas[areaId].nameAr : areas[areaId].nameEn}
+                <label style="display:flex; align-items:center; gap:12px; padding:10px; margin-bottom:8px; background:rgba(255,255,255,0.05); border-radius:5px; cursor:pointer; direction:rtl;">
+                    <input type="checkbox" class="edit-area-checkbox" value="${areaId}" ${isChecked} style="width:18px; height:18px; accent-color:#f39c12;"> 
+                    <span style="color:white; font-size:14px;">${currentLang === 'ar' ? areas[areaId].nameAr : areas[areaId].nameEn}</span>
                 </label>`;
         }
 
         let modalHtml = `
             <div id="modal-overlay" class="modal-overlay">
                 <div class="modal-box">
-                    <h3>${lang.delPricesTitle}</h3>
-                    <div style="margin-bottom:15px;">
-                        <label style="color:#aaa; display:block; margin-bottom:5px;">${lang.deliveryPrice}</label>
-                        <input type="number" id="edit-price-value" value="${currentPrice}" placeholder="0.000" step="0.005">
-                    </div>
+                    <h3>${lang.modalEditArea}</h3>
+                    <input type="number" id="edit-price-value" value="${currentPrice}" placeholder="0.000" step="0.005">
                     
-                    <div style="text-align:right; max-height:200px; overflow-y:auto; margin:15px 0; border:1px solid #444; padding:10px; background:#1a1a2e; border-radius:5px;">
-                        <p style="color:#f39c12; margin-bottom:10px; font-weight:bold;">${currentLang === 'ar' ? 'تعديل المناطق المشمولة:' : 'Edit Included Areas:'}</p>
+                    <div style="margin:15px 0 10px 0;">
+                        <input type="text" id="area-search-edit" oninput="filterAreasInEditModal()" 
+                               placeholder="${lang.searchArea}" 
+                               style="width:100%; padding:10px; background:#0f0f1e; border:1px solid #444; color:white; border-radius:5px;">
+                    </div>
+
+                    <div id="edit-areas-container" style="text-align:right; max-height:200px; overflow-y:auto; margin:15px 0; border:1px solid #444; padding:10px; background:#16213e; border-radius:5px;">
                         ${areasCheckboxes}
                     </div>
 
                     <div style="margin-top:20px; display:flex; justify-content: space-around; gap:10px;">
-                        <button class="btn-login" onclick="confirmPriceUpdate('${id}')">${lang.edit}</button>
+                        <button class="btn-main" onclick="confirmPriceUpdate('${id}')">${lang.edit}</button>
                         <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
                     </div>
                 </div>
             </div>`;
         document.body.insertAdjacentHTML('beforeend', modalHtml);
     });
+};
+
+// دالة الفلترة الخاصة بنافذة التعديل
+window.filterAreasInEditModal = function() {
+    const searchValue = document.getElementById('area-search-edit').value.toLowerCase();
+    const container = document.getElementById('edit-areas-container');
+    const labels = container.getElementsByTagName('label');
+
+    for (let label of labels) {
+        const areaName = label.innerText.toLowerCase();
+        label.style.display = areaName.includes(searchValue) ? "flex" : "none";
+    }
 };
 
 // وظيفة جمع البيانات الجديدة وإرسالها للموديول
@@ -1332,22 +1343,38 @@ if (t.closest('.delete-price-btn')) {
 // --- دالة عرض البيانات الموحدة والمترجمة ---
 window.initDeliveryAreasLogic = function() {
     const lang = translations[currentLang];
+    
     get(ref(database, 'customers')).then((custSnap) => {
         const allCustomers = custSnap.val() || {};
+        
         onValue(ref(database, 'delivery_areas'), (snapshot) => {
             const tbody = document.getElementById('delivery-areas-list');
             if (!tbody) return;
             tbody.innerHTML = "";
             const areas = snapshot.val() || {};
+
             for (let id in areas) {
                 const area = areas[id];
                 const count = Object.values(allCustomers).filter(c => c.areaId === id).length;
+
                 tbody.innerHTML += `
                     <tr>
                         <td>${area.nameAr}</td>
                         <td>${area.nameEn}</td>
-                        <td style="font-weight:bold; color:#f39c12;">${count}</td>
-                        <td><button class="btn-main" onclick="viewAreaCustomers('${id}')">${lang.viewCustomers}</button></td>
+                        <td style="font-weight:bold; color:#f39c12; cursor:pointer" onclick="viewAreaCustomers('${id}')">
+                            ${count} <i class="fas fa-users" style="font-size:12px; margin-right:5px;"></i>
+                        </td>
+                        <td>
+                            <div style="display:flex; gap:5px; justify-content:center;">
+                                <button class="btn-main edit-area-btn" 
+                                        data-id="${id}" data-ar="${area.nameAr}" data-en="${area.nameEn}">
+                                    ${lang.edit}
+                                </button>
+                                <button class="btn-clear delete-area-btn" data-id="${id}">
+                                    ${lang.delete}
+                                </button>
+                            </div>
+                        </td>
                     </tr>`;
             }
         });

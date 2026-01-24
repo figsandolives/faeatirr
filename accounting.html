@@ -935,7 +935,12 @@ window.loadDeliveryAreasPage = function() {
             <div id="import-status" style="margin:10px 0; color:#f39c12; font-weight:bold;"></div>
             <table class="data-table">
                 <thead>
-                    <tr><th>${lang.areaNameAr}</th><th>${lang.areaNameEn}</th><th>${lang.customerCount}</th><th>${lang.actions}</th></tr>
+                    <tr>
+                        <th>${lang.areaNameAr}</th>
+                        <th>${lang.areaNameEn}</th>
+                        <th>${lang.deliveryPrice}</th> <th>${lang.customerCount}</th>
+                        <th>${lang.actions}</th>
+                    </tr>
                 </thead>
                 <tbody id="delivery-areas-list"></tbody>
             </table>
@@ -969,17 +974,23 @@ window.loadDeliveryPricesPage = function() {
 };
 
 // دالة نافذة التعديل (يجب إضافتها هنا)
-window.openEditAreaModal = function(id, nameAr, nameEn, price) {
+window.openEditAreaModal = function(id, nameAr, nameEn) {
     const lang = translations[currentLang];
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
             <div class="modal-box">
                 <h3>${lang.modalEditArea}</h3>
-                <input type="text" id="edit-area-ar" value="${nameAr}" placeholder="${lang.areaNameAr}">
-                <input type="text" id="edit-area-en" value="${nameEn}" placeholder="${lang.areaNameEn}">
-                <input type="number" id="edit-area-price" value="${price}" placeholder="${lang.deliveryPrice}" step="0.001">
-                <div style="margin-top:20px; display:flex; justify-content: space-around;">
-                    <button class="btn-login" onclick="confirmAreaUpdate('${id}')">${lang.edit}</button>
+                <div style="margin-bottom:15px;">
+                    <label style="color:#aaa; display:block; margin-bottom:5px; font-size:12px;">${lang.areaNameAr}</label>
+                    <input type="text" id="edit-area-ar" value="${nameAr}" placeholder="${lang.areaNameAr}">
+                </div>
+                <div style="margin-bottom:15px;">
+                    <label style="color:#aaa; display:block; margin-bottom:5px; font-size:12px;">${lang.areaNameEn}</label>
+                    <input type="text" id="edit-area-en" value="${nameEn}" placeholder="${lang.areaNameEn}">
+                </div>
+                
+                <div style="margin-top:20px; display:flex; justify-content: space-around; gap:10px;">
+                    <button class="btn-main" onclick="confirmAreaUpdate('${id}')">${lang.edit}</button>
                     <button class="btn-clear" onclick="closeModal()">${lang.delete}</button>
                 </div>
             </div>
@@ -1344,8 +1355,13 @@ if (t.closest('.delete-price-btn')) {
 window.initDeliveryAreasLogic = function() {
     const lang = translations[currentLang];
     
-    get(ref(database, 'customers')).then((custSnap) => {
+    // 1. جلب بيانات الزبائن وأسعار التوصيل معاً لضمان دقة الربط
+    Promise.all([
+        get(ref(database, 'customers')),
+        get(ref(database, 'delivery_prices'))
+    ]).then(([custSnap, priceSnap]) => {
         const allCustomers = custSnap.val() || {};
+        const allPrices = priceSnap.val() || {};
         
         onValue(ref(database, 'delivery_areas'), (snapshot) => {
             const tbody = document.getElementById('delivery-areas-list');
@@ -1353,24 +1369,41 @@ window.initDeliveryAreasLogic = function() {
             tbody.innerHTML = "";
             const areas = snapshot.val() || {};
 
-            for (let id in areas) {
-                const area = areas[id];
-                const count = Object.values(allCustomers).filter(c => c.areaId === id).length;
+            for (let areaId in areas) {
+                const area = areas[areaId];
+                
+                // 2. البحث عن السعر المرتبط بهذه المنطقة في قاعدة البيانات
+                let assignedPrice = (currentLang === 'ar' ? "غير معرف" : "Undefined");
+                let priceColor = "#e94560"; // لون أحمر للتنبيه إذا كان غير معرف
+
+                for (let pId in allPrices) {
+                    if (allPrices[pId].areaIds && allPrices[pId].areaIds.includes(areaId)) {
+                        assignedPrice = parseFloat(allPrices[pId].price).toFixed(3) + " KD";
+                        priceColor = "#28a745"; // لون أخضر إذا كان معرفاً
+                        break;
+                    }
+                }
+
+                // 3. حساب عدد الزبائن المندرجين تحت هذه المنطقة
+                const count = Object.values(allCustomers).filter(c => c.areaId === areaId).length;
 
                 tbody.innerHTML += `
                     <tr>
                         <td>${area.nameAr}</td>
                         <td>${area.nameEn}</td>
-                        <td style="font-weight:bold; color:#f39c12; cursor:pointer" onclick="viewAreaCustomers('${id}')">
+                        <td style="font-weight:bold; color:${priceColor};">
+                            ${assignedPrice}
+                        </td>
+                        <td style="font-weight:bold; color:#f39c12; cursor:pointer" onclick="viewAreaCustomers('${areaId}')">
                             ${count} <i class="fas fa-users" style="font-size:12px; margin-right:5px;"></i>
                         </td>
                         <td>
                             <div style="display:flex; gap:5px; justify-content:center;">
                                 <button class="btn-main edit-area-btn" 
-                                        data-id="${id}" data-ar="${area.nameAr}" data-en="${area.nameEn}">
+                                        data-id="${areaId}" data-ar="${area.nameAr}" data-en="${area.nameEn}">
                                     ${lang.edit}
                                 </button>
-                                <button class="btn-clear delete-area-btn" data-id="${id}">
+                                <button class="btn-clear delete-area-btn" data-id="${areaId}">
                                     ${lang.delete}
                                 </button>
                             </div>

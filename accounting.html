@@ -6,6 +6,9 @@
     <title id="tab-title">المحاسبة والمخازن</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body class="rtl" id="body-tag">
@@ -1434,6 +1437,175 @@ window.toggleSelectAllOrders = function(source) {
     checkboxes.forEach(cb => cb.checked = source.checked);
 };
 
+window.loadProductsPage = function() {
+    const lang = translations[currentLang];
+    
+    // بناء واجهة إدارة المنتجات المتكاملة
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h3><i class="fas fa-box"></i> المنتجات</h3>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+                    <button class="btn-main" onclick="openAddProductModal()">
+                        <i class="fas fa-plus-circle"></i> منتج جديد
+                    </button>
+                    <button class="btn-main" style="background:#27ae60;" onclick="exportProductsExcel()">
+                        <i class="fas fa-file-excel"></i> تحميل التقرير
+                    </button>
+                    <button class="btn-main" style="background:#8e44ad;" onclick="downloadSelectedBarcodes()">
+                        <i class="fas fa-barcode"></i> تحميل الباركودات
+                    </button>
+                    <button class="btn-main" style="background:#2980b9;" onclick="triggerBulkImport()">
+                        <i class="fas fa-upload"></i> إضافة مجموعة
+                    </button>
+                    <button class="btn-clear" onclick="downloadProductTemplate()" style="font-size:12px; border:1px solid #444;">
+                        <i class="fas fa-file-download"></i> نموذج الإكسل
+                    </button>
+                </div>
+            </div>
+
+            <div class="info-card" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:15px; background: rgba(255,255,255,0.05); margin-bottom:20px; padding:15px; border-radius:10px;">
+                <div>
+                    <label style="font-size:11px; color:#aaa; display:block; margin-bottom:5px;">فرز حسب الفرع</label>
+                    <select id="filter-product-branch" onchange="refreshProductStock()" style="width:100%; padding:8px; background:#1a1a2e; color:white; border:1px solid #444; border-radius:5px;">
+                        <option value="main">الفرع الرئيسي</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:11px; color:#aaa; display:block; margin-bottom:5px;">التصنيف</label>
+                    <select id="filter-product-category" onchange="filterProductsTable()" style="width:100%; padding:8px; background:#1a1a2e; color:white; border:1px solid #444; border-radius:5px;">
+                        <option value="">كل التصنيفات</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:11px; color:#aaa; display:block; margin-bottom:5px;">مكان التخزين</label>
+                    <select id="filter-product-storage" onchange="filterProductsTable()" style="width:100%; padding:8px; background:#1a1a2e; color:white; border:1px solid #444; border-radius:5px;">
+                        <option value="">كل أماكن التخزين</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:11px; color:#aaa; display:block; margin-bottom:5px;">المبيعات</label>
+                    <select id="sort-product-sales" onchange="filterProductsTable()" style="width:100%; padding:8px; background:#1a1a2e; color:white; border:1px solid #444; border-radius:5px;">
+                        <option value="none">بدون ترتيب</option>
+                        <option value="high">الأعلى مبيعاً</option>
+                        <option value="low">الأقل مبيعاً</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="overflow-x:auto;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" id="select-all-products" onclick="toggleAllProducts(this)"></th>
+                            <th>المنتج</th>
+                            <th>التصنيف</th>
+                            <th>التكلفة / البيع</th>
+                            <th>المخزون (الوحدة)</th>
+                            <th>الحالة</th>
+                            <th>مرات البيع</th>
+                            <th>الباركود</th>
+                            <th>إجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="products-list-body">
+                        </tbody>
+                </table>
+            </div>
+
+            <div id="import-progress-container" style="display:none; margin: 25px auto; padding: 20px; background: rgba(0,0,0,0.3); border-radius: 12px; max-width: 550px; border: 1px solid var(--gold-accent); box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+                <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                    <span style="color:var(--gold-accent); font-weight:bold;">جاري معالجة الملف...</span>
+                    <span id="import-percent-text" style="color:white;">0%</span>
+                </div>
+                <progress id="import-progress-bar" value="0" max="100" style="width:100%; height: 12px; border-radius: 10px; accent-color: var(--gold-accent);"></progress>
+                <p id="import-status-text" style="text-align:center; font-size:13px; margin-top: 10px; color: #ccc;"></p>
+            </div>
+        </div>`;
+
+    document.getElementById('content-area').innerHTML = html;
+
+    // تشغيل محرك الربط مع قاعدة البيانات
+    if (window.initProductsLogic) {
+        window.initProductsLogic();
+    }
+};
+
+// دالة فتح مودال إضافة منتج
+window.openAddProductModal = function() {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box" style="width:600px;">
+                <h3>إضافة منتج جديد</h3>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                    <input type="text" id="p-name-ar" placeholder="الاسم العربي">
+                    <input type="text" id="p-name-en" placeholder="الاسم الإنجليزي">
+                    <input type="number" id="p-cost" placeholder="التكلفة">
+                    <input type="number" id="p-price" placeholder="سعر البيع">
+                    <select id="p-unit-select"><option>جاري تحميل الوحدات...</option></select>
+                    <input type="number" id="p-reorder" placeholder="نقطة إعادة الطلب">
+                    <div style="grid-column: span 2;">
+                        <input type="text" id="p-barcode" placeholder="رقم الباركود (اتركه فارغاً للتوليد آلياً)">
+                        <canvas id="barcode-preview" style="display:none; margin:10px auto;"></canvas>
+                    </div>
+                </div>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveNewProduct()">إضافة المنتج</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    populateUnitsDropdown();
+};
+
+window.downloadProductTemplate = function() {
+    // تجهيز رؤوس الأعمدة المطلوبة لمخبز التين والزيتون
+    const data = [[
+        "الاسم العربي", "الاسم الإنجليزي", "التكلفة", "سعر البيع", 
+        "الوحدة", "المخزون الأولي", "نقطة إعادة الطلب", "الباركود (اختياري)"
+    ]];
+    
+    const worksheet = XLSX.utils.aoa_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Products Template");
+    
+    // تحميل الملف
+    XLSX.writeFile(workbook, "Figs_Olives_Products_Template.xlsx");
+};
+
+// دالة فتح نافذة اختيار ملف الإكسل
+window.triggerBulkImport = function() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx, .xls';
+    input.onchange = (e) => {
+        if (window.handleBulkProductImport) {
+            window.handleBulkProductImport(e);
+        }
+    };
+    input.click();
+};
+
+// دالة تحديث واجهة العداد (Progress UI)
+window.updateImportProgress = function(current, total) {
+    const container = document.getElementById('import-progress-container');
+    const bar = document.getElementById('import-progress-bar');
+    const text = document.getElementById('import-status-text');
+    
+    container.style.display = 'block';
+    const percent = Math.round((current / total) * 100);
+    bar.value = percent;
+    text.innerText = `جاري رفع المنتجات: (${current} من ${total}) - اكتمل ${percent}%`;
+    
+    if (current === total) {
+        setTimeout(() => {
+            container.style.display = 'none';
+            alert("✅ تم استيراد جميع المنتجات بنجاح");
+        }, 1500);
+    }
+};
+
     </script>
 
     <script type="module">
@@ -1739,6 +1911,28 @@ if (role) {
         lastSeen: new Date().toLocaleString() 
     });
 }
+
+
+onValue(ref(database, 'products'), (snapshot) => {
+    const products = snapshot.val() || {};
+    // تصفية المنتجات التي وصلت أو قلّت عن نقطة إعادة الطلب
+    const lowStockItems = Object.values(products).filter(p => parseFloat(p.stock) <= parseFloat(p.reorderPoint));
+    
+    // التحقق من أن المستخدم هو "أمين مخازن" لإظهار التنبيه
+    if (lowStockItems.length > 0 && sessionStorage.getItem('userRole') === 'أمين مخازن') {
+        const notifyHtml = `
+            <div id="stock-alert-banner" style="background:#e94560; color:white; padding:12px; text-align:center; font-weight:bold; position:sticky; top:0; z-index:1000; border-bottom:2px solid rgba(0,0,0,0.2);">
+                <i class="fas fa-exclamation-triangle"></i> تنبيه للمخازن: يوجد عدد (${lowStockItems.length}) منتجات وصلت لنقطة إعادة الطلب! يرجى مراجعة الجدول باللون الأحمر.
+            </div>`;
+        
+        // إزالة التنبيه القديم إن وجد وإضافة الجديد
+        document.getElementById('stock-alert-banner')?.remove();
+        document.querySelector('.main-content').insertAdjacentHTML('afterbegin', notifyHtml);
+    } else {
+        // إخفاء التنبيه إذا تم تعديل الكميات وأصبح المخزون كافياً
+        document.getElementById('stock-alert-banner')?.remove();
+    }
+});
 
 
      // دالة التحديث الفعلي للمستخدم في Firebase
@@ -2237,6 +2431,125 @@ window.updateDeviceLink = async function(deviceId, branchId, branchName) {
     }
 };
 
+// جلب وعرض المنتجات مع مراقبة نقطة إعادة الطلب
+window.initProductsLogic = async function() {
+    const branchesSnap = await get(ref(database, 'branches'));
+    populateFilter('filter-product-branch', branchesSnap.val(), 'nameAr');
+
+    onValue(ref(database, 'products'), (snapshot) => {
+        const tbody = document.getElementById('products-list-body');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const products = snapshot.val() || {};
+
+        for (let id in products) {
+            const p = products[id];
+            // منطق التنبيه بالألوان
+            let stockColor = "inherit";
+            let statusText = "مستقر";
+            if (p.stock <= p.reorderPoint) {
+                stockColor = "#e94560"; // أحمر وصل للنقطة
+                statusText = "نقص مخزون ⚠️";
+            } else if (p.stock <= p.reorderPoint * 1.2) {
+                stockColor = "#f39c12"; // أصفر اقترب
+                statusText = "إعادة طلب قريباً";
+            }
+
+            tbody.innerHTML += `
+                <tr class="product-row">
+                    <td><input type="checkbox" class="product-checkbox" data-id="${id}" data-name="${p.nameAr}"></td>
+                    <td style="text-align:right;"><b>${p.nameAr}</b><br><small>${p.nameEn}</small></td>
+                    <td>${p.categoryName || 'غير محدد'}</td>
+                    <td>${p.cost} / <span style="color:#28a745">${p.price}</span></td>
+                    <td style="font-weight:bold; color:${stockColor}">${p.stock} (${p.unit})</td>
+                    <td><span class="rank-badge" style="background:${stockColor}">${statusText}</span></td>
+                    <td>${p.salesCount || 0}</td>
+                    <td>
+                        <canvas id="bc-${id}" class="mini-barcode"></canvas>
+                        <button onclick="downloadSingleBarcode('${id}', '${p.nameAr}')" class="btn-clear" style="padding:2px 5px; font-size:10px;">💾</button>
+                    </td>
+                    <td>
+                        <button class="btn-main" style="padding:5px;" onclick="editProduct('${id}')"><i class="fas fa-edit"></i></button>
+                    </td>
+                </tr>`;
+            
+            // توليد صورة الباركود فوراً
+            setTimeout(() => {
+                JsBarcode(`#bc-${id}`, p.barcode, { height: 30, displayValue: true, fontSize: 10 });
+            }, 100);
+        }
+    });
+};
+
+// دالة تحميل الباركودات كملف ZIP
+window.downloadSelectedBarcodes = async function() {
+    const selected = document.querySelectorAll('.product-checkbox:checked');
+    if (selected.length === 0) return alert("يرجى تحديد منتجات أولاً");
+
+    const zip = new JSZip();
+    const folder = zip.folder("Figs_Olives_Barcodes");
+
+    selected.forEach(cb => {
+        const id = cb.dataset.id;
+        const nameAr = cb.dataset.name;
+        const canvas = document.getElementById(`bc-${id}`);
+        const imgData = canvas.toDataURL("image/png").split(',')[1];
+        folder.file(`${nameAr}.png`, imgData, {base64: true});
+    });
+
+    const content = await zip.generateAsync({type:"blob"});
+    saveAs(content, `Barcodes_${Date.now()}.zip`);
+};
+
+
+// محرك قراءة الإكسل وحفظ البيانات في Firebase
+window.handleBulkProductImport = async function(event) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+
+    reader.onload = async (e) => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet);
+        
+        const total = rows.length;
+        if (total === 0) return alert("الملف فارغ!");
+
+        for (let i = 0; i < total; i++) {
+            const row = rows[i];
+            const productId = Date.now() + i; // معرف فريد للمنتج
+            
+            // 1. توليد باركود تلقائي إذا كانت الخانة فارغة في الإكسل
+            const barcode = row['الباركود (اختياري)'] || `FIGS${Math.floor(Math.random() * 1000000000)}`;
+
+            // 2. تجهيز كائن المنتج
+            const productData = {
+                id: productId,
+                nameAr: row['الاسم العربي'] || 'منتج بدون اسم',
+                nameEn: row['الاسم الإنجليزي'] || '',
+                cost: parseFloat(row['التكلفة']) || 0,
+                price: parseFloat(row['سعر البيع']) || 0,
+                unit: row['الوحدة'] || 'حبة',
+                stock: parseFloat(row['المخزون الأولي']) || 0,
+                reorderPoint: parseFloat(row['نقطة إعادة الطلب']) || 5,
+                barcode: barcode,
+                salesCount: 0,
+                createdAt: new Date().toISOString()
+            };
+
+            // 3. الحفظ في قاعدة البيانات
+            await set(ref(database, 'products/' + productId), productData);
+
+            // 4. تحديث المخزون في الفرع الرئيسي آلياً
+            await set(ref(database, 'inventory/main_branch/' + productId), productData.stock);
+
+            // 5. تحديث العداد في الواجهة
+            window.updateImportProgress(i + 1, total);
+        }
+    };
+    reader.readAsArrayBuffer(file);
+};
 
 </script>
 </body>

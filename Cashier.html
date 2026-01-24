@@ -124,6 +124,16 @@
             </div>
         </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+    const searchInput = document.getElementById('cashier-search');
+    if (searchInput) {
+        searchInput.focus(); // جعل المؤشر يبدأ من خانة البحث فوراً للسرعة
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                window.handleCashierSearch(e);
+                e.target.value = ''; // مسح الخانة للعملية التالية
+            }
+        });
+    }
     // تشغيل جلب الأقسام فور الفتح
     if(window.loadCashierCategories) window.loadCashierCategories();
 };

@@ -433,15 +433,6 @@ areaName: "المنطقة",
         checkDeviceBinding();
     }
 
-    function checkDeviceBinding() {
-    // نستخدم localStorage هنا لكي لا يتغير الـ ID للجهاز ابداً
-    let deviceID = localStorage.getItem('fawatirr_device_id');
-    if (!deviceID) {
-        deviceID = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
-        localStorage.setItem('fawatirr_device_id', deviceID);
-    }
-    console.log("هوية الجهاز الحالية:", deviceID);
-}
 
     // فحص حالة الدخول عند تحميل الصفحة
     window.addEventListener('DOMContentLoaded', (event) => {
@@ -1408,7 +1399,8 @@ window.searchProduct = function() {
 
 // 3. توحيد دالة معرف الجهاز
 function checkDeviceBinding() {
-    let deviceID = localStorage.getItem('figs_pos_id'); // توحيد الاسم هنا
+    // توحيد المسمى إلى figs_pos_id ليتوافق مع الكاشير
+    let deviceID = localStorage.getItem('figs_pos_id');
     if (!deviceID) {
         deviceID = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
         localStorage.setItem('figs_pos_id', deviceID);
@@ -1736,13 +1728,17 @@ if (t.closest('.delete-price-btn')) {
         if (hidden[role]) hidden[role].forEach(s => document.querySelectorAll(s).forEach(el => el.style.setProperty('display', 'none', 'important')));
     };
 
-    const role = sessionStorage.getItem('userRole');
-    if (role) {
-        window.applyRolePermissions(role);
-        let deviceID = localStorage.getItem('fawatirr_device_id') || 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
-        localStorage.setItem('fawatirr_device_id', deviceID);
-        update(ref(database, 'authorized_devices/' + deviceID), { status: 'online', lastSeen: new Date().toLocaleString() });
-    }
+    // البحث عن السطر الذي يبدأ بـ let deviceID = localStorage.getItem...
+const role = sessionStorage.getItem('userRole');
+if (role) {
+    window.applyRolePermissions(role);
+    let deviceID = checkDeviceBinding(); // استخدام الدالة الموحدة
+    update(ref(database, 'authorized_devices/' + deviceID), { 
+        id: deviceID,
+        status: 'online', 
+        lastSeen: new Date().toLocaleString() 
+    });
+}
 
 
      // دالة التحديث الفعلي للمستخدم في Firebase

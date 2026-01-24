@@ -11,16 +11,32 @@
 <body class="rtl">
 
     <div id="login-overlay" class="login-screen">
-        <div class="login-box">
-            <img src="logo.png" class="login-logo">
-            <h2 id="branch-display">جاري التحقق من الجهاز...</h2>
-            <div class="pin-display"><input type="password" id="pin-input" readonly placeholder="****"></div>
-            <div class="pin-pad">
-                <button onclick="appendPin('1')">1</button> <button class="btn-clear" onclick="clearPin()">C</button>
-                <button class="btn-login" onclick="checkCashierLogin()">دخول</button>
-            </div>
+    <div class="login-box">
+        <img src="logo.png" class="login-logo">
+        <h2 id="branch-display" style="color:var(--gold-accent); margin-bottom:10px;">جاري التحقق...</h2>
+        <h3 id="login-title">تسجيل دخول الكاشير</h3>
+        
+        <div class="pin-display">
+            <input type="password" id="pin-input" readonly placeholder="******">
         </div>
+
+        <div class="pin-pad">
+            <button onclick="appendCashierPin('1')">1</button>
+            <button onclick="appendCashierPin('2')">2</button>
+            <button onclick="appendCashierPin('3')">3</button>
+            <button onclick="appendCashierPin('4')">4</button>
+            <button onclick="appendCashierPin('5')">5</button>
+            <button onclick="appendCashierPin('6')">6</button>
+            <button onclick="appendCashierPin('7')">7</button>
+            <button onclick="appendCashierPin('8')">8</button>
+            <button onclick="appendCashierPin('9')">9</button>
+            <button class="btn-clear" onclick="clearCashierPin()">C</button>
+            <button onclick="appendCashierPin('0')">0</button>
+            <button class="btn-login" onclick="checkCashierLogin()">Enter</button>
+        </div>
+        <p id="login-error" style="color: #e94560; margin-top: 15px; display: none;">الرمز غير صحيح!</p>
     </div>
+</div>
 
     <div class="dashboard-container" id="main-ui" style="display:none;">
         <main class="main-content">
@@ -190,6 +206,27 @@ window.updateBasketUI = function() {
     }
 };
 
+let cashierPin = "";
+
+window.appendCashierPin = function(num) {
+    if (cashierPin.length < 6) {
+        cashierPin += num;
+        document.getElementById('pin-input').value = "*".repeat(cashierPin.length);
+        document.getElementById('login-error').style.display = "none";
+    }
+};
+
+window.clearCashierPin = function() {
+    cashierPin = "";
+    document.getElementById('pin-input').value = "";
+};
+
+window.checkCashierLogin = function() {
+    if (window.verifyCashier) {
+        window.verifyCashier(cashierPin);
+    }
+};
+
     </script>
 
     <script type="module">
@@ -238,15 +275,38 @@ window.updateBasketUI = function() {
 
         initDevice();
 
-        // دالة التحقق من الكاشير
-        window.verifyCashier = async function(pin) {
-            const snap = await get(ref(database, 'cashiers/' + pin));
-            if(snap.exists()) {
-                document.getElementById('login-overlay').style.display = 'none';
-                document.getElementById('main-ui').style.display = 'flex';
-                loadCashierMain();
-            } else { alert("الرمز خطأ!"); }
-        };
+        // تحديث دالة التحقق داخل الموديول لتعمل بدقة
+window.verifyCashier = async function(pin) {
+    const errorMsg = document.getElementById('login-error');
+    
+    try {
+        // البحث عن الكاشير في قاعدة البيانات بواسطة الرمز
+        const snap = await get(ref(database, 'cashiers/' + pin));
+        
+        if (snap.exists()) {
+            const cashierData = snap.val();
+            
+            // تخزين بيانات الجلسة للأمان
+            sessionStorage.setItem('cashierName', cashierData.name);
+            sessionStorage.setItem('cashierLoggedIn', 'true');
+            
+            // إخفاء شاشة الدخول وإظهار واجهة المبيعات
+            document.getElementById('login-overlay').style.display = 'none';
+            document.getElementById('main-ui').style.display = 'flex';
+            
+            // تحميل الصفحة الرئيسية للكاشير
+            loadCashierMain();
+        } else {
+            // الرمز خاطئ
+            errorMsg.style.display = "block";
+            clearCashierPin();
+            // اهتزاز بسيط للتنبيه (اختياري من الـ CSS)
+        }
+    } catch (e) {
+        console.error("خطأ في الاتصال:", e);
+        alert("فشل الاتصال بقاعدة البيانات");
+    }
+};
 
         window.renderRecentOrders = function() {
     onValue(ref(database, 'orders'), (snapshot) => {

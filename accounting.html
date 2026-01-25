@@ -59,7 +59,7 @@
             <div id="drop-stores" class="dropdown-container">
                 <a href="#" class="sidebar-item" id="sub-inv-items" onclick="loadPage('inv-items')">مواد المخزون</a>
                 <a class="sidebar-item" id="sub-storage-locations" onclick="loadPage('storage-locations')">أماكن التخزين</a>
-                <a class="sidebar-item" id="sub-disbursement">صرف</a>
+                <a href="#" class="sidebar-item" id="sub-disbursement" onclick="loadPage('disbursement')">صرف</a>
                 <a class="sidebar-item" id="sub-production">انتاج</a>
                 <a class="sidebar-item" id="sub-inventory-check">جرد</a>
                 <a class="sidebar-item" id="sub-transfers">تحويلات</a>
@@ -415,6 +415,9 @@ else if (pageId === 'inv-items') {
 }
 else if (pageId === 'storage-locations') {
     loadStorageLocationsPage();
+}
+else if (pageId === 'disbursement') {
+    loadDisbursementPage();
 }
 };
 
@@ -2428,6 +2431,55 @@ window.backspaceKeypad = () => {
 };
 window.closeKeypad = () => document.getElementById('keypad-overlay').remove();
 
+// 1. التبديل بين حقول الإنتاج والطلبات
+window.toggleDisburseFields = function() {
+    const type = document.getElementById('disburse-type-select').value;
+    document.getElementById('field-production').style.display = (type === 'production') ? 'block' : 'none';
+    document.getElementById('field-order').style.display = (type === 'order') ? 'block' : 'none';
+};
+
+// 2. اختيار صنف من نتائج البحث لفتح لوحة الأرقام
+window.selectDisburseItem = async function(id) {
+    const [pSnap, iSnap] = await Promise.all([get(ref(database, 'products/' + id)), get(ref(database, 'inventory_items/' + id))]);
+    const item = pSnap.val() || iSnap.val();
+    if (!item) return;
+    
+    document.getElementById('disburse-search-results').style.display = 'none';
+    document.getElementById('search-inv-disburse').value = "";
+    
+    // فتح لوحة الأرقام فوراً
+    const currentStock = item.stock || item.branches?.main?.stock || 0;
+    openQtyKeypad(item, currentStock);
+};
+
+// 3. إضافة الصنف من لوحة الأرقام إلى السلة
+window.addCurrentToBasket = function(id, name) {
+    const qty = parseFloat(document.getElementById('keypad-display').value);
+    if (!qty || qty <= 0) return alert("يرجى إدخال كمية صحيحة");
+
+    // التحقق إذا كان الصنف مضافاً مسبقاً لزيادة الكمية فقط
+    const existing = disbursementBasket.find(i => i.id === id);
+    if (existing) {
+        existing.qty += qty;
+    } else {
+        disbursementBasket.push({ id, name, qty });
+    }
+
+    closeKeypad();
+    renderDisburseBasket();
+};
+
+// 4. تحديث جدول السلة داخل المودال
+window.renderDisburseBasket = function() {
+    const tbody = document.getElementById('disburse-basket-body');
+    tbody.innerHTML = disbursementBasket.map((item, index) => `
+        <tr>
+            <td>${item.name}</td>
+            <td style="font-weight:bold;">${item.qty}</td>
+            <td><button onclick="disbursementBasket.splice(${index}, 1); renderDisburseBasket();" class="btn-clear" style="padding:2px 5px;">❌</button></td>
+        </tr>`).join('');
+};
+
     </script>
 
     <script type="module">
@@ -4385,6 +4437,36 @@ window.processFinalDisbursement = async function() {
         window.disbursementBasket = [];
         closeModal();
     } catch (e) { alert("خطأ: " + e.message); }
+};
+
+// تعبئة قوائم الموظفين والكاشير داخل مودال الصرف
+window.populateDisburseDropdowns = async function() {
+    const [staffSnap, cashierSnap] = await Promise.all([
+        get(ref(database, 'system_users')),
+        get(ref(database, 'cashiers'))
+    ]);
+
+    const staffSelect = document.getElementById('select-prod-staff');
+    const cashierSelect = document.getElementById('select-cashier-ref');
+
+    if (staffSelect && staffSnap.exists()) {
+        staffSelect.innerHTML = Object.values(staffSnap.val())
+            .map(u => `<option value="${u.name}">${u.name} (${u.role})</option>`).join('');
+    }
+
+    if (cashierSelect && cashierSnap.exists()) {
+        cashierSelect.innerHTML = Object.values(cashierSnap.val())
+            .map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+    }
+};
+
+// دالة عرض تفاصيل سند قديم
+window.viewDisburseSlip = async function(id) {
+    const snap = await get(ref(database, 'disbursements/' + id));
+    const slip = snap.val();
+    let itemsHtml = slip.items.map(i => `<li>${i.name}: ${i.qty}</li>`).join('');
+    
+    alert(`تفاصيل السند #${slip.slipNo}\nالمستلم: ${slip.receiverName}\nالأصناف:\n${itemsHtml}`);
 };
 
 </script>

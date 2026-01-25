@@ -2696,11 +2696,18 @@ window.updateDeviceLink = async function(deviceId, branchId, branchName) {
 
 // جلب وعرض المنتجات مع مراقبة نقطة إعادة الطلب
 window.initProductsLogic = async function() {
-    // 1. جلب بيانات الفروع لملء فلتر الفروع
-    const branchesSnap = await get(ref(database, 'branches'));
+    // 1. جلب بيانات الفروع والتصنيفات معاً لضمان سرعة التحميل
+    const [branchesSnap, catsSnap] = await Promise.all([
+        get(ref(database, 'branches')),
+        get(ref(database, 'categories'))
+    ]);
+    
+    const allCategories = catsSnap.val() || {};
     populateFilter('filter-product-branch', branchesSnap.val(), 'nameAr');
+    // تعبئة فلتر التصنيفات في أعلى الجدول
+    populateFilter('filter-product-category', allCategories, 'nameAr');
 
-    // 2. مراقبة المنتجات بشكل لحظي من Firebase
+    // 2. مراقبة المنتجات بشكل لحظي
     onValue(ref(database, 'products'), (snapshot) => {
         const tbody = document.getElementById('products-list-body');
         if (!tbody) return;
@@ -2710,17 +2717,22 @@ window.initProductsLogic = async function() {
         for (let id in products) {
             const p = products[id];
             
+            // --- الربط الذكي: البحث عن اسم القسم باستخدام الـ ID المار ---
+            const catName = p.categoryId && allCategories[p.categoryId] 
+                ? allCategories[p.categoryId].nameAr 
+                : '<span style="color:#666;">غير مصنف</span>';
+
             // --- منطق التنبيه الذكي بالألوان ---
             let stockColor = "inherit";
             let statusText = "مستقر";
             let rowClass = "";
 
             if (parseFloat(p.stock) <= parseFloat(p.reorderPoint)) {
-                stockColor = "#e94560"; // لون أحمر للتنبيه عند الوصول لنقطة الطلب
+                stockColor = "#e94560"; 
                 statusText = "نقص مخزون ⚠️";
                 rowClass = "low-stock-critical";
             } else if (parseFloat(p.stock) <= parseFloat(p.reorderPoint) * 1.2) {
-                stockColor = "#f39c12"; // لون أصفر عند الاقتراب من النقص
+                stockColor = "#f39c12"; 
                 statusText = "إعادة طلب قريباً";
                 rowClass = "low-stock-warning";
             }
@@ -2729,14 +2741,13 @@ window.initProductsLogic = async function() {
             tbody.innerHTML += `
                 <tr class="product-row ${rowClass}">
                     <td>
-                        <input type="checkbox" class="product-checkbox" 
-                               data-id="${id}" data-name="${p.nameAr}">
+                        <input type="checkbox" class="product-checkbox" data-id="${id}" data-name="${p.nameAr}">
                     </td>
                     <td style="text-align:right;">
                         <div style="font-weight:bold;">${p.nameAr}</div>
                         <div style="font-size:11px; color:#aaa;">${p.nameEn || ''}</div>
                     </td>
-                    <td style="font-size:13px;">${p.categoryName || 'غير محدد'}</td>
+                    <td style="font-size:13px; color:var(--gold-accent); font-weight:bold;">${catName}</td>
                     <td style="font-size:13px;">
                         <span title="التكلفة">${parseFloat(p.cost).toFixed(3)}</span> / 
                         <span title="سعر البيع" style="color:#28a745; font-weight:bold;">${parseFloat(p.price).toFixed(3)}</span>
@@ -2762,28 +2773,18 @@ window.initProductsLogic = async function() {
                     <td>
                         <div style="display:flex; gap:8px; justify-content:center;">
                             <button class="btn-main" style="padding:6px 12px; background:var(--primary-blue);" 
-                                    onclick="editProduct('${id}')" title="تعديل المنتج">
-                                <i class="fas fa-edit"></i>
-                            </button>
+                                    onclick="editProduct('${id}')"><i class="fas fa-edit"></i></button>
                             <button class="btn-clear" style="padding:6px 12px; background:#e94560; color:white; border:none;" 
-                                    onclick="confirmDeleteProduct('${id}')" title="حذف المنتج">
-                                <i class="fas fa-trash"></i>
-                            </button>
+                                    onclick="confirmDeleteProduct('${id}')"><i class="fas fa-trash"></i></button>
                         </div>
                     </td>
                 </tr>`;
             
-            // --- توليد صورة الباركود فوراً بعد إضافة السطر للـ DOM ---
+            // توليد الباركود
             setTimeout(() => {
-                if(document.getElementById(`bc-${id}`)) {
-                    JsBarcode(`#bc-${id}`, p.barcode, { 
-                        height: 35, 
-                        displayValue: true, 
-                        fontSize: 12,
-                        background: "#ffffff",
-                        lineColor: "#000000",
-                        margin: 5
-                    });
+                const canvas = document.getElementById(`bc-${id}`);
+                if(canvas) {
+                    JsBarcode(`#bc-${id}`, p.barcode, { height: 35, displayValue: true, fontSize: 12 });
                 }
             }, 150);
         }

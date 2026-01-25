@@ -1875,7 +1875,6 @@ window.goBackCategory = function() {
     loadCategoriesPage();
 };
 
-
 // دالة بناء صفحة مواد المخزون
 window.loadInventoryItemsPage = function() {
     const lang = translations[currentLang];
@@ -1886,7 +1885,7 @@ window.loadInventoryItemsPage = function() {
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
                     <button class="btn-main" onclick="openAddInvItemModal()">+ مادة جديدة</button>
                     <button class="btn-main" style="background:#27ae60;" onclick="exportInvItemsExcel()"><i class="fas fa-file-excel"></i> تقرير</button>
-                    <button class="btn-main" style="background:#8e44ad;" onclick="downloadInvBarcodesZIP()"><i class="fas fa-file-archive"></i> تحميل الباركودات</button>
+                    <button class="btn-main" style="background:#8e44ad;" onclick="downloadInvBarcodesZIP()"><i class="fas fa-file-archive"></i> تحميل الكل ZIP</button>
                     <button class="btn-main" style="background:#2980b9;" onclick="triggerBulkInvImport()"><i class="fas fa-upload"></i> إضافة مجموعة</button>
                     <button class="btn-clear" onclick="downloadInvItemTemplate()" style="font-size:11px; border:1px solid #444;"><i class="fas fa-download"></i> النموذج</button>
                 </div>
@@ -1895,11 +1894,6 @@ window.loadInventoryItemsPage = function() {
             <div class="info-card" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:15px; background: rgba(255,255,255,0.05); margin:15px 0; padding:15px; border-radius:10px;">
                 <select id="inv-filter-branch" onchange="initInventoryItemsLogic()"><option value="main">الفرع الرئيسي</option></select>
                 <select id="inv-filter-storage" onchange="filterInvTable()"><option value="">كل أماكن التخزين</option></select>
-                <select id="inv-sort-sales" onchange="filterInvTable()">
-                    <option value="none">ترتيب المبيعات</option>
-                    <option value="high">الأعلى</option>
-                    <option value="low">الأقل</option>
-                </select>
             </div>
 
             <div style="overflow-x:auto;">
@@ -1912,9 +1906,6 @@ window.loadInventoryItemsPage = function() {
                             <th>المخزون (الوحدة)</th>
                             <th>الحالة</th>
                             <th>مكان التخزين</th>
-                            <th>مُعرف الإنتاج</th>
-                            <th>غير مُعرف</th>
-                            <th>مرات البيع</th>
                             <th>الباركود</th>
                             <th>إجراءات</th>
                         </tr>
@@ -3442,12 +3433,27 @@ window.deleteUnit = async function(id) {
 
 // 2. دالة تحميل باركود واحد فقط
 window.downloadSingleBarcode = function(id, nameAr) {
-    const canvas = document.getElementById(`bc-${id}`);
+    // محرك ذكي يبحث عن الكانفس في كلا القسمين (المنتجات أو المخزون)
+    const canvas = document.getElementById(`inv-bc-${id}`) || document.getElementById(`bc-${id}`);
+
     if (canvas) {
-        const link = document.createElement('a');
-        link.download = `${nameAr}.png`;
-        link.href = canvas.toDataURL("image/png");
-        link.click();
+        try {
+            const link = document.createElement('a');
+            // تنظيف اسم الملف من الرموز غير المسموحة
+            const safeName = nameAr.replace(/[/\\?%*:|"<>]/g, '-');
+            link.download = `Barcode_${safeName}.png`;
+            link.href = canvas.toDataURL("image/png");
+            
+            // تنفيذ التحميل
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (e) {
+            console.error("فشل تحويل الباركود لصورة:", e);
+            alert("حدث خطأ أثناء تحميل الصورة.");
+        }
+    } else {
+        alert("عذراً، لم يتم العثور على صورة الباركود. تأكد من ظهور الصورة بوضوح في الجدول.");
     }
 };
 
@@ -3718,10 +3724,10 @@ window.deleteCategory = async function(id) {
 
 // مراقبة مواد المخزون
 window.initInventoryItemsLogic = async function() {
-    // 1. تحديد الفرع المختار (الافتراضي: الرئيسي)
+    // 1. تحديد الفرع المختار من القائمة المنسدلة
     const branchId = document.getElementById('inv-filter-branch')?.value || 'main';
     
-    // 2. جلب بيانات الفروع وأماكن التخزين لضمان الربط اللحظي
+    // 2. جلب بيانات الفروع وأماكن التخزين لضمان ظهور الأسماء بدلاً من الرموز
     const [branchesSnap, storageSnap] = await Promise.all([
         get(ref(database, 'branches')),
         get(ref(database, 'storage_locations'))
@@ -3729,11 +3735,11 @@ window.initInventoryItemsLogic = async function() {
     
     const allStorageLocs = storageSnap.val() || {};
     
-    // ملء الفلاتر العلوية
+    // ملء قوائم الفلترة العلوية
     populateFilter('inv-filter-branch', branchesSnap.val(), 'nameAr');
     populateFilter('inv-filter-storage', allStorageLocs, 'nameAr');
 
-    // 3. مراقبة سجل مواد المخزون بشكل لحظي
+    // 3. مراقبة بيانات المخزون وتحديث الجدول لحظياً
     onValue(ref(database, 'inventory_items'), (snapshot) => {
         const tbody = document.getElementById('inv-items-list-body');
         if (!tbody) return;
@@ -3743,25 +3749,26 @@ window.initInventoryItemsLogic = async function() {
         for (let id in items) {
             const item = items[id];
             
-            // --- الربط التلقائي لمكان التخزين ---
+            // --- الربط الذكي لمكان التخزين ---
             const storageName = item.storageId && allStorageLocs[item.storageId] 
                 ? allStorageLocs[item.storageId].nameAr 
                 : '<span style="color:#666; font-size:11px;">غير محدد</span>';
 
-            // --- جلب المخزون الخاص بالفرع المختار ---
+            // --- جلب كمية المخزون بناءً على الفرع المختار ---
             const branchStock = item.branches?.[branchId]?.stock || 0;
             
-            // --- منطق الألوان الذكي للتنبيه بالنقص ---
-            let statusColor = "#28a745"; // أخضر: مستقر
+            // --- منطق الألوان الذكي للتنبيه بالنقص (نظام الإشارات) ---
+            let statusColor = "#28a745"; // أخضر للمستقر
             let statusText = "مستقر";
             if (parseFloat(branchStock) <= parseFloat(item.reorderPoint)) {
-                statusColor = "#e94560"; // أحمر: نقص
+                statusColor = "#e94560"; // أحمر للنقص الحاد
                 statusText = "نقص ⚠️";
             } else if (parseFloat(branchStock) <= parseFloat(item.reorderPoint) * 1.2) {
-                statusColor = "#f39c12"; // أصفر: قريب
+                statusColor = "#f39c12"; // أصفر للاقتراب من النقص
                 statusText = "إعادة طلب";
             }
 
+            // --- بناء صف الجدول (تمت إزالة الأعمدة الثلاثة المطلوبة) ---
             tbody.innerHTML += `
                 <tr class="inv-item-row">
                     <td>
@@ -3779,25 +3786,25 @@ window.initInventoryItemsLogic = async function() {
                         <span class="rank-badge" style="background:${statusColor}; font-size:10px; padding:2px 8px;">${statusText}</span>
                     </td>
                     <td style="color:var(--gold-accent); font-size:13px;">
-                        <i class="fas fa-map-marker-alt" style="font-size:10px; opacity:0.6;"></i> ${storageName}
+                        <i class="fas fa-map-marker-alt" style="font-size:10px; opacity:0.6; margin-left:4px;"></i>${storageName}
                     </td>
-                    <td style="text-align:center; font-weight:bold;">${item.prodIdentified || 0}</td>
-                    <td style="text-align:center; color:#aaa;">${item.prodUnidentified || 0}</td>
-                    <td style="text-align:center; font-weight:bold;">${item.salesCount || 0}</td>
                     <td>
                         <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
                             <canvas id="inv-bc-${id}" style="width:100px; height:40px;"></canvas>
-                            <button onclick="downloadSingleBarcode('${id}', '${item.nameAr}')" class="btn-clear" style="font-size:9px; padding:1px 5px; border:1px solid #444;">💾 PNG</button>
+                            <button onclick="downloadSingleBarcode('${id}', '${item.nameAr}')" 
+                                    class="btn-clear" style="font-size:9px; padding:1px 8px; border:1px solid #555; background:rgba(255,255,255,0.05);">
+                                <i class="fas fa-download"></i> PNG
+                            </button>
                         </div>
                     </td>
                     <td>
-                        <button class="btn-main" style="padding:6px 10px;" onclick="editInvItem('${id}')">
+                        <button class="btn-main" style="padding:6px 10px;" onclick="editInvItem('${id}')" title="تعديل">
                             <i class="fas fa-edit"></i>
                         </button>
                     </td>
                 </tr>`;
             
-            // توليد الباركود فوراً
+            // توليد صورة الباركود فورياً بعد تحديث الواجهة
             setTimeout(() => {
                 const canvas = document.getElementById(`inv-bc-${id}`);
                 if(canvas) {
@@ -3805,7 +3812,8 @@ window.initInventoryItemsLogic = async function() {
                         height: 30, 
                         displayValue: true, 
                         fontSize: 10,
-                        margin: 2
+                        margin: 2,
+                        background: "#ffffff"
                     });
                 }
             }, 150);

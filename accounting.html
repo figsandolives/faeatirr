@@ -1957,6 +1957,61 @@ window.downloadInvBarcodesZIP = async function() {
     saveAs(content, `Inv_Barcodes_${Date.now()}.zip`);
 };
 
+
+// 1. فتح نافذة إضافة مادة مخزون جديدة
+window.openAddInvItemModal = function() {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box" style="width:600px;">
+                <h3>إضافة مادة مخزون جديدة</h3>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                    <input type="text" id="inv-name-ar" placeholder="الاسم العربي">
+                    <input type="text" id="inv-name-en" placeholder="الاسم الإنجليزي">
+                    <input type="number" id="inv-cost" placeholder="التكلفة">
+                    <select id="inv-unit-select"></select>
+                    <input type="number" id="inv-stock" placeholder="المخزون الأولي">
+                    <input type="number" id="inv-reorder" placeholder="نقطة إعادة الطلب">
+                    <div style="grid-column: span 2;">
+                        <input type="text" id="inv-barcode" placeholder="الباركود (اتركه فارغاً للتوليد آلياً)">
+                    </div>
+                </div>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveNewInvItem()">إضافة المادة</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // تعبئة الوحدات في القائمة المنسدلة
+    const select = document.getElementById('inv-unit-select');
+    if (window.availableUnits) {
+        for (let id in window.availableUnits) {
+            const u = window.availableUnits[id];
+            select.innerHTML += `<option value="${u.nameAr}">${u.nameAr}</option>`;
+        }
+    }
+};
+
+// 2. تفعيل اختيار الكل في الجدول
+window.toggleAllInvItems = function(source) {
+    const checkboxes = document.querySelectorAll('.inv-checkbox');
+    checkboxes.forEach(cb => cb.checked = source.checked);
+};
+
+// 3. تشغيل نافذة اختيار ملف الإكسل
+window.triggerBulkInvImport = function() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx, .xls';
+    input.onchange = (e) => {
+        if (window.handleBulkInvProductImport) {
+            window.handleBulkInvProductImport(e);
+        }
+    };
+    input.click();
+};
+
     </script>
 
     <script type="module">
@@ -3359,6 +3414,61 @@ window.handleBulkInvProductImport = async function(event) {
         document.getElementById('inv-import-progress').style.display = 'none';
     };
     reader.readAsArrayBuffer(file);
+};
+
+// 1. حفظ المادة الجديدة في قاعدة البيانات
+window.saveNewInvItem = async function() {
+    const nameAr = document.getElementById('inv-name-ar').value;
+    const cost = document.getElementById('inv-cost').value;
+    const unit = document.getElementById('inv-unit-select').value;
+    const stock = document.getElementById('inv-stock').value;
+    const reorder = document.getElementById('inv-reorder').value;
+    let barcode = document.getElementById('inv-barcode').value || "INV" + Date.now();
+
+    if (!nameAr || !cost) return alert("يرجى إكمال البيانات الأساسية");
+
+    const id = Date.now();
+    const itemData = {
+        id,
+        nameAr,
+        nameEn: document.getElementById('inv-name-en').value || '',
+        cost: parseFloat(cost),
+        unit,
+        reorderPoint: parseFloat(reorder) || 5,
+        barcode,
+        branches: { 'main': { stock: parseFloat(stock) || 0 } },
+        prodIdentified: 0,
+        prodUnidentified: parseFloat(stock) || 0,
+        createdAt: new Date().toISOString()
+    };
+
+    try {
+        await set(ref(database, 'inventory_items/' + id), itemData);
+        alert("✅ تم إضافة مادة المخزون بنجاح");
+        closeModal();
+    } catch (e) { alert("خطأ: " + e.message); }
+};
+
+// 2. تصدير تقرير مواد المخزون إلى إكسل
+window.exportInvItemsExcel = async function() {
+    const snap = await get(ref(database, 'inventory_items'));
+    const items = Object.values(snap.val() || {});
+    if (items.length === 0) return alert("لا توجد بيانات لتصديرها");
+
+    const branchId = document.getElementById('inv-filter-branch')?.value || 'main';
+    const data = items.map(item => ({
+        "المادة": item.nameAr,
+        "التكلفة": item.cost,
+        "المخزون": item.branches?.[branchId]?.stock || 0,
+        "الوحدة": item.unit,
+        "مكان التخزين": item.storageName || 'غير محدد',
+        "الباركود": item.barcode
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Inventory Report");
+    XLSX.writeFile(workbook, `Inventory_Report_${Date.now()}.xlsx`);
 };
 
 </script>

@@ -413,6 +413,9 @@ else if (pageId === 'categories') {
 else if (pageId === 'inv-items') {
     loadInventoryItemsPage();
 }
+else if (pageId === 'storage-locations') {
+    loadStorageLocationsPage();
+}
 };
 
         // --- كود نظام الدخول والتعرف على الجهاز ---
@@ -2012,6 +2015,82 @@ window.triggerBulkInvImport = function() {
     input.click();
 };
 
+// متغير لتتبع مكان التخزين المفتوح حالياً
+window.currentStorageId = null;
+
+// 1. دالة بناء صفحة أماكن التخزين الرئيسية
+window.loadStorageLocationsPage = function() {
+    window.currentStorageId = null; // تصفير الموقع عند الدخول
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-archive"></i> أماكن التخزين</h3>
+                <button class="btn-main" onclick="openAddStorageModal()">+ مكان تخزين جديد</button>
+            </div>
+            
+            <div id="storage-list-view">
+                <table class="data-table" style="margin-top:20px;">
+                    <thead>
+                        <tr>
+                            <th>مكان التخزين</th>
+                            <th>عدد العناصر (منتجات + مواد)</th>
+                            <th>إجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="storage-locations-body"></tbody>
+                </table>
+            </div>
+
+            <div id="storage-details-view" style="display:none;">
+                <div class="header-flex" style="background: rgba(255,255,255,0.05); padding:15px; border-radius:10px; margin-bottom:20px;">
+                    <h4 id="active-storage-name" style="color:var(--gold-accent);"></h4>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-main" style="background:#27ae60;" onclick="openAddItemsToStorageModal()">+ إضافة منتج / مادة</button>
+                        <button class="btn-clear" onclick="backToStorageList()"><i class="fas fa-arrow-right"></i> رجوع</button>
+                    </div>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>الاسم</th>
+                            <th>النوع</th>
+                            <th>المخزون</th>
+                            <th>إجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="storage-items-body"></tbody>
+                </table>
+            </div>
+        </div>`;
+    
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initStorageLogic) window.initStorageLogic();
+};
+
+// 2. دالة فتح مودال إضافة مكان تخزين
+window.openAddStorageModal = function() {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>إضافة مكان تخزين جديد</h3>
+                <input type="text" id="storage-name-ar" placeholder="اسم المكان بالعربي (مثل: ثلاجة 1)">
+                <input type="text" id="storage-name-en" placeholder="English Name (e.g., Fridge 1)">
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveNewStorage()">إضافة</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+// 3. دالة الرجوع للقائمة الرئيسية
+window.backToStorageList = function() {
+    document.getElementById('storage-list-view').style.display = 'block';
+    document.getElementById('storage-details-view').style.display = 'none';
+    window.currentStorageId = null;
+};
+
     </script>
 
     <script type="module">
@@ -3469,6 +3548,136 @@ window.exportInvItemsExcel = async function() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Inventory Report");
     XLSX.writeFile(workbook, `Inventory_Report_${Date.now()}.xlsx`);
+};
+
+// 1. محرك عرض أماكن التخزين وحساب العناصر
+window.initStorageLogic = async function() {
+    const [prodSnap, invSnap] = await Promise.all([
+        get(ref(database, 'products')),
+        get(ref(database, 'inventory_items'))
+    ]);
+    const allProducts = prodSnap.val() || {};
+    const allInvItems = invSnap.val() || {};
+
+    onValue(ref(database, 'storage_locations'), (snapshot) => {
+        const tbody = document.getElementById('storage-locations-body');
+        if (!tbody || window.currentStorageId) return;
+        tbody.innerHTML = "";
+        const locations = snapshot.val() || {};
+
+        for (let id in locations) {
+            const loc = locations[id];
+            // حساب عدد العناصر المربوطة بهذا المكان
+            const count = Object.values(allProducts).filter(p => p.storageId === id).length +
+                          Object.values(allInvItems).filter(i => i.storageId === id).length;
+
+            tbody.innerHTML += `
+                <tr onclick="enterStorage('${id}', '${loc.nameAr}')" style="cursor:pointer;">
+                    <td><b>${loc.nameAr}</b><br><small>${loc.nameEn}</small></td>
+                    <td><span class="rank-badge" style="background:#444;">${count} عنصر</span></td>
+                    <td>
+                        <button class="btn-main" onclick="event.stopPropagation(); editStorage('${id}')"><i class="fas fa-edit"></i></button>
+                        <button class="btn-clear" onclick="event.stopPropagation(); deleteStorage('${id}')" style="background:#e94560;"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>`;
+        }
+    });
+};
+
+// 2. الدخول لمكان تخزين وعرض محتوياته
+window.enterStorage = async function(id, name) {
+    window.currentStorageId = id;
+    document.getElementById('storage-list-view').style.display = 'none';
+    document.getElementById('storage-details-view').style.display = 'block';
+    document.getElementById('active-storage-name').innerText = "محتويات: " + name;
+
+    const [prodSnap, invSnap] = await Promise.all([
+        get(ref(database, 'products')),
+        get(ref(database, 'inventory_items'))
+    ]);
+    
+    const tbody = document.getElementById('storage-items-body');
+    tbody.innerHTML = "";
+
+    // عرض المنتجات في هذا المكان
+    Object.entries(prodSnap.val() || {}).forEach(([pid, p]) => {
+        if (p.storageId === id) {
+            tbody.innerHTML += `<tr><td>${p.nameAr}</td><td>منتج بيع</td><td>${p.stock}</td><td><button onclick="removeItemFromStorage('${pid}', 'products')" class="btn-clear" style="font-size:10px;">إزالة</button></td></tr>`;
+        }
+    });
+
+    // عرض مواد المخزون في هذا المكان
+    Object.entries(invSnap.val() || {}).forEach(([iid, i]) => {
+        if (i.storageId === id) {
+            tbody.innerHTML += `<tr><td>${i.nameAr}</td><td>مادة خام</td><td>${i.branches?.main?.stock || 0}</td><td><button onclick="removeItemFromStorage('${iid}', 'inventory_items')" class="btn-clear" style="font-size:10px;">إزالة</button></td></tr>`;
+        }
+    });
+};
+
+// 3. نافذة اختيار العناصر (المستبعد منها ما تم تصنيفه مسبقاً)
+window.openAddItemsToStorageModal = async function() {
+    const [prodSnap, invSnap] = await Promise.all([
+        get(ref(database, 'products')),
+        get(ref(database, 'inventory_items'))
+    ]);
+    
+    let listHtml = `
+        <input type="text" id="storage-search-items" placeholder="ابحث عن منتج أو مادة..." oninput="filterStorageSelection()" style="width:100%; padding:10px; margin-bottom:10px; background:#0f0f1e; border:1px solid #444; color:white; border-radius:5px;">
+        <div id="selection-list-container" style="max-height:300px; overflow-y:auto;">`;
+
+    // دمج المنتجات والمواد التي ليس لها مكان تخزين
+    const available = [
+        ...Object.entries(prodSnap.val() || {}).map(([id, p]) => ({ id, name: p.nameAr, type: 'products', sid: p.storageId })),
+        ...Object.entries(invSnap.val() || {}).map(([id, i]) => ({ id, name: i.nameAr, type: 'inventory_items', sid: i.storageId }))
+    ].filter(item => !item.sid); // المنتج الذي بداخل قسم لا يظهر
+
+    available.forEach(item => {
+        listHtml += `
+            <label class="storage-item-label" style="display:flex; align-items:center; gap:10px; padding:10px; background:rgba(255,255,255,0.05); margin-bottom:5px; border-radius:5px; cursor:pointer;">
+                <input type="checkbox" class="storage-check" value="${item.id}" data-type="${item.type}">
+                <span>${item.name} <small style="color:#aaa;">(${item.type === 'products' ? 'منتج' : 'مادة'})</small></span>
+            </label>`;
+    });
+
+    listHtml += `</div>`;
+
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>إضافة عناصر إلى مكان التخزين</h3>
+                ${listHtml}
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="confirmAddItemsToStorage()">إضافة المحددة</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+// 4. تنفيذ الربط في Firebase
+window.confirmAddItemsToStorage = async function() {
+    const checks = document.querySelectorAll('.storage-check:checked');
+    for (let check of checks) {
+        const id = check.value;
+        const type = check.dataset.type; // إما products أو inventory_items
+        await update(ref(database, type + '/' + id), { storageId: window.currentStorageId });
+    }
+    alert("✅ تم تحديث أماكن التخزين بنجاح");
+    closeModal();
+    enterStorage(window.currentStorageId, ""); // تحديث العرض
+};
+
+// 5. حذف مكان تخزين
+window.deleteStorage = async function(id) {
+    if(confirm("عند حذف المكان، ستصبح العناصر بداخله 'غير مصنفة'. هل أنت متأكد؟")) {
+        const [prodSnap, invSnap] = await Promise.all([get(ref(database, 'products')), get(ref(database, 'inventory_items'))]);
+        // فك ارتباط المنتجات والمواد
+        for (let pid in prodSnap.val()) if(prodSnap.val()[pid].storageId === id) await update(ref(database, 'products/'+pid), {storageId: null});
+        for (let iid in invSnap.val()) if(invSnap.val()[iid].storageId === id) await update(ref(database, 'inventory_items/'+iid), {storageId: null});
+        
+        await set(ref(database, 'storage_locations/' + id), null);
+    }
 };
 
 </script>

@@ -2241,6 +2241,64 @@ window.saveInvItemUpdate = function(id) {
     }
 };
 
+// دالة فلترة جدول العملاء بناءً على الرتبة
+window.filterCustomers = function(rank) {
+    const rows = document.querySelectorAll('.cust-row');
+    rows.forEach(row => {
+        if (rank === 'all') {
+            row.style.display = '';
+        } else {
+            // التحقق مما إذا كان نص الرتبة في الصف يحتوي على النوع المختار
+            const rowRank = row.dataset.rank.toLowerCase();
+            row.style.display = rowRank.includes(rank.toLowerCase()) ? '' : 'none';
+        }
+    });
+};
+
+
+// 1. دالة فتح نافذة تعديل بيانات العميل
+window.editCustomer = async function(id) {
+    // جلب بيانات العميل الحالية من Firebase
+    const snap = await get(ref(database, 'customers/' + id));
+    const cust = snap.val();
+    if (!cust) return;
+
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>تعديل بيانات العميل</h3>
+                <div style="text-align:right; margin-bottom:15px;">
+                    <label style="font-size:12px; color:#aaa;">اسم العميل</label>
+                    <input type="text" id="edit-cust-name" value="${cust.name}" placeholder="الاسم الكامل">
+                </div>
+                <div style="text-align:right; margin-bottom:15px;">
+                    <label style="font-size:12px; color:#aaa;">رقم الهاتف</label>
+                    <input type="text" id="edit-cust-phone" value="${cust.phone}" placeholder="رقم الهاتف">
+                </div>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveCustomerUpdate('${id}')">حفظ التعديلات</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+// 2. دالة جمع البيانات وإرسالها للتنفيذ
+window.saveCustomerUpdate = function(id) {
+    const newName = document.getElementById('edit-cust-name').value;
+    const newPhone = document.getElementById('edit-cust-phone').value;
+
+    if (!newName || !newPhone) return alert("يرجى إكمال جميع الحقول");
+
+    if (window.updateCustomerInFirebase) {
+        window.updateCustomerInFirebase(id, {
+            name: newName,
+            phone: newPhone
+        });
+    }
+};
+
     </script>
 
     <script type="module">
@@ -2805,9 +2863,11 @@ window.downloadExcelTemplate = function() {
 };
 
 window.initCustomersLogic = async function() {
+    // 1. جلب جميع الطلبات لمرة واحدة لحساب إحصائيات العملاء
     const ordersSnap = await get(ref(database, 'orders'));
     const allOrders = ordersSnap.val() || {};
     
+    // 2. مراقبة جدول العملاء بشكل لحظي لضمان تحديث البيانات فور تغييرها
     onValue(ref(database, 'customers'), (snapshot) => {
         const tbody = document.getElementById('customers-list-body');
         if (!tbody) return;
@@ -2816,14 +2876,15 @@ window.initCustomersLogic = async function() {
 
         for (let id in customers) {
             const cust = customers[id];
+            // تصفية الطلبات الخاصة بهذا العميل فقط عن طريق رقم الهاتف
             const custOrders = Object.values(allOrders).filter(o => o.phone === cust.phone);
             
-            // حساب الإحصائيات
+            // --- محرك الإحصائيات ---
             const orderCount = custOrders.length;
-            const totalSpent = custOrders.reduce((sum, o) => sum + parseFloat(o.total), 0);
+            const totalSpent = custOrders.reduce((sum, o) => sum + (parseFloat(o.total) || 0), 0);
             const avgBill = orderCount > 0 ? (totalSpent / orderCount) : 0;
             
-            // حساب متوسط الأيام (بين أول وآخر طلب)
+            // حساب معدل تكرار الشراء بالستخدام متوسط الأيام بين أول وآخر طلب
             let avgDays = 0;
             if (orderCount > 1) {
                 const dates = custOrders.map(o => new Date(o.date).getTime()).sort();
@@ -2831,29 +2892,56 @@ window.initCustomersLogic = async function() {
                 avgDays = (diffTime / (1000 * 60 * 60 * 24)) / (orderCount - 1);
             }
 
-            // تصنيف العميل
+            // --- محرك التصنيف الذكي (Segmentation) ---
             let rank = "عادي";
             let rankClass = "";
-            if (avgBill >= 20 && avgDays <= 3 && orderCount > 1) { rank = "VVIP ★"; rankClass = "vvip-tag"; }
-            else if (avgBill >= 10 && avgDays <= 7 && orderCount > 1) { rank = "VIP"; rankClass = "vip-tag"; }
-            
-            if (cust.status === 'blocked') { rank = "موقوف ⛔"; rankClass = "blocked-tag"; }
+            let rankFilter = "all"; // القيمة التي تستخدمها أزرار الفلترة
 
+            if (avgBill >= 20 && avgDays <= 3 && orderCount > 1) { 
+                rank = "VVIP ★"; 
+                rankClass = "vvip-tag"; 
+                rankFilter = "vvip";
+            } 
+            else if (avgBill >= 10 && avgDays <= 7 && orderCount > 1) { 
+                rank = "VIP"; 
+                rankClass = "vip-tag"; 
+                rankFilter = "vip";
+            }
+            
+            // حالة الحظر تطغى على التصنيف الفني للعميل
+            if (cust.status === 'blocked') { 
+                rank = "موقوف ⛔"; 
+                rankClass = "blocked-tag"; 
+                rankFilter = "blocked";
+            }
+
+            // --- بناء صف الجدول ---
             tbody.innerHTML += `
-                <tr class="cust-row" data-rank="${rank.toLowerCase()}">
+                <tr class="cust-row" data-rank="${rankFilter}">
                     <td><input type="checkbox" class="cust-checkbox" data-id="${id}"></td>
                     <td onclick="viewCustomerOrders('${cust.phone}')" style="cursor:pointer">
-                        <div style="font-weight:bold">${cust.name}</div>
-                        <div style="font-size:12px; color:#aaa">${cust.phone}</div>
+                        <div style="font-weight:bold; color:var(--gold-accent);">${cust.name}</div>
+                        <div style="font-size:11px; color:#aaa; font-family:monospace;">${cust.phone}</div>
                     </td>
                     <td><span class="rank-badge ${rankClass}">${rank}</span></td>
-                    <td style="font-size:12px; text-align:right">
-                        عدد: ${orderCount} | متوسط: ${avgBill.toFixed(2)} د.ك<br>
-                        كل: ${avgDays.toFixed(1)} يوم
+                    <td style="font-size:12px; text-align:right; line-height:1.6;">
+                        <div>الطلبات: <b>${orderCount}</b></div>
+                        <div>المتوسط: <b>${avgBill.toFixed(3)} د.ك</b></div>
+                        <div style="color:#888; font-size:10px;">التكرار: كل ${avgDays.toFixed(1)} يوم</div>
                     </td>
-                    <td>${custOrders.length > 0 ? custOrders[custOrders.length-1].date : '-'}</td>
+                    <td style="font-size:12px; vertical-align:middle;">
+                        ${custOrders.length > 0 ? custOrders[custOrders.length-1].date : '<span style="color:#444;">لا يوجد</span>'}
+                    </td>
                     <td>
-                        <button class="btn-clear" onclick="openBlockModal('${id}', '${cust.name}')">إيقاف</button>
+                        <div style="display:flex; gap:5px; justify-content:center;">
+                            <button class="btn-main" style="padding:5px 10px; background:var(--primary-blue);" onclick="editCustomer('${id}')">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn-clear" style="padding:5px 10px; background:#e94560; color:white; border:none;" 
+                                    onclick="openBlockModal('${id}', '${cust.name}')">
+                                <i class="fas fa-user-slash"></i> إيقاف
+                            </button>
+                        </div>
                     </td>
                 </tr>`;
         }
@@ -4024,6 +4112,40 @@ window.updateInvItemInFirebase = async function(id, data) {
         // لا نحتاج لتحديث الصفحة يدوياً لأن onValue ستقوم بتحديث الجدول تلقائياً
     } catch (e) {
         console.error("Error updating inventory item:", e);
+        alert("عذراً، فشل التحديث: " + e.message);
+    }
+};
+
+// 1. دالة تأكيد حظر العميل مع حفظ السبب
+window.confirmBlockCustomer = async function(id) {
+    const reason = document.getElementById('block-reason').value;
+    if (!reason) return alert("يرجى كتابة سبب الإيقاف");
+
+    try {
+        await update(ref(database, 'customers/' + id), {
+            status: 'blocked',
+            blockReason: reason
+        });
+        alert("🚫 تم إيقاف العميل بنجاح");
+        closeModal();
+    } catch (e) { alert("خطأ: " + e.message); }
+};
+
+// 2. دالة عرض تاريخ طلبات العميل (اختياري حالياً)
+window.viewCustomerOrders = function(phone) {
+    alert("سيتم عرض أرشيف طلبات العميل صاحب الرقم: " + phone);
+    // يمكنك هنا توجيه المستخدم لصفحة الطلبات مع فلترة رقم الهاتف
+};
+
+// دالة تحديث بيانات العميل في Firebase
+window.updateCustomerInFirebase = async function(id, data) {
+    try {
+        await update(ref(database, 'customers/' + id), data);
+        alert("✅ تم تحديث بيانات العميل بنجاح");
+        closeModal();
+        // الجدول سيتحدث تلقائياً بفضل وجود onValue في دالة initCustomersLogic
+    } catch (e) {
+        console.error("Error updating customer:", e);
         alert("عذراً، فشل التحديث: " + e.message);
     }
 };

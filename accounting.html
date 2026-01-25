@@ -57,7 +57,7 @@
                 <i class="fas fa-chevron-down"></i>
             </div>
             <div id="drop-stores" class="dropdown-container">
-                <a class="sidebar-item" id="sub-inv-items">مواد المخزون</a>
+                <a href="#" class="sidebar-item" id="sub-inv-items" onclick="loadPage('inv-items')">مواد المخزون</a>
                 <a class="sidebar-item" id="sub-storage-locations">أماكن التخزين</a>
                 <a class="sidebar-item" id="sub-disbursement">صرف</a>
                 <a class="sidebar-item" id="sub-production">انتاج</a>
@@ -409,6 +409,9 @@ areaName: "المنطقة",
 else if (pageId === 'categories') {
     window.categoryPath = []; // تصفير المسار عند الدخول لأول مرة
     loadCategoriesPage();
+}
+else if (pageId === 'inv-items') {
+    loadInventoryItemsPage();
 }
 };
 
@@ -1869,6 +1872,91 @@ window.goBackCategory = function() {
     loadCategoriesPage();
 };
 
+
+// دالة بناء صفحة مواد المخزون
+window.loadInventoryItemsPage = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-warehouse"></i> مواد المخزون</h3>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="btn-main" onclick="openAddInvItemModal()">+ مادة جديدة</button>
+                    <button class="btn-main" style="background:#27ae60;" onclick="exportInvItemsExcel()"><i class="fas fa-file-excel"></i> تقرير</button>
+                    <button class="btn-main" style="background:#8e44ad;" onclick="downloadInvBarcodesZIP()"><i class="fas fa-file-archive"></i> تحميل الباركودات</button>
+                    <button class="btn-main" style="background:#2980b9;" onclick="triggerBulkInvImport()"><i class="fas fa-upload"></i> إضافة مجموعة</button>
+                    <button class="btn-clear" onclick="downloadInvItemTemplate()" style="font-size:11px; border:1px solid #444;"><i class="fas fa-download"></i> النموذج</button>
+                </div>
+            </div>
+
+            <div class="info-card" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:15px; background: rgba(255,255,255,0.05); margin:15px 0; padding:15px; border-radius:10px;">
+                <select id="inv-filter-branch" onchange="initInventoryItemsLogic()"><option value="main">الفرع الرئيسي</option></select>
+                <select id="inv-filter-storage" onchange="filterInvTable()"><option value="">كل أماكن التخزين</option></select>
+                <select id="inv-sort-sales" onchange="filterInvTable()">
+                    <option value="none">ترتيب المبيعات</option>
+                    <option value="high">الأعلى</option>
+                    <option value="low">الأقل</option>
+                </select>
+            </div>
+
+            <div style="overflow-x:auto;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" id="select-all-inv" onclick="toggleAllInvItems(this)"></th>
+                            <th>المادة</th>
+                            <th>التكلفة</th>
+                            <th>المخزون (الوحدة)</th>
+                            <th>الحالة</th>
+                            <th>مكان التخزين</th>
+                            <th>مُعرف الإنتاج</th>
+                            <th>غير مُعرف</th>
+                            <th>مرات البيع</th>
+                            <th>الباركود</th>
+                            <th>إجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inv-items-list-body"></tbody>
+                </table>
+            </div>
+
+            <div id="inv-import-progress" style="display:none; margin-top:20px; padding:15px; background:rgba(0,0,0,0.3); border-radius:10px; border:1px solid var(--gold-accent);">
+                <progress id="inv-progress-bar" value="0" max="100" style="width:100%; height:15px;"></progress>
+                <p id="inv-progress-text" style="text-align:center; font-size:12px; margin-top:10px; color:var(--gold-accent);"></p>
+            </div>
+        </div>`;
+    
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initInventoryItemsLogic) window.initInventoryItemsLogic();
+};
+
+// تحميل نموذج الإكسل لمواد المخزون
+window.downloadInvItemTemplate = function() {
+    const data = [["الاسم العربي", "الاسم الإنجليزي", "التكلفة", "الوحدة", "المخزون الأولي", "نقطة إعادة الطلب", "الباركود"]];
+    const worksheet = XLSX.utils.aoa_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Inventory Template");
+    XLSX.writeFile(workbook, "Figs_Olives_Inventory_Template.xlsx");
+};
+
+// تجميع الباركودات في ملف مضغوط
+window.downloadInvBarcodesZIP = async function() {
+    const selected = document.querySelectorAll('.inv-checkbox:checked');
+    if (selected.length === 0) return alert("حدد مواد أولاً");
+    const zip = new JSZip();
+    selected.forEach(cb => {
+        const id = cb.dataset.id;
+        const name = cb.dataset.name;
+        const canvas = document.getElementById(`inv-bc-${id}`);
+        if(canvas) {
+            const imgData = canvas.toDataURL("image/png").split(',')[1];
+            zip.file(`${name}.png`, imgData, {base64: true});
+        }
+    });
+    const content = await zip.generateAsync({type:"blob"});
+    saveAs(content, `Inv_Barcodes_${Date.now()}.zip`);
+};
+
     </script>
 
     <script type="module">
@@ -3182,6 +3270,95 @@ window.deleteCategory = async function(id) {
         // 2. حذف القسم نفسه
         await set(ref(database, 'categories/' + id), null);
     }
+};
+
+
+// مراقبة مواد المخزون
+window.initInventoryItemsLogic = async function() {
+    const branchId = document.getElementById('inv-filter-branch')?.value || 'main';
+    const [branchesSnap, storageSnap] = await Promise.all([
+        get(ref(database, 'branches')),
+        get(ref(database, 'storage_locations'))
+    ]);
+    
+    populateFilter('inv-filter-branch', branchesSnap.val(), 'nameAr');
+    populateFilter('inv-filter-storage', storageSnap.val(), 'nameAr');
+
+    onValue(ref(database, 'inventory_items'), (snapshot) => {
+        const tbody = document.getElementById('inv-items-list-body');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const items = snapshot.val() || {};
+
+        for (let id in items) {
+            const item = items[id];
+            // جلب المخزون الخاص بالفرع المختار
+            const branchStock = item.branches?.[branchId]?.stock || 0;
+            
+            // منطق الألوان
+            let statusColor = "#28a745"; 
+            if (branchStock <= item.reorderPoint) statusColor = "#e94560";
+            else if (branchStock <= item.reorderPoint * 1.2) statusColor = "#f39c12";
+
+            tbody.innerHTML += `
+                <tr>
+                    <td><input type="checkbox" class="inv-checkbox" data-id="${id}" data-name="${item.nameAr}"></td>
+                    <td><b>${item.nameAr}</b></td>
+                    <td>${parseFloat(item.cost).toFixed(3)}</td>
+                    <td style="color:${statusColor}; font-weight:bold;">${branchStock} (${item.unit})</td>
+                    <td><div style="width:15px; height:15px; border-radius:50%; background:${statusColor}; margin:auto;"></div></td>
+                    <td>${item.storageName || 'غير محدد'}</td>
+                    <td>${item.prodIdentified || 0}</td>
+                    <td>${item.prodUnidentified || 0}</td>
+                    <td>${item.salesCount || 0}</td>
+                    <td><canvas id="inv-bc-${id}" style="width:80px;"></canvas></td>
+                    <td>
+                        <button class="btn-main" onclick="editInvItem('${id}')"><i class="fas fa-edit"></i></button>
+                    </td>
+                </tr>`;
+            
+            setTimeout(() => {
+                JsBarcode(`#inv-bc-${id}`, item.barcode || id, { height: 30, displayValue: true, fontSize: 10 });
+            }, 100);
+        }
+    });
+};
+
+// محرك الاستيراد الجماعي للمواد
+window.handleBulkInvProductImport = async function(event) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const rows = XLSX.utils.sheet_to_json(XLSX.read(new Uint8Array(e.target.result), {type:'array'}).Sheets[XLSX.read(new Uint8Array(e.target.result), {type:'array'}).SheetNames[0]]);
+        const total = rows.length;
+        document.getElementById('inv-import-progress').style.display = 'block';
+
+        for (let i = 0; i < total; i++) {
+            const row = rows[i];
+            const id = Date.now() + i;
+            const itemData = {
+                id,
+                nameAr: row['الاسم العربي'],
+                nameEn: row['الاسم الإنجليزي'] || '',
+                cost: parseFloat(row['التكلفة']) || 0,
+                unit: row['الوحدة'] || 'حبة',
+                reorderPoint: parseFloat(row['نقطة إعادة الطلب']) || 5,
+                barcode: row['الباركود'] || "INV" + id,
+                branches: { 'main': { stock: parseFloat(row['المخزون الأولي']) || 0 } },
+                salesCount: 0,
+                prodIdentified: 0,
+                prodUnidentified: parseFloat(row['المخزون الأولي']) || 0
+            };
+            await set(ref(database, 'inventory_items/' + id), itemData);
+            
+            const percent = Math.round(((i + 1) / total) * 100);
+            document.getElementById('inv-progress-bar').value = percent;
+            document.getElementById('inv-progress-text').innerText = `تم رفع ${i+1} من ${total}`;
+        }
+        alert("✅ اكتمل استيراد مواد المخزون");
+        document.getElementById('inv-import-progress').style.display = 'none';
+    };
+    reader.readAsArrayBuffer(file);
 };
 
 </script>

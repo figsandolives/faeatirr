@@ -4539,32 +4539,40 @@ window.processFinalDisbursement = async function() {
     } catch (e) { alert("خطأ: " + e.message); }
 };
 
-// تعبئة قوائم الموظفين والكاشير داخل مودال الصرف
+// تحديث دالة تعبئة القوائم لربط موظفي الإنتاج المسجلين
 window.populateDisburseDropdowns = async function() {
     try {
+        // جلب البيانات من جدول موظفي الإنتاج وجدول الكاشير
         const [staffSnap, cashierSnap] = await Promise.all([
-            get(ref(database, 'system_users')),
+            get(ref(database, 'production_staff')), // المصدر الجديد للبيانات
             get(ref(database, 'cashiers'))
         ]);
 
         const staffSelect = document.getElementById('select-prod-staff');
         const cashierSelect = document.getElementById('select-cashier-ref');
 
+        // تعبئة قائمة موظفي الإنتاج بالأسماء المسجلة في صفحة الإدارة
         if (staffSelect) {
             const staff = staffSnap.val() || {};
-            // تصفية المستخدمين الذين دورهم "إنتاج" أو عرض الجميع إذا رغبت
-            staffSelect.innerHTML = Object.values(staff).map(u => 
-                `<option value="${u.name}">${u.name} (${u.role})</option>`
-            ).join('') || '<option value="">لا يوجد موظفين</option>';
+            const staffOptions = Object.values(staff).map(s => 
+                `<option value="${s.nameAr}">${s.nameAr}</option>`
+            ).join('');
+            
+            staffSelect.innerHTML = staffOptions || '<option value="">لا يوجد موظفي إنتاج مسجلين</option>';
         }
 
+        // تعبئة قائمة الكاشير
         if (cashierSelect) {
             const cashiers = cashierSnap.val() || {};
-            cashierSelect.innerHTML = Object.values(cashiers).map(c => 
+            const cashierOptions = Object.values(cashiers).map(c => 
                 `<option value="${c.name}">${c.name}</option>`
-            ).join('') || '<option value="">لا يوجد كاشير</option>';
+            ).join('');
+            
+            cashierSelect.innerHTML = cashierOptions || '<option value="">لا يوجد كاشير مضاف</option>';
         }
-    } catch (e) { console.error("Error populating dropdowns:", e); }
+    } catch (e) { 
+        console.error("Error populating dropdowns:", e); 
+    }
 };
 
 // دالة عرض تفاصيل سند قديم

@@ -1746,6 +1746,71 @@ window.toggleDropdown = function(id) {
     }
 };
 
+
+// 1. دالة فتح نافذة التعديل ببيانات المنتج الحالية
+window.editProduct = async function(id) {
+    const snap = await get(ref(database, 'products/' + id));
+    const p = snap.val();
+    if (!p) return;
+
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box" style="width:600px;">
+                <h3>تعديل منتج: ${p.nameAr}</h3>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                    <input type="text" id="edit-p-name-ar" value="${p.nameAr}" placeholder="الاسم العربي">
+                    <input type="text" id="edit-p-name-en" value="${p.nameEn || ''}" placeholder="الاسم الإنجليزي">
+                    <input type="number" id="edit-p-cost" value="${p.cost}" placeholder="التكلفة">
+                    <input type="number" id="edit-p-price" value="${p.price}" placeholder="سعر البيع">
+                    <select id="edit-p-unit-select"></select>
+                    <input type="number" id="edit-p-reorder" value="${p.reorderPoint}" placeholder="نقطة إعادة الطلب">
+                    <input type="number" id="edit-p-stock" value="${p.stock}" placeholder="المخزون الحالي">
+                    <input type="text" id="edit-p-barcode" value="${p.barcode}" placeholder="الباركود">
+                </div>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveProductUpdate('${id}')">حفظ التغييرات</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // ملء قائمة الوحدات وتحديد الوحدة الحالية
+    const unitSelect = document.getElementById('edit-p-unit-select');
+    for (let uid in window.availableUnits) {
+        const unit = window.availableUnits[uid];
+        const selected = unit.nameAr === p.unit ? 'selected' : '';
+        unitSelect.innerHTML += `<option value="${unit.nameAr}" ${selected}>${unit.nameAr}</option>`;
+    }
+};
+
+// 2. دالة جمع البيانات المحدثة وإرسالها للموديول
+window.saveProductUpdate = function(id) {
+    const data = {
+        nameAr: document.getElementById('edit-p-name-ar').value,
+        nameEn: document.getElementById('edit-p-name-en').value,
+        cost: parseFloat(document.getElementById('edit-p-cost').value) || 0,
+        price: parseFloat(document.getElementById('edit-p-price').value) || 0,
+        unit: document.getElementById('edit-p-unit-select').value,
+        reorderPoint: parseFloat(document.getElementById('edit-p-reorder').value) || 0,
+        stock: parseFloat(document.getElementById('edit-p-stock').value) || 0,
+        barcode: document.getElementById('edit-p-barcode').value
+    };
+
+    if (window.updateProductInFirebase) {
+        window.updateProductInFirebase(id, data);
+    }
+};
+
+// 3. دالة حذف المنتج
+window.confirmDeleteProduct = function(id) {
+    if (confirm("هل أنت متأكد من حذف هذا المنتج نهائياً؟ سيتم حذفه أيضاً من المخازن.")) {
+        if (window.deleteProductFromFirebase) {
+            window.deleteProductFromFirebase(id);
+        }
+    }
+};
+
     </script>
 
     <script type="module">
@@ -2573,9 +2638,11 @@ window.updateDeviceLink = async function(deviceId, branchId, branchName) {
 
 // جلب وعرض المنتجات مع مراقبة نقطة إعادة الطلب
 window.initProductsLogic = async function() {
+    // 1. جلب بيانات الفروع لملء فلتر الفروع
     const branchesSnap = await get(ref(database, 'branches'));
     populateFilter('filter-product-branch', branchesSnap.val(), 'nameAr');
 
+    // 2. مراقبة المنتجات بشكل لحظي من Firebase
     onValue(ref(database, 'products'), (snapshot) => {
         const tbody = document.getElementById('products-list-body');
         if (!tbody) return;
@@ -2584,39 +2651,83 @@ window.initProductsLogic = async function() {
 
         for (let id in products) {
             const p = products[id];
-            // منطق التنبيه بالألوان
+            
+            // --- منطق التنبيه الذكي بالألوان ---
             let stockColor = "inherit";
             let statusText = "مستقر";
-            if (p.stock <= p.reorderPoint) {
-                stockColor = "#e94560"; // أحمر وصل للنقطة
+            let rowClass = "";
+
+            if (parseFloat(p.stock) <= parseFloat(p.reorderPoint)) {
+                stockColor = "#e94560"; // لون أحمر للتنبيه عند الوصول لنقطة الطلب
                 statusText = "نقص مخزون ⚠️";
-            } else if (p.stock <= p.reorderPoint * 1.2) {
-                stockColor = "#f39c12"; // أصفر اقترب
+                rowClass = "low-stock-critical";
+            } else if (parseFloat(p.stock) <= parseFloat(p.reorderPoint) * 1.2) {
+                stockColor = "#f39c12"; // لون أصفر عند الاقتراب من النقص
                 statusText = "إعادة طلب قريباً";
+                rowClass = "low-stock-warning";
             }
 
+            // --- بناء سطر الجدول لكل منتج ---
             tbody.innerHTML += `
-                <tr class="product-row">
-                    <td><input type="checkbox" class="product-checkbox" data-id="${id}" data-name="${p.nameAr}"></td>
-                    <td style="text-align:right;"><b>${p.nameAr}</b><br><small>${p.nameEn}</small></td>
-                    <td>${p.categoryName || 'غير محدد'}</td>
-                    <td>${p.cost} / <span style="color:#28a745">${p.price}</span></td>
-                    <td style="font-weight:bold; color:${stockColor}">${p.stock} (${p.unit})</td>
-                    <td><span class="rank-badge" style="background:${stockColor}">${statusText}</span></td>
-                    <td>${p.salesCount || 0}</td>
+                <tr class="product-row ${rowClass}">
                     <td>
-                        <canvas id="bc-${id}" class="mini-barcode"></canvas>
-                        <button onclick="downloadSingleBarcode('${id}', '${p.nameAr}')" class="btn-clear" style="padding:2px 5px; font-size:10px;">💾</button>
+                        <input type="checkbox" class="product-checkbox" 
+                               data-id="${id}" data-name="${p.nameAr}">
+                    </td>
+                    <td style="text-align:right;">
+                        <div style="font-weight:bold;">${p.nameAr}</div>
+                        <div style="font-size:11px; color:#aaa;">${p.nameEn || ''}</div>
+                    </td>
+                    <td style="font-size:13px;">${p.categoryName || 'غير محدد'}</td>
+                    <td style="font-size:13px;">
+                        <span title="التكلفة">${parseFloat(p.cost).toFixed(3)}</span> / 
+                        <span title="سعر البيع" style="color:#28a745; font-weight:bold;">${parseFloat(p.price).toFixed(3)}</span>
+                    </td>
+                    <td style="font-weight:bold; color:${stockColor}">
+                        ${p.stock} <small style="font-weight:normal; color:#aaa;">(${p.unit})</small>
                     </td>
                     <td>
-                        <button class="btn-main" style="padding:5px;" onclick="editProduct('${id}')"><i class="fas fa-edit"></i></button>
+                        <span class="rank-badge" style="background:${stockColor}; font-size:11px;">${statusText}</span>
+                    </td>
+                    <td style="text-align:center; font-weight:bold; color:var(--gold-accent);">
+                        ${p.salesCount || 0}
+                    </td>
+                    <td>
+                        <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
+                            <canvas id="bc-${id}" class="mini-barcode"></canvas>
+                            <button onclick="downloadSingleBarcode('${id}', '${p.nameAr}')" 
+                                    class="btn-clear" style="padding:2px 8px; font-size:10px; border:1px solid #555;">
+                                <i class="fas fa-download"></i> حفظ بصيغة PNG
+                            </button>
+                        </div>
+                    </td>
+                    <td>
+                        <div style="display:flex; gap:8px; justify-content:center;">
+                            <button class="btn-main" style="padding:6px 12px; background:var(--primary-blue);" 
+                                    onclick="editProduct('${id}')" title="تعديل المنتج">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn-clear" style="padding:6px 12px; background:#e94560; color:white; border:none;" 
+                                    onclick="confirmDeleteProduct('${id}')" title="حذف المنتج">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
                     </td>
                 </tr>`;
             
-            // توليد صورة الباركود فوراً
+            // --- توليد صورة الباركود فوراً بعد إضافة السطر للـ DOM ---
             setTimeout(() => {
-                JsBarcode(`#bc-${id}`, p.barcode, { height: 30, displayValue: true, fontSize: 10 });
-            }, 100);
+                if(document.getElementById(`bc-${id}`)) {
+                    JsBarcode(`#bc-${id}`, p.barcode, { 
+                        height: 35, 
+                        displayValue: true, 
+                        fontSize: 12,
+                        background: "#ffffff",
+                        lineColor: "#000000",
+                        margin: 5
+                    });
+                }
+            }, 150);
         }
     });
 };
@@ -2861,6 +2972,29 @@ window.refreshProductStock = async function() {
     // هنا يمكن تحديث عرض المخزون بناءً على الفرع المختار
     console.log("تغيير عرض المخزون للفرع:", branchId);
     window.initProductsLogic(); // إعادة تحميل البيانات
+};
+
+
+// دالة تحديث بيانات المنتج
+window.updateProductInFirebase = async function(id, data) {
+    try {
+        // تحديث سجل المنتج
+        await update(ref(database, 'products/' + id), data);
+        // تحديث المخزون في الفرع الرئيسي لضمان التطابق
+        await set(ref(database, 'inventory/main_branch/' + id), data.stock);
+        
+        alert("✅ تم تحديث بيانات المنتج بنجاح");
+        closeModal();
+    } catch (e) { alert("خطأ في التحديث: " + e.message); }
+};
+
+// دالة حذف المنتج من كافة السجلات
+window.deleteProductFromFirebase = async function(id) {
+    try {
+        await set(ref(database, 'products/' + id), null);
+        await set(ref(database, 'inventory/main_branch/' + id), null);
+        alert("✅ تم حذف المنتج بنجاح");
+    } catch (e) { alert("خطأ في الحذف: " + e.message); }
 };
 
 </script>

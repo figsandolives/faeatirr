@@ -2577,6 +2577,96 @@ window.openAddProductionStaffModal = function() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
+// دالة طباعة سند الصرف بتنسيق A4
+window.printDisbursementSlip = function(slip) {
+    const isProduction = slip.type === 'production';
+    const receiverLabel = isProduction ? "موظف الإنتاج" : "رقم فاتورة الطلب";
+    
+    let printHtml = `
+        <html>
+        <head>
+            <title>سند صرف #${slip.slipNo}</title>
+            <style>
+                @media print {
+                    @page { size: A4; margin: 20mm; }
+                    .no-print { display: none; }
+                }
+                body { direction: rtl; font-family: 'Cairo', Arial, sans-serif; color: #333; padding: 20px; }
+                .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 30px; }
+                .logo { width: 100px; }
+                .title { text-align: center; }
+                .slip-info { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; background: #f9f9f9; padding: 15px; border-radius: 8px; }
+                .data-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                .data-table th, .data-table td { border: 1px solid #ddd; padding: 12px; text-align: right; }
+                .data-table th { background-color: #f2f2f2; }
+                .footer { margin-top: 50px; display: flex; justify-content: space-around; text-align: center; }
+                .signature-box { border-top: 1px solid #000; width: 200px; margin-top: 40px; padding-top: 10px; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <img src="logo.png" class="logo">
+                <div class="title">
+                    <h1 style="margin:0;">مخبز التين والزيتون</h1>
+                    <h3 style="margin:5px 0; color: #555;">سند صرف مخزني (Disbursement Slip)</h3>
+                </div>
+                <div style="text-align: left; font-size: 14px;">
+                    رقم السند: #${slip.slipNo}<br>
+                    التاريخ: ${slip.date}
+                </div>
+            </div>
+
+            <div class="slip-info">
+                <div><b>نوع الصرف:</b> ${isProduction ? 'إنتاج' : 'طلب مبيعات'}</div>
+                <div><b>أمين المخزن:</b> ${slip.storekeeper}</div>
+                <div><b>المستلم (${receiverLabel}):</b> ${slip.receiverName}</div>
+                <div><b>حالة السند:</b> مكتمل (تم الخصم)</div>
+            </div>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width: 50px;">#</th>
+                        <th>اسم المادة / المنتج</th>
+                        <th>الكمية المنصرفة</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${slip.items.map((item, index) => `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${item.name}</td>
+                            <td><b>${item.qty}</b></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+
+            <div class="footer">
+                <div>
+                    <p>توقيع أمين المخزن</p>
+                    <div class="signature-box"></div>
+                </div>
+                <div>
+                    <p>توقيع المستلم</p>
+                    <div class="signature-box"></div>
+                </div>
+            </div>
+
+            <script>
+                window.onload = function() { 
+                    window.print(); 
+                    setTimeout(() => { window.close(); }, 500);
+                }
+            <\/script>
+        </body>
+        </html>`;
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(printHtml);
+    printWindow.document.close();
+};
+
     </script>
 
     <script type="module">
@@ -4499,41 +4589,75 @@ window.handleDisburseSearch = async function(e) {
 
 // 3. خصم المخزون وحفظ السند
 window.processFinalDisbursement = async function() {
-    if (disbursementBasket.length === 0) return alert("السند فارغ!");
+    // 1. التحقق من وجود أصناف في السلة قبل البدء
+    if (window.disbursementBasket.length === 0) {
+        return alert("السند فارغ! يرجى إضافة أصناف أولاً.");
+    }
     
+    // 2. جلب بيانات السند وتحديد المستلم بناءً على النوع
     const type = document.getElementById('disburse-type-select').value;
-    const receiver = type === 'production' ? document.getElementById('select-prod-staff').value : document.getElementById('invoice-no-ref').value;
+    const receiver = type === 'production' 
+        ? document.getElementById('select-prod-staff').value 
+        : document.getElementById('invoice-no-ref').value;
+
+    // التحقق من إدخال اسم المستلم أو رقم الفاتورة
+    if (!receiver) {
+        return alert(type === 'production' ? "يرجى اختيار موظف الإنتاج" : "يرجى إدخال رقم الفاتورة المرجعي");
+    }
+
     const slipId = Date.now();
-    
+    const slipNo = slipId.toString().slice(-6);
+    const storekeeper = sessionStorage.getItem('userName') || "غير مسجل";
+    const dateStr = new Date().toLocaleString();
+
     try {
-        for (let item of disbursementBasket) {
-            // خصم الكمية من المسارين (منتج أو مادة مخزون)
+        // 3. دورة تحديث المخزون (الخصم من الفرع الرئيسي)
+        for (let item of window.disbursementBasket) {
             const pRef = ref(database, 'products/' + item.id);
             const iRef = ref(database, 'inventory_items/' + item.id + '/branches/main/stock');
             
+            // محاولة جلب الصنف كمنتج جاهز أولاً
             const pSnap = await get(pRef);
             if (pSnap.exists()) {
-                await update(pRef, { stock: pSnap.val().stock - item.qty });
+                const currentStock = parseFloat(pSnap.val().stock) || 0;
+                await update(pRef, { stock: currentStock - item.qty });
             } else {
+                // إذا لم يكن منتجاً، فهو مادة مخزون (خام)
                 const iSnap = await get(iRef);
-                await set(iRef, iSnap.val() - item.qty);
+                const currentStock = parseFloat(iSnap.val()) || 0;
+                await set(iRef, currentStock - item.qty);
             }
         }
 
-        // حفظ سجل السند
-        await set(ref(database, 'disbursements/' + slipId), {
-            slipNo: slipId.toString().slice(-6),
-            date: new Date().toLocaleString(),
-            type,
+        // 4. تجهيز بيانات السند النهائية للحفظ والطباعة
+        const slipData = {
+            slipNo: slipNo,
+            date: dateStr,
+            type: type,
             receiverName: receiver,
-            storekeeper: sessionStorage.getItem('userName'),
-            items: disbursementBasket
-        });
+            storekeeper: storekeeper,
+            items: [...window.disbursementBasket] // نسخة من السلة لضمان استقلالية البيانات
+        };
 
-        alert("✅ تم تنفيذ الصرف وخصم الكميات");
+        // 5. حفظ سجل السند في الأرشيف
+        await set(ref(database, 'disbursements/' + slipId), slipData);
+
+        // 6. تنظيف الواجهة
         window.disbursementBasket = [];
         closeModal();
-    } catch (e) { alert("خطأ: " + e.message); }
+
+        // 7. محرك الطباعة الفوري الاختياري
+        const doPrint = confirm("✅ تم تنفيذ الصرف وخصم الكميات بنجاح.\n\nهل تريد طباعة السند الآن بتنسيق A4؟");
+        if (doPrint && window.printDisbursementSlip) {
+            window.printDisbursementSlip(slipData);
+        } else {
+            alert("✅ تم حفظ السند بنجاح.");
+        }
+
+    } catch (e) { 
+        console.error("Disbursement Finalization Error:", e);
+        alert("عذراً، حدث خطأ أثناء تنفيذ العملية: " + e.message); 
+    }
 };
 
 // تحديث دالة تعبئة القوائم لربط موظفي الإنتاج المسجلين
@@ -4637,6 +4761,41 @@ window.deleteProductionStaff = async function(id) {
     if (confirm("هل أنت متأكد من حذف هذا الموظف؟")) {
         await set(ref(database, 'production_staff/' + id), null);
     }
+};
+
+// تحديث دالة عرض السند لتشمل زر الطباعة
+window.viewDisburseSlip = async function(id) {
+    const snap = await get(ref(database, 'disbursements/' + id));
+    const slip = snap.val();
+    if (!slip) return;
+
+    let itemsHtml = slip.items.map(i => `
+        <tr style="border-bottom: 1px solid #444;">
+            <td style="padding:8px;">${i.name}</td>
+            <td style="padding:8px; font-weight:bold;">${i.qty}</td>
+        </tr>`).join('');
+    
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay" style="z-index: 2000;">
+            <div class="modal-box" style="width:500px;">
+                <h3>تفاصيل السند #${slip.slipNo}</h3>
+                <div style="text-align:right; font-size:14px; margin-bottom:15px; color:#aaa;">
+                    <div>تاريخ السند: ${slip.date}</div>
+                    <div>المستلم: ${slip.receiverName}</div>
+                </div>
+                <table style="width:100%; border-collapse:collapse; margin-bottom:20px;">
+                    <thead style="background:#1a1a2e;"><tr><th>الصنف</th><th>الكمية</th></tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn-main" style="flex:1; background:#27ae60;" onclick='printDisbursementSlip(${JSON.stringify(slip)})'>
+                        <i class="fas fa-print"></i> طباعة A4
+                    </button>
+                    <button class="btn-clear" style="flex:1;" onclick="closeModal()">إغلاق</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
 </script>

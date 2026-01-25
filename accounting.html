@@ -2290,6 +2290,144 @@ window.saveCustomerUpdate = function(id) {
     }
 };
 
+// سلة الصرف المؤقتة
+window.disbursementBasket = [];
+
+window.loadDisbursementPage = function() {
+    const lang = translations[currentLang];
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-file-export"></i> سندات الصرف</h3>
+                <button class="btn-main" onclick="openAddDisbursementModal()">+ إضافة سند صرف</button>
+            </div>
+
+            <div class="info-card" style="display:flex; gap:15px; margin:15px 0;">
+                <select id="filter-disburse-type" onchange="filterDisburseTable()">
+                    <option value="all">كل الأنواع</option>
+                    <option value="order">صرف لطلب (مبيعات)</option>
+                    <option value="production">صرف للإنتاج</option>
+                </select>
+            </div>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>رقم السند</th>
+                        <th>التاريخ</th>
+                        <th>النوع</th>
+                        <th>المستلم</th>
+                        <th>أمين المخزن</th>
+                        <th>عدد الأصناف</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="disbursement-list-body"></tbody>
+            </table>
+        </div>`;
+    
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initDisbursementLogic) window.initDisbursementLogic();
+};
+
+// نافذة إضافة سند جديد
+window.openAddDisbursementModal = async function() {
+    const storekeeper = sessionStorage.getItem('userName') || "غير مسجل";
+    
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box" style="width:800px; max-width:95%;">
+                <h3>إنشاء سند صرف جديد</h3>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; text-align:right;">
+                    <div>
+                        <label style="font-size:12px;">أمين المخزن (تلقائي)</label>
+                        <input type="text" value="${storekeeper}" readonly style="background:#1a1a2e; color:#aaa;">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;">نوع الصرف</label>
+                        <select id="disburse-type-select" onchange="toggleDisburseFields()">
+                            <option value="production">للإنتاج</option>
+                            <option value="order">لطلب (فاتورة كاشير)</option>
+                        </select>
+                    </div>
+                    
+                    <div id="field-production">
+                        <label style="font-size:12px;">موظف الإنتاج</label>
+                        <select id="select-prod-staff"></select>
+                    </div>
+                    
+                    <div id="field-order" style="display:none; grid-column: span 1; display:none;">
+                        <div style="display:flex; gap:10px;">
+                            <div style="flex:1;">
+                                <label style="font-size:12px;">الكاشير</label>
+                                <select id="select-cashier-ref"></select>
+                            </div>
+                            <div style="flex:1;">
+                                <label style="font-size:12px;">رقم الفاتورة</label>
+                                <input type="text" id="invoice-no-ref" placeholder="رقم الفاتورة">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="grid-column: span 2; position:relative;">
+                        <label style="font-size:12px;">البحث عن صنف (أو سكان الباركود)</label>
+                        <input type="text" id="search-inv-disburse" placeholder="ابحث بالاسم أو الباركود..." onkeydown="handleDisburseSearch(event)">
+                        <div id="disburse-search-results" class="search-dropdown"></div>
+                    </div>
+                </div>
+
+                <div style="margin-top:20px; max-height:200px; overflow-y:auto; border:1px solid #444; border-radius:8px;">
+                    <table class="data-table" style="font-size:13px;">
+                        <thead><tr style="background:#1a1a2e;"><th>الصنف</th><th>الكمية</th><th>إزالة</th></tr></thead>
+                        <tbody id="disburse-basket-body"></tbody>
+                    </table>
+                </div>
+
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" style="background:#28a745;" onclick="processFinalDisbursement()">تأكيد وصرف الكميات</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء السند</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // تحميل القوائم المنسدلة
+    if(window.populateDisburseDropdowns) window.populateDisburseDropdowns();
+};
+
+// لوحة مفاتيح الكمية (مودال داخل مودال)
+window.openQtyKeypad = function(item, availableStock) {
+    let keypadHtml = `
+        <div id="keypad-overlay" class="modal-overlay" style="z-index:2000; background:rgba(0,0,0,0.8);">
+            <div class="modal-box" style="width:320px;">
+                <h4 style="margin-bottom:5px;">${item.nameAr}</h4>
+                <div style="color:var(--gold-accent); font-size:12px; margin-bottom:15px;">المخزون المتوفر: ${availableStock}</div>
+                
+                <input type="text" id="keypad-display" readonly style="font-size:2rem; text-align:center; margin-bottom:15px; height:60px;">
+                
+                <div class="pin-pad">
+                    ${[1,2,3,4,5,6,7,8,9].map(n => `<button onclick="appendToKeypad('${n}')">${n}</button>`).join('')}
+                    <button onclick="appendToKeypad('.')">.</button>
+                    <button onclick="appendToKeypad('0')">0</button>
+                    <button class="btn-clear" onclick="backspaceKeypad()"><i class="fas fa-backspace"></i></button>
+                </div>
+                
+                <div style="margin-top:20px; display:flex; gap:10px;">
+                    <button class="btn-login" style="flex:1;" onclick="addCurrentToBasket('${item.id}', '${item.nameAr}')">إضافة</button>
+                    <button class="btn-clear" style="flex:1;" onclick="closeKeypad()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', keypadHtml);
+};
+
+window.appendToKeypad = (val) => document.getElementById('keypad-display').value += val;
+window.backspaceKeypad = () => {
+    const d = document.getElementById('keypad-display');
+    d.value = d.value.slice(0, -1);
+};
+window.closeKeypad = () => document.getElementById('keypad-overlay').remove();
+
     </script>
 
     <script type="module">
@@ -4156,6 +4294,97 @@ window.updateCustomerInFirebase = async function(id, data) {
         console.error("Error updating customer:", e);
         alert("عذراً، فشل التحديث: " + e.message);
     }
+};
+
+
+// 1. مراقبة وجلب سندات الصرف
+window.initDisbursementLogic = async function() {
+    onValue(ref(database, 'disbursements'), (snapshot) => {
+        const tbody = document.getElementById('disbursement-list-body');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const slips = snapshot.val() || {};
+        
+        Object.entries(slips).reverse().forEach(([id, slip]) => {
+            tbody.innerHTML += `
+                <tr>
+                    <td>#${slip.slipNo}</td>
+                    <td>${slip.date}</td>
+                    <td><span class="rank-badge" style="background:#444;">${slip.type === 'production' ? 'إنتاج' : 'طلب'}</span></td>
+                    <td>${slip.receiverName}</td>
+                    <td>${slip.storekeeper}</td>
+                    <td>${slip.items.length} أصناف</td>
+                    <td><button class="btn-main" onclick="viewDisburseSlip('${id}')"><i class="fas fa-eye"></i></button></td>
+                </tr>`;
+        });
+    });
+};
+
+// 2. محرك البحث والباركود
+window.handleDisburseSearch = async function(e) {
+    const val = e.target.value;
+    if (val.length < 2) return;
+
+    const [pSnap, iSnap] = await Promise.all([get(ref(database, 'products')), get(ref(database, 'inventory_items'))]);
+    const all = { ...pSnap.val(), ...iSnap.val() };
+
+    // فحص الباركود (إذا تم ضغط Enter أو كان الطول يطابق باركود)
+    if (e.key === 'Enter') {
+        const found = Object.values(all).find(item => item.barcode === val);
+        if (found) {
+            e.target.value = "";
+            openQtyKeypad(found, found.stock || found.branches?.main?.stock || 0);
+            return;
+        }
+    }
+    
+    // عرض نتائج البحث النصي
+    const results = Object.values(all).filter(item => item.nameAr.includes(val)).slice(0, 5);
+    const drop = document.getElementById('disburse-search-results');
+    drop.innerHTML = results.map(item => `
+        <div onclick="selectDisburseItem('${item.id}')" style="padding:10px; border-bottom:1px solid #333; cursor:pointer;">
+            ${item.nameAr} <small>(متاح: ${item.stock || item.branches?.main?.stock || 0})</small>
+        </div>`).join('');
+    drop.style.display = 'block';
+};
+
+// 3. خصم المخزون وحفظ السند
+window.processFinalDisbursement = async function() {
+    if (disbursementBasket.length === 0) return alert("السند فارغ!");
+    
+    const type = document.getElementById('disburse-type-select').value;
+    const receiver = type === 'production' ? document.getElementById('select-prod-staff').value : document.getElementById('invoice-no-ref').value;
+    const slipId = Date.now();
+    
+    try {
+        for (let item of disbursementBasket) {
+            // خصم الكمية من المسارين (منتج أو مادة مخزون)
+            const pRef = ref(database, 'products/' + item.id);
+            const iRef = ref(database, 'inventory_items/' + item.id + '/branches/main/stock');
+            
+            const pSnap = await get(pRef);
+            if (pSnap.exists()) {
+                await update(pRef, { stock: pSnap.val().stock - item.qty });
+            } else {
+                const iSnap = await get(iRef);
+                await set(iRef, iSnap.val() - item.qty);
+            }
+        }
+
+        // حفظ سجل السند
+        await set(ref(database, 'disbursements/' + slipId), {
+            slipNo: slipId.toString().slice(-6),
+            date: new Date().toLocaleString(),
+            type,
+            receiverName: receiver,
+            storekeeper: sessionStorage.getItem('userName'),
+            items: disbursementBasket
+        });
+
+        alert("✅ تم تنفيذ الصرف وخصم الكميات");
+        window.disbursementBasket = [];
+        closeModal();
+    } catch (e) { alert("خطأ: " + e.message); }
 };
 
 </script>

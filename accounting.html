@@ -406,6 +406,10 @@ areaName: "المنطقة",
     else if (pageId === 'units') {
     loadUnitsPage();
 }
+else if (pageId === 'categories') {
+    window.categoryPath = []; // تصفير المسار عند الدخول لأول مرة
+    loadCategoriesPage();
+}
 };
 
         // --- كود نظام الدخول والتعرف على الجهاز ---
@@ -1811,6 +1815,60 @@ window.confirmDeleteProduct = function(id) {
     }
 };
 
+// متغيرات لتتبع المسار الحالي للتنقل
+window.categoryPath = []; 
+
+window.loadCategoriesPage = function() {
+    const lang = translations[currentLang];
+    const currentId = window.categoryPath.length > 0 ? window.categoryPath[window.categoryPath.length - 1].id : null;
+    const currentName = window.categoryPath.length > 0 ? window.categoryPath[window.categoryPath.length - 1].name : "الأقسام الرئيسية";
+
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-tags"></i> ${currentName}</h3>
+                <div style="display:flex; gap:10px;">
+                    ${window.categoryPath.length > 0 ? `<button class="btn-clear" onclick="goBackCategory()"><i class="fas fa-arrow-right"></i> رجوع</button>` : ''}
+                    <button class="btn-main" onclick="openAddCategoryModal('${currentId}')">+ قسم ${currentId ? 'فرعي' : 'جديد'}</button>
+                    ${currentId ? `<button class="btn-main" style="background:#27ae60;" onclick="openAddProductToCategoryModal('${currentId}')">+ إضافة منتجات</button>` : ''}
+                </div>
+            </div>
+
+            <div class="info-card" style="margin:15px 0;">
+                <input type="text" id="cat-search" placeholder="بحث في الأقسام والمنتجات..." oninput="filterCategoriesAndProducts()" style="width:100%; padding:10px; background:#1a1a2e; color:white; border:1px solid #444; border-radius:8px;">
+            </div>
+
+            <div id="categories-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:20px;">
+                </div>
+        </div>`;
+    
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initCategoriesLogic) window.initCategoriesLogic(currentId);
+};
+
+// دالة فتح مودال إضافة قسم
+window.openAddCategoryModal = function(parentId) {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>إضافة قسم ${parentId !== 'null' ? 'فرعي' : 'رئيسي'}</h3>
+                <input type="text" id="cat-name-ar" placeholder="اسم القسم بالعربي">
+                <input type="text" id="cat-name-en" placeholder="English Category Name">
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveCategory('${parentId}')">إضافة</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+// دالة الرجوع للخلف
+window.goBackCategory = function() {
+    window.categoryPath.pop();
+    loadCategoriesPage();
+};
+
     </script>
 
     <script type="module">
@@ -2986,6 +3044,139 @@ window.deleteProductFromFirebase = async function(id) {
         await set(ref(database, 'inventory/main_branch/' + id), null);
         alert("✅ تم حذف المنتج بنجاح");
     } catch (e) { alert("خطأ في الحذف: " + e.message); }
+};
+
+
+// محرك عرض التصنيفات والمنتجات
+window.initCategoriesLogic = async function(parentId) {
+    const catGrid = document.getElementById('categories-grid');
+    if (!catGrid) return;
+
+    // 1. جلب الأقسام التابعة لهذا الـ ID
+    onValue(ref(database, 'categories'), (snapshot) => {
+        catGrid.innerHTML = "";
+        const allCats = snapshot.val() || {};
+        
+        // عرض الأقسام
+        for (let id in allCats) {
+            const cat = allCats[id];
+            if (cat.parentId == parentId) {
+                catGrid.innerHTML += `
+                    <div class="category-card" onclick="enterCategory('${id}', '${cat.nameAr}')" style="background:#0f3460; padding:20px; border-radius:12px; cursor:pointer; position:relative; text-align:center; border:1px solid #16213e;">
+                        <i class="fas fa-folder" style="font-size:2rem; color:var(--gold-accent); margin-bottom:10px;"></i>
+                        <div style="font-weight:bold;">${cat.nameAr}</div>
+                        <div style="font-size:12px; color:#aaa;">${cat.nameEn}</div>
+                        <button onclick="event.stopPropagation(); deleteCategory('${id}')" style="position:absolute; top:5px; left:5px; background:none; border:none; color:#e94560;"><i class="fas fa-times"></i></button>
+                    </div>`;
+            }
+        }
+
+        // 2. عرض المنتجات المضافة لهذا القسم
+        get(ref(database, 'products')).then(prodSnap => {
+            const products = prodSnap.val() || {};
+            for (let pid in products) {
+                const p = products[pid];
+                if (p.categoryId == parentId && parentId !== null) {
+                    catGrid.innerHTML += `
+                        <div class="product-card-mini" style="background:rgba(255,255,255,0.05); padding:15px; border-radius:12px; text-align:center; border:1px dashed #444;">
+                            <i class="fas fa-box" style="color:#aaa; margin-bottom:8px;"></i>
+                            <div style="font-size:14px;">${p.nameAr}</div>
+                            <button onclick="removeProductFromCategory('${pid}')" class="btn-clear" style="font-size:10px; padding:2px 5px; margin-top:5px;">إزالة من القسم</button>
+                        </div>`;
+                }
+            }
+        });
+    });
+};
+
+// الدخول لقسم معين
+window.enterCategory = function(id, name) {
+    window.categoryPath.push({ id, name });
+    loadCategoriesPage();
+};
+
+// حفظ قسم جديد في Firebase
+window.saveCategory = async function(parentId) {
+    const nameAr = document.getElementById('cat-name-ar').value;
+    const nameEn = document.getElementById('cat-name-en').value;
+    if (!nameAr) return alert("يرجى إدخال اسم القسم");
+
+    const id = Date.now();
+    await set(ref(database, 'categories/' + id), {
+        id,
+        nameAr,
+        nameEn,
+        parentId: parentId === 'null' ? null : parentId,
+        createdAt: new Date().toISOString()
+    });
+    closeModal();
+};
+
+// نافذة اختيار المنتجات (التي ليست في أي قسم)
+window.openAddProductToCategoryModal = async function(categoryId) {
+    const snap = await get(ref(database, 'products'));
+    const products = snap.val() || {};
+    
+    let listHtml = "";
+    for (let id in products) {
+        // شرط: لا تظهر إلا المنتجات التي ليس لها قسم (Unclassified)
+        if (!products[id].categoryId) {
+            listHtml += `
+                <label style="display:flex; align-items:center; gap:10px; background:#1a1a2e; padding:10px; margin-bottom:5px; border-radius:5px; cursor:pointer;">
+                    <input type="checkbox" class="cat-prod-check" value="${id}">
+                    <span>${products[id].nameAr}</span>
+                </label>`;
+        }
+    }
+
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box" style="max-height:80vh; overflow-y:auto;">
+                <h3>إضافة منتجات للقسم</h3>
+                <div id="unclassified-list">${listHtml || 'لا توجد منتجات غير مصنفة حالياً'}</div>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="confirmAddProductsToCat('${categoryId}')">إضافة المختارة</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+// ربط المنتجات بالقسم في Firebase
+window.confirmAddProductsToCat = async function(categoryId) {
+    const checks = document.querySelectorAll('.cat-prod-check:checked');
+    for (let check of checks) {
+        const productId = check.value;
+        await update(ref(database, 'products/' + productId), { categoryId: categoryId });
+    }
+    alert("✅ تم ربط المنتجات بالقسم");
+    closeModal();
+    loadCategoriesPage();
+};
+
+// إزالة منتج من قسم (يعود غير مصنف)
+window.removeProductFromCategory = async function(productId) {
+    if (confirm("هل تريد إزالة المنتج من هذا القسم؟ سيعود للمنتجات 'غير المصنفة'.")) {
+        await update(ref(database, 'products/' + productId), { categoryId: null });
+        loadCategoriesPage();
+    }
+};
+
+// حذف قسم
+window.deleteCategory = async function(id) {
+    if (confirm("تحذير: عند حذف القسم، ستصبح جميع المنتجات والأقسام الفرعية بداخله 'غير مصنفة'. هل أنت متأكد؟")) {
+        // 1. جعل المنتجات التابعة له بدون قسم
+        const prodSnap = await get(ref(database, 'products'));
+        const products = prodSnap.val() || {};
+        for (let pid in products) {
+            if (products[pid].categoryId == id) {
+                await update(ref(database, 'products/' + pid), { categoryId: null });
+            }
+        }
+        // 2. حذف القسم نفسه
+        await set(ref(database, 'categories/' + id), null);
+    }
 };
 
 </script>

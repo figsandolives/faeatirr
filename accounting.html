@@ -85,7 +85,7 @@
                 <a class="sidebar-item" id="sub-pending-moves">حركات مخزون معلقة</a>
                 <a class="sidebar-item" id="sub-pos-devices" onclick="loadPOSDevicesPage()">الأجهزة والكاشير</a>
                 <a class="sidebar-item" id="sub-store-staff" onclick="loadUsersPage()">المستخدمين</a>
-                <a class="sidebar-item" id="sub-prod-staff">موظفي الانتاج</a>
+                <a class="sidebar-item" id="sub-prod-staff" onclick="loadPage('prod-staff')">موظفي الانتاج</a>
                 <a class="sidebar-item" id="sub-branches" onclick="loadBranchesPage()">الفروع</a>
                 <a class="sidebar-item" id="sub-delivery-areas" onclick="loadDeliveryAreasPage()">مناطق التوصيل</a>
 <a class="sidebar-item" id="sub-delivery-prices" onclick="loadDeliveryPricesPage()">أسعار التوصيل</a>
@@ -418,6 +418,9 @@ else if (pageId === 'storage-locations') {
 }
 else if (pageId === 'disbursement') {
     loadDisbursementPage();
+}
+else if (pageId === 'prod-staff') {
+    loadProductionStaffPage();
 }
 };
 
@@ -2400,24 +2403,39 @@ window.openAddDisbursementModal = async function() {
 
 // لوحة مفاتيح الكمية (مودال داخل مودال)
 window.openQtyKeypad = function(item, availableStock) {
+    // إزالة أي لوحة قديمة إن وجدت لتجنب تكرار العناصر
+    const oldKeypad = document.getElementById('keypad-overlay');
+    if (oldKeypad) oldKeypad.remove();
+
     let keypadHtml = `
-        <div id="keypad-overlay" class="modal-overlay" style="z-index:2000; background:rgba(0,0,0,0.8);">
-            <div class="modal-box" style="width:320px;">
-                <h4 style="margin-bottom:5px;">${item.nameAr}</h4>
-                <div style="color:var(--gold-accent); font-size:12px; margin-bottom:15px;">المخزون المتوفر: ${availableStock}</div>
+        <div id="keypad-overlay" class="modal-overlay" style="z-index:3000; background:rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center;">
+            <div class="modal-box" style="width:340px; border: 2px solid var(--gold-accent); box-shadow: 0 0 20px rgba(0,0,0,0.5);">
+                <h4 style="margin-bottom:5px; color:white;">${item.nameAr}</h4>
+                <div style="color:var(--gold-accent); font-size:13px; margin-bottom:15px; font-weight:bold;">
+                    المخزون المتوفر: ${parseFloat(availableStock).toFixed(2)}
+                </div>
                 
-                <input type="text" id="keypad-display" readonly style="font-size:2rem; text-align:center; margin-bottom:15px; height:60px;">
+                <input type="text" id="keypad-display" readonly 
+                       style="font-size:2.2rem; text-align:center; margin-bottom:15px; height:70px; background:#000; color:var(--gold-accent); border:1px solid #444; width:100%;">
                 
-                <div class="pin-pad">
-                    ${[1,2,3,4,5,6,7,8,9].map(n => `<button onclick="appendToKeypad('${n}')">${n}</button>`).join('')}
+                <div class="pin-pad" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px;">
+                    <button onclick="appendToKeypad('1')">1</button>
+                    <button onclick="appendToKeypad('2')">2</button>
+                    <button onclick="appendToKeypad('3')">3</button>
+                    <button onclick="appendToKeypad('4')">4</button>
+                    <button onclick="appendToKeypad('5')">5</button>
+                    <button onclick="appendToKeypad('6')">6</button>
+                    <button onclick="appendToKeypad('7')">7</button>
+                    <button onclick="appendToKeypad('8')">8</button>
+                    <button onclick="appendToKeypad('9')">9</button>
                     <button onclick="appendToKeypad('.')">.</button>
                     <button onclick="appendToKeypad('0')">0</button>
                     <button class="btn-clear" onclick="backspaceKeypad()"><i class="fas fa-backspace"></i></button>
                 </div>
                 
                 <div style="margin-top:20px; display:flex; gap:10px;">
-                    <button class="btn-login" style="flex:1;" onclick="addCurrentToBasket('${item.id}', '${item.nameAr}')">إضافة</button>
-                    <button class="btn-clear" style="flex:1;" onclick="closeKeypad()">إلغاء</button>
+                    <button class="btn-login" style="flex:1; padding:15px;" onclick="addCurrentToBasket('${item.id}', '${item.nameAr}')">إضافة للسند</button>
+                    <button class="btn-clear" style="flex:1; padding:15px; background:#666;" onclick="closeKeypad()">إلغاء</button>
                 </div>
             </div>
         </div>`;
@@ -2448,10 +2466,15 @@ window.toggleDisburseFields = function() {
 
 // 2. اختيار صنف من نتائج البحث لفتح لوحة الأرقام
 window.selectDisburseItem = async function(id) {
-    // إخفاء قائمة النتائج فوراً
-    document.getElementById('disburse-search-results').style.display = 'none';
-    document.getElementById('search-inv-disburse').value = "";
+    // 1. إغلاق القائمة المنسدلة فوراً
+    const dropdown = document.getElementById('disburse-search-results');
+    if (dropdown) dropdown.style.display = 'none';
+    
+    // 2. مسح نص البحث لتجهيزه للعملية القادمة
+    const searchInput = document.getElementById('search-inv-disburse');
+    if (searchInput) searchInput.value = "";
 
+    // 3. جلب بيانات الصنف
     const [pSnap, iSnap] = await Promise.all([
         get(ref(database, 'products/' + id)),
         get(ref(database, 'inventory_items/' + id))
@@ -2462,7 +2485,7 @@ window.selectDisburseItem = async function(id) {
     
     const currentStock = item.stock || item.branches?.main?.stock || 0;
     
-    // فتح لوحة الأرقام لإدخال الكمية
+    // 4. فتح لوحة الأرقام (ستظهر الآن في المقدمة)
     openQtyKeypad(item, currentStock);
 };
 
@@ -2509,6 +2532,52 @@ window.renderDisburseBasket = function() {
     if (window.disbursementBasket.length === 0) {
         tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:#666;">السلة فارغة.. ابحث عن أصناف لإضافتها</td></tr>`;
     }
+};
+
+// 1. بناء صفحة موظفي الإنتاج
+window.loadProductionStaffPage = function() {
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-user-cog"></i> موظفي الإنتاج</h3>
+                <button class="btn-main" onclick="openAddProductionStaffModal()">+ إضافة موظف جديد</button>
+            </div>
+            
+            <table class="data-table" style="margin-top:20px;">
+                <thead>
+                    <tr>
+                        <th>الاسم بالعربي</th>
+                        <th>الاسم بالإنجليزي</th>
+                        <th>تاريخ الإضافة</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="prod-staff-list-body">
+                    <tr><td colspan="4">جاري تحميل البيانات...</td></tr>
+                </tbody>
+            </table>
+        </div>`;
+    
+    document.getElementById('content-area').innerHTML = html;
+    // تشغيل محرك جلب البيانات من الموديول
+    if(window.initProductionStaffLogic) window.initProductionStaffLogic();
+};
+
+// 2. نافذة إضافة موظف جديد
+window.openAddProductionStaffModal = function() {
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>إضافة موظف إنتاج جديد</h3>
+                <input type="text" id="staff-name-ar" placeholder="الاسم بالعربي">
+                <input type="text" id="staff-name-en" placeholder="English Name">
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveProductionStaff()">إضافة الموظف</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
     </script>
@@ -4505,6 +4574,64 @@ window.viewDisburseSlip = async function(id) {
     let itemsHtml = slip.items.map(i => `<li>${i.name}: ${i.qty}</li>`).join('');
     
     alert(`تفاصيل السند #${slip.slipNo}\nالمستلم: ${slip.receiverName}\nالأصناف:\n${itemsHtml}`);
+};
+
+// 1. مراقبة وعرض قائمة الموظفين
+window.initProductionStaffLogic = function() {
+    onValue(ref(database, 'production_staff'), (snapshot) => {
+        const tbody = document.getElementById('prod-staff-list-body');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const data = snapshot.val();
+
+        if (!data) {
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">لا يوجد موظفين مضافين حالياً</td></tr>`;
+            return;
+        }
+
+        for (let id in data) {
+            const s = data[id];
+            tbody.innerHTML += `
+                <tr>
+                    <td><b>${s.nameAr}</b></td>
+                    <td>${s.nameEn}</td>
+                    <td style="font-size:12px; color:#aaa;">${new Date(s.createdAt).toLocaleDateString()}</td>
+                    <td>
+                        <button class="btn-clear" style="padding:5px 10px; background:#e94560; color:white; border:none;" 
+                                onclick="deleteProductionStaff('${id}')">
+                            <i class="fas fa-trash"></i> حذف
+                        </button>
+                    </td>
+                </tr>`;
+        }
+    });
+};
+
+// 2. حفظ موظف جديد في قاعدة البيانات
+window.saveProductionStaff = async function() {
+    const nameAr = document.getElementById('staff-name-ar').value;
+    const nameEn = document.getElementById('staff-name-en').value;
+
+    if (!nameAr || !nameEn) return alert("يرجى إدخال الاسم بالعربي والإنجليزي");
+
+    const id = "STF" + Date.now();
+    try {
+        await set(ref(database, 'production_staff/' + id), {
+            id,
+            nameAr,
+            nameEn,
+            createdAt: new Date().toISOString()
+        });
+        alert("✅ تم إضافة الموظف بنجاح");
+        closeModal();
+    } catch (e) { alert("خطأ: " + e.message); }
+};
+
+// 3. حذف موظف
+window.deleteProductionStaff = async function(id) {
+    if (confirm("هل أنت متأكد من حذف هذا الموظف؟")) {
+        await set(ref(database, 'production_staff/' + id), null);
+    }
 };
 
 </script>

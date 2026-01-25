@@ -58,7 +58,7 @@
             </div>
             <div id="drop-stores" class="dropdown-container">
                 <a href="#" class="sidebar-item" id="sub-inv-items" onclick="loadPage('inv-items')">مواد المخزون</a>
-                <a class="sidebar-item" id="sub-storage-locations">أماكن التخزين</a>
+                <a class="sidebar-item" id="sub-storage-locations" onclick="loadPage('storage-locations')">أماكن التخزين</a>
                 <a class="sidebar-item" id="sub-disbursement">صرف</a>
                 <a class="sidebar-item" id="sub-production">انتاج</a>
                 <a class="sidebar-item" id="sub-inventory-check">جرد</a>
@@ -3678,6 +3678,72 @@ window.deleteStorage = async function(id) {
         
         await set(ref(database, 'storage_locations/' + id), null);
     }
+};
+
+
+// 1. دالة حفظ مكان التخزين الجديد
+window.saveNewStorage = async function() {
+    const nameAr = document.getElementById('storage-name-ar').value;
+    const nameEn = document.getElementById('storage-name-en').value;
+    if (!nameAr) return alert("يرجى إدخال اسم المكان");
+
+    const id = "ST" + Date.now();
+    try {
+        await set(ref(database, 'storage_locations/' + id), {
+            id, nameAr, nameEn, createdAt: new Date().toISOString()
+        });
+        alert("✅ تم إضافة مكان التخزين");
+        closeModal();
+    } catch (e) { alert("خطأ: " + e.message); }
+};
+
+// 2. دالة إزالة منتج أو مادة من مكان تخزين معين
+window.removeItemFromStorage = async function(itemId, type) {
+    if (confirm("هل تريد إزالة هذا العنصر من مكان التخزين؟")) {
+        try {
+            await update(ref(database, type + '/' + itemId), { storageId: null });
+            // تحديث العرض فوراً
+            enterStorage(window.currentStorageId, document.getElementById('active-storage-name').innerText.replace("محتويات: ", ""));
+        } catch (e) { alert("خطأ: " + e.message); }
+    }
+};
+
+// 3. دالة الفلترة داخل نافذة اختيار المنتجات
+window.filterStorageSelection = function() {
+    const val = document.getElementById('storage-search-items').value.toLowerCase();
+    document.querySelectorAll('.storage-item-label').forEach(label => {
+        const text = label.innerText.toLowerCase();
+        label.style.display = text.includes(val) ? 'flex' : 'none';
+    });
+};
+
+// 4. دالة تعديل اسم مكان التخزين
+window.editStorage = async function(id) {
+    const snap = await get(ref(database, 'storage_locations/' + id));
+    const loc = snap.val();
+    if (!loc) return;
+
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>تعديل مكان التخزين</h3>
+                <input type="text" id="edit-storage-ar" value="${loc.nameAr}">
+                <input type="text" id="edit-storage-en" value="${loc.nameEn}">
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="confirmStorageUpdate('${id}')">حفظ</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.confirmStorageUpdate = async function(id) {
+    const nameAr = document.getElementById('edit-storage-ar').value;
+    const nameEn = document.getElementById('edit-storage-en').value;
+    await update(ref(database, 'storage_locations/' + id), { nameAr, nameEn });
+    alert("✅ تم التحديث");
+    closeModal();
 };
 
 </script>

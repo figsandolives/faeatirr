@@ -2091,6 +2091,156 @@ window.backToStorageList = function() {
     window.currentStorageId = null;
 };
 
+// متغيرات تتبع المسار الحالي
+window.categoryPath = []; 
+
+window.loadCategoriesPage = function() {
+    const lang = translations[currentLang];
+    const currentId = window.categoryPath.length > 0 ? window.categoryPath[window.categoryPath.length - 1].id : null;
+    const currentName = window.categoryPath.length > 0 ? window.categoryPath[window.categoryPath.length - 1].name : "الأقسام الرئيسية";
+
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-tags"></i> ${currentName}</h3>
+                <div style="display:flex; gap:10px;">
+                    ${window.categoryPath.length > 0 ? `<button class="btn-clear" onclick="goBackCategory()"><i class="fas fa-arrow-right"></i> رجوع</button>` : ''}
+                    <button class="btn-main" onclick="openAddCategoryModal('${currentId}')">+ قسم ${currentId ? 'فرعي' : 'رئيسي'}</button>
+                    ${currentId ? `<button class="btn-main" style="background:#27ae60;" onclick="openAddProductToCategoryModal('${currentId}')">+ إضافة منتجات</button>` : ''}
+                </div>
+            </div>
+
+            <div class="info-card" style="margin:20px 0; background:rgba(255,255,255,0.02); border-right: 4px solid var(--gold-accent);">
+                <small style="color:#aaa;">المسار الحالي: </small>
+                <span style="color:var(--gold-accent); font-weight:bold;"> الرئيسية ${window.categoryPath.map(p => ' > ' + p.name).join('')} </span>
+            </div>
+
+            <div style="margin-top:20px;">
+                <h4 style="margin-bottom:10px; color:#aaa;"><i class="fas fa-folder-open"></i> الأقسام الفرعية</h4>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>القسم</th>
+                            <th>عدد العناصر</th>
+                            <th>إجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="categories-list-body"></tbody>
+                </table>
+            </div>
+
+            ${currentId ? `
+            <div style="margin-top:40px;">
+                <h4 style="margin-bottom:10px; color:#aaa;"><i class="fas fa-box"></i> المنتجات في هذا القسم</h4>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>المنتج</th>
+                            <th>الباركود</th>
+                            <th>المخزون</th>
+                            <th>إجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="category-items-body"></tbody>
+                </table>
+            </div>` : ''}
+        </div>`;
+    
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initCategoriesLogic) window.initCategoriesLogic(currentId);
+};
+
+// دالة الرجوع خطوة للخلف
+window.goBackCategory = function() {
+    window.categoryPath.pop();
+    loadCategoriesPage();
+};
+
+window.filterCategoriesAndProducts = function() {
+    const val = document.getElementById('cat-search').value.toLowerCase();
+    // تصفية صفوف الأقسام والمنتجات
+    document.querySelectorAll('#categories-list-body tr, #category-items-body tr').forEach(row => {
+        const text = row.innerText.toLowerCase();
+        row.style.display = text.includes(val) ? '' : 'none';
+    });
+};
+
+
+// 1. دالة فتح نافذة تعديل مادة المخزون
+window.editInvItem = async function(id) {
+    // جلب بيانات المادة من Firebase
+    const snap = await get(ref(database, 'inventory_items/' + id));
+    const item = snap.val();
+    if (!item) return;
+
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box" style="width:600px;">
+                <h3>تعديل مادة مخزون: ${item.nameAr}</h3>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; text-align:right;">
+                    <div>
+                        <label style="font-size:12px; color:#aaa;">الاسم العربي</label>
+                        <input type="text" id="edit-inv-name-ar" value="${item.nameAr}">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; color:#aaa;">الاسم الإنجليزي</label>
+                        <input type="text" id="edit-inv-name-en" value="${item.nameEn || ''}">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; color:#aaa;">التكلفة</label>
+                        <input type="number" id="edit-inv-cost" value="${item.cost}" step="0.001">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; color:#aaa;">الوحدة</label>
+                        <select id="edit-inv-unit-select"></select>
+                    </div>
+                    <div>
+                        <label style="font-size:12px; color:#aaa;">نقطة إعادة الطلب</label>
+                        <input type="number" id="edit-inv-reorder" value="${item.reorderPoint}">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; color:#aaa;">الباركود</label>
+                        <input type="text" id="edit-inv-barcode" value="${item.barcode || ''}">
+                    </div>
+                    <div style="grid-column: span 2; background:rgba(255,255,255,0.05); padding:10px; border-radius:5px; border:1px solid #444;">
+                        <label style="font-size:11px; color:var(--gold-accent); display:block; margin-bottom:5px;">⚠️ ملاحظة: لتعديل كميات المخزون، يرجى استخدام قسم (الجرد) أو (إذن استلام).</label>
+                    </div>
+                </div>
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="saveInvItemUpdate('${id}')">حفظ التغييرات</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // ملء قائمة الوحدات وتحديد الوحدة الحالية
+    const unitSelect = document.getElementById('edit-inv-unit-select');
+    if (window.availableUnits) {
+        for (let uid in window.availableUnits) {
+            const u = window.availableUnits[uid];
+            const selected = u.nameAr === item.unit ? 'selected' : '';
+            unitSelect.innerHTML += `<option value="${u.nameAr}" ${selected}>${u.nameAr}</option>`;
+        }
+    }
+};
+
+// 2. دالة جمع البيانات المحدثة وإرسالها للموديول
+window.saveInvItemUpdate = function(id) {
+    const data = {
+        nameAr: document.getElementById('edit-inv-name-ar').value,
+        nameEn: document.getElementById('edit-inv-name-en').value,
+        cost: parseFloat(document.getElementById('edit-inv-cost').value) || 0,
+        unit: document.getElementById('edit-inv-unit-select').value,
+        reorderPoint: parseFloat(document.getElementById('edit-inv-reorder').value) || 0,
+        barcode: document.getElementById('edit-inv-barcode').value
+    };
+
+    if (window.updateInvItemInFirebase) {
+        window.updateInvItemInFirebase(id, data);
+    }
+};
+
     </script>
 
     <script type="module">
@@ -3276,44 +3426,53 @@ window.deleteProductFromFirebase = async function(id) {
 
 // محرك عرض التصنيفات والمنتجات
 window.initCategoriesLogic = async function(parentId) {
-    const catGrid = document.getElementById('categories-grid');
-    if (!catGrid) return;
+    const [catsSnap, prodSnap] = await Promise.all([
+        get(ref(database, 'categories')),
+        get(ref(database, 'products'))
+    ]);
+    const allCategories = catsSnap.val() || {};
+    const allProducts = prodSnap.val() || {};
 
-    // 1. جلب الأقسام التابعة لهذا الـ ID
-    onValue(ref(database, 'categories'), (snapshot) => {
-        catGrid.innerHTML = "";
-        const allCats = snapshot.val() || {};
-        
-        // عرض الأقسام
-        for (let id in allCats) {
-            const cat = allCats[id];
+    // عرض الأقسام التابعة
+    const catTbody = document.getElementById('categories-list-body');
+    if (catTbody) {
+        catTbody.innerHTML = "";
+        for (let id in allCategories) {
+            const cat = allCategories[id];
             if (cat.parentId == parentId) {
-                catGrid.innerHTML += `
-                    <div class="category-card" onclick="enterCategory('${id}', '${cat.nameAr}')" style="background:#0f3460; padding:20px; border-radius:12px; cursor:pointer; position:relative; text-align:center; border:1px solid #16213e;">
-                        <i class="fas fa-folder" style="font-size:2rem; color:var(--gold-accent); margin-bottom:10px;"></i>
-                        <div style="font-weight:bold;">${cat.nameAr}</div>
-                        <div style="font-size:12px; color:#aaa;">${cat.nameEn}</div>
-                        <button onclick="event.stopPropagation(); deleteCategory('${id}')" style="position:absolute; top:5px; left:5px; background:none; border:none; color:#e94560;"><i class="fas fa-times"></i></button>
-                    </div>`;
+                // حساب عدد المنتجات داخل هذا القسم فقط
+                const count = Object.values(allProducts).filter(p => p.categoryId == id).length;
+                
+                catTbody.innerHTML += `
+                    <tr onclick="enterCategory('${id}', '${cat.nameAr}')" style="cursor:pointer;">
+                        <td><b>${cat.nameAr}</b><br><small>${cat.nameEn}</small></td>
+                        <td><span class="rank-badge" style="background:#444;">${count} منتج</span></td>
+                        <td>
+                            <button class="btn-main" onclick="event.stopPropagation(); editCategory('${id}')"><i class="fas fa-edit"></i></button>
+                            <button class="btn-clear" onclick="event.stopPropagation(); deleteCategory('${id}')" style="background:#e94560;"><i class="fas fa-trash"></i></button>
+                        </td>
+                    </tr>`;
             }
         }
+    }
 
-        // 2. عرض المنتجات المضافة لهذا القسم
-        get(ref(database, 'products')).then(prodSnap => {
-            const products = prodSnap.val() || {};
-            for (let pid in products) {
-                const p = products[pid];
-                if (p.categoryId == parentId && parentId !== null) {
-                    catGrid.innerHTML += `
-                        <div class="product-card-mini" style="background:rgba(255,255,255,0.05); padding:15px; border-radius:12px; text-align:center; border:1px dashed #444;">
-                            <i class="fas fa-box" style="color:#aaa; margin-bottom:8px;"></i>
-                            <div style="font-size:14px;">${p.nameAr}</div>
-                            <button onclick="removeProductFromCategory('${pid}')" class="btn-clear" style="font-size:10px; padding:2px 5px; margin-top:5px;">إزالة من القسم</button>
-                        </div>`;
-                }
+    // عرض المنتجات داخل القسم الحالي
+    const prodTbody = document.getElementById('category-items-body');
+    if (prodTbody && parentId) {
+        prodTbody.innerHTML = "";
+        for (let pid in allProducts) {
+            const p = allProducts[pid];
+            if (p.categoryId == parentId) {
+                prodTbody.innerHTML += `
+                    <tr>
+                        <td>${p.nameAr}</td>
+                        <td style="font-family:monospace;">${p.barcode}</td>
+                        <td>${p.stock} ${p.unit}</td>
+                        <td><button onclick="removeItemFromCategory('${pid}')" class="btn-clear" style="font-size:10px;">إزالة من القسم</button></td>
+                    </tr>`;
             }
-        });
-    });
+        }
+    }
 };
 
 // الدخول لقسم معين
@@ -3322,45 +3481,77 @@ window.enterCategory = function(id, name) {
     loadCategoriesPage();
 };
 
-// حفظ قسم جديد في Firebase
+// دالة حفظ التصنيف الجديد (رئيسي أو فرعي)
 window.saveCategory = async function(parentId) {
     const nameAr = document.getElementById('cat-name-ar').value;
     const nameEn = document.getElementById('cat-name-en').value;
-    if (!nameAr) return alert("يرجى إدخال اسم القسم");
 
-    const id = Date.now();
-    await set(ref(database, 'categories/' + id), {
-        id,
-        nameAr,
-        nameEn,
-        parentId: parentId === 'null' ? null : parentId,
-        createdAt: new Date().toISOString()
-    });
-    closeModal();
+    // التحقق من إدخال الاسم العربي على الأقل
+    if (!nameAr) {
+        const errorMsg = currentLang === 'ar' ? "يرجى إدخال اسم القسم" : "Please enter category name";
+        alert(errorMsg);
+        return;
+    }
+
+    // إنشاء معرف فريد للقسم
+    const id = "CAT" + Date.now();
+    
+    // معالجة الـ parentId لضمان حفظه بشكل صحيح (Null للرئيسي، أو قيمة للفرعي)
+    const finalParentId = (parentId === 'null' || parentId === null || parentId === "") ? null : parentId;
+
+    try {
+        // الحفظ في قاعدة بيانات Firebase
+        await set(ref(database, 'categories/' + id), {
+            id: id,
+            nameAr: nameAr,
+            nameEn: nameEn || '',
+            parentId: finalParentId,
+            createdAt: new Date().toISOString()
+        });
+
+        // رسالة نجاح
+        alert(currentLang === 'ar' ? "✅ تم إضافة القسم بنجاح" : "✅ Category added successfully");
+        
+        // إغلاق النافذة المنبثقة
+        closeModal();
+        
+        // تحديث الصفحة فوراً ليعرض الجدول البيانات الجديدة
+        loadCategoriesPage(); 
+        
+    } catch (error) {
+        console.error("Error saving category:", error);
+        alert("حدث خطأ أثناء الحفظ: " + error.message);
+    }
 };
 
-// نافذة اختيار المنتجات (التي ليست في أي قسم)
+// --- الكود المصحح لإضافة منتجات للقسم (يُوضع داخل الموديول) ---
 window.openAddProductToCategoryModal = async function(categoryId) {
     const snap = await get(ref(database, 'products'));
     const products = snap.val() || {};
     
-    let listHtml = "";
-    for (let id in products) {
-        // شرط: لا تظهر إلا المنتجات التي ليس لها قسم (Unclassified)
-        if (!products[id].categoryId) {
-            listHtml += `
-                <label style="display:flex; align-items:center; gap:10px; background:#1a1a2e; padding:10px; margin-bottom:5px; border-radius:5px; cursor:pointer;">
-                    <input type="checkbox" class="cat-prod-check" value="${id}">
-                    <span>${products[id].nameAr}</span>
-                </label>`;
-        }
-    }
+    let listHtml = `
+        <input type="text" id="cat-search-items" placeholder="ابحث عن منتج..." oninput="filterCategorySelection()" style="width:100%; padding:10px; margin-bottom:10px; background:#0f0f1e; border:1px solid #444; color:white; border-radius:5px;">
+        <div id="cat-selection-list" style="max-height:300px; overflow-y:auto;">`;
+
+    // تصفية المنتجات التي لم تُصنف بعد
+    const unclassified = Object.entries(products).filter(([id, p]) => !p.categoryId);
+
+    unclassified.forEach(([id, p]) => {
+        listHtml += `
+            <label class="cat-item-label" style="display:flex; align-items:center; gap:10px; padding:10px; background:rgba(255,255,255,0.05); margin-bottom:5px; border-radius:5px; cursor:pointer;">
+                <input type="checkbox" class="cat-prod-check" value="${id}">
+                <span>${p.nameAr}</span>
+            </label>`;
+    });
+
+    if (unclassified.length === 0) listHtml += '<p style="text-align:center; padding:10px; color:#666;">لا توجد منتجات غير مصنفة حالياً</p>';
+    listHtml += `</div>`;
 
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
-            <div class="modal-box" style="max-height:80vh; overflow-y:auto;">
+            <div class="modal-box">
                 <h3>إضافة منتجات للقسم</h3>
-                <div id="unclassified-list">${listHtml || 'لا توجد منتجات غير مصنفة حالياً'}</div>
+                ${listHtml}
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
                     <button class="btn-login" onclick="confirmAddProductsToCat('${categoryId}')">إضافة المختارة</button>
                     <button class="btn-clear" onclick="closeModal()">إلغاء</button>
@@ -3368,6 +3559,36 @@ window.openAddProductToCategoryModal = async function(categoryId) {
             </div>
         </div>`;
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+// دالة تعديل اسم التصنيف (كانت مفقودة وتسبب خطأ عند الضغط على زر التعديل)
+window.editCategory = async function(id) {
+    const snap = await get(ref(database, 'categories/' + id));
+    const cat = snap.val();
+    if (!cat) return;
+
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay">
+            <div class="modal-box">
+                <h3>تعديل القسم</h3>
+                <input type="text" id="edit-cat-ar" value="${cat.nameAr}" placeholder="الاسم العربي">
+                <input type="text" id="edit-cat-en" value="${cat.nameEn || ''}" placeholder="English Name">
+                <div style="margin-top:20px; display:flex; justify-content: space-around;">
+                    <button class="btn-login" onclick="confirmCategoryUpdate('${id}')">حفظ</button>
+                    <button class="btn-clear" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.confirmCategoryUpdate = async function(id) {
+    const nameAr = document.getElementById('edit-cat-ar').value;
+    const nameEn = document.getElementById('edit-cat-en').value;
+    await update(ref(database, 'categories/' + id), { nameAr, nameEn });
+    alert("✅ تم التحديث بنجاح");
+    closeModal();
+    loadCategoriesPage();
 };
 
 // ربط المنتجات بالقسم في Firebase
@@ -3409,15 +3630,22 @@ window.deleteCategory = async function(id) {
 
 // مراقبة مواد المخزون
 window.initInventoryItemsLogic = async function() {
+    // 1. تحديد الفرع المختار (الافتراضي: الرئيسي)
     const branchId = document.getElementById('inv-filter-branch')?.value || 'main';
+    
+    // 2. جلب بيانات الفروع وأماكن التخزين لضمان الربط اللحظي
     const [branchesSnap, storageSnap] = await Promise.all([
         get(ref(database, 'branches')),
         get(ref(database, 'storage_locations'))
     ]);
     
+    const allStorageLocs = storageSnap.val() || {};
+    
+    // ملء الفلاتر العلوية
     populateFilter('inv-filter-branch', branchesSnap.val(), 'nameAr');
-    populateFilter('inv-filter-storage', storageSnap.val(), 'nameAr');
+    populateFilter('inv-filter-storage', allStorageLocs, 'nameAr');
 
+    // 3. مراقبة سجل مواد المخزون بشكل لحظي
     onValue(ref(database, 'inventory_items'), (snapshot) => {
         const tbody = document.getElementById('inv-items-list-body');
         if (!tbody) return;
@@ -3426,34 +3654,73 @@ window.initInventoryItemsLogic = async function() {
 
         for (let id in items) {
             const item = items[id];
-            // جلب المخزون الخاص بالفرع المختار
+            
+            // --- الربط التلقائي لمكان التخزين ---
+            const storageName = item.storageId && allStorageLocs[item.storageId] 
+                ? allStorageLocs[item.storageId].nameAr 
+                : '<span style="color:#666; font-size:11px;">غير محدد</span>';
+
+            // --- جلب المخزون الخاص بالفرع المختار ---
             const branchStock = item.branches?.[branchId]?.stock || 0;
             
-            // منطق الألوان
-            let statusColor = "#28a745"; 
-            if (branchStock <= item.reorderPoint) statusColor = "#e94560";
-            else if (branchStock <= item.reorderPoint * 1.2) statusColor = "#f39c12";
+            // --- منطق الألوان الذكي للتنبيه بالنقص ---
+            let statusColor = "#28a745"; // أخضر: مستقر
+            let statusText = "مستقر";
+            if (parseFloat(branchStock) <= parseFloat(item.reorderPoint)) {
+                statusColor = "#e94560"; // أحمر: نقص
+                statusText = "نقص ⚠️";
+            } else if (parseFloat(branchStock) <= parseFloat(item.reorderPoint) * 1.2) {
+                statusColor = "#f39c12"; // أصفر: قريب
+                statusText = "إعادة طلب";
+            }
 
             tbody.innerHTML += `
-                <tr>
-                    <td><input type="checkbox" class="inv-checkbox" data-id="${id}" data-name="${item.nameAr}"></td>
-                    <td><b>${item.nameAr}</b></td>
-                    <td>${parseFloat(item.cost).toFixed(3)}</td>
-                    <td style="color:${statusColor}; font-weight:bold;">${branchStock} (${item.unit})</td>
-                    <td><div style="width:15px; height:15px; border-radius:50%; background:${statusColor}; margin:auto;"></div></td>
-                    <td>${item.storageName || 'غير محدد'}</td>
-                    <td>${item.prodIdentified || 0}</td>
-                    <td>${item.prodUnidentified || 0}</td>
-                    <td>${item.salesCount || 0}</td>
-                    <td><canvas id="inv-bc-${id}" style="width:80px;"></canvas></td>
+                <tr class="inv-item-row">
                     <td>
-                        <button class="btn-main" onclick="editInvItem('${id}')"><i class="fas fa-edit"></i></button>
+                        <input type="checkbox" class="inv-checkbox" data-id="${id}" data-name="${item.nameAr}">
+                    </td>
+                    <td style="text-align:right;">
+                        <b>${item.nameAr}</b><br>
+                        <small style="color:#aaa;">${item.nameEn || ''}</small>
+                    </td>
+                    <td style="font-family:monospace;">${parseFloat(item.cost).toFixed(3)}</td>
+                    <td style="color:${statusColor}; font-weight:bold;">
+                        ${branchStock} <small style="font-weight:normal; color:#aaa;">(${item.unit})</small>
+                    </td>
+                    <td style="text-align:center;">
+                        <span class="rank-badge" style="background:${statusColor}; font-size:10px; padding:2px 8px;">${statusText}</span>
+                    </td>
+                    <td style="color:var(--gold-accent); font-size:13px;">
+                        <i class="fas fa-map-marker-alt" style="font-size:10px; opacity:0.6;"></i> ${storageName}
+                    </td>
+                    <td style="text-align:center; font-weight:bold;">${item.prodIdentified || 0}</td>
+                    <td style="text-align:center; color:#aaa;">${item.prodUnidentified || 0}</td>
+                    <td style="text-align:center; font-weight:bold;">${item.salesCount || 0}</td>
+                    <td>
+                        <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+                            <canvas id="inv-bc-${id}" style="width:100px; height:40px;"></canvas>
+                            <button onclick="downloadSingleBarcode('${id}', '${item.nameAr}')" class="btn-clear" style="font-size:9px; padding:1px 5px; border:1px solid #444;">💾 PNG</button>
+                        </div>
+                    </td>
+                    <td>
+                        <button class="btn-main" style="padding:6px 10px;" onclick="editInvItem('${id}')">
+                            <i class="fas fa-edit"></i>
+                        </button>
                     </td>
                 </tr>`;
             
+            // توليد الباركود فوراً
             setTimeout(() => {
-                JsBarcode(`#inv-bc-${id}`, item.barcode || id, { height: 30, displayValue: true, fontSize: 10 });
-            }, 100);
+                const canvas = document.getElementById(`inv-bc-${id}`);
+                if(canvas) {
+                    JsBarcode(`#inv-bc-${id}`, item.barcode || id, { 
+                        height: 30, 
+                        displayValue: true, 
+                        fontSize: 10,
+                        margin: 2
+                    });
+                }
+            }, 150);
         }
     });
 };
@@ -3744,6 +4011,21 @@ window.confirmStorageUpdate = async function(id) {
     await update(ref(database, 'storage_locations/' + id), { nameAr, nameEn });
     alert("✅ تم التحديث");
     closeModal();
+};
+
+// دالة التحديث المباشر لمادة المخزون في Firebase
+window.updateInvItemInFirebase = async function(id, data) {
+    try {
+        // تحديث سجل المادة (البيانات الأساسية فقط)
+        await update(ref(database, 'inventory_items/' + id), data);
+        
+        alert("✅ تم تحديث بيانات المادة بنجاح");
+        closeModal();
+        // لا نحتاج لتحديث الصفحة يدوياً لأن onValue ستقوم بتحديث الجدول تلقائياً
+    } catch (e) {
+        console.error("Error updating inventory item:", e);
+        alert("عذراً، فشل التحديث: " + e.message);
+    }
 };
 
 </script>

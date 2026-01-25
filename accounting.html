@@ -2434,37 +2434,57 @@ window.closeKeypad = () => document.getElementById('keypad-overlay').remove();
 // 1. التبديل بين حقول الإنتاج والطلبات
 window.toggleDisburseFields = function() {
     const type = document.getElementById('disburse-type-select').value;
-    document.getElementById('field-production').style.display = (type === 'production') ? 'block' : 'none';
-    document.getElementById('field-order').style.display = (type === 'order') ? 'block' : 'none';
+    const prodField = document.getElementById('field-production');
+    const orderField = document.getElementById('field-order');
+    
+    if (type === 'production') {
+        prodField.style.display = 'block';
+        orderField.style.display = 'none';
+    } else {
+        prodField.style.display = 'none';
+        orderField.style.display = 'block';
+    }
 };
 
 // 2. اختيار صنف من نتائج البحث لفتح لوحة الأرقام
 window.selectDisburseItem = async function(id) {
-    const [pSnap, iSnap] = await Promise.all([get(ref(database, 'products/' + id)), get(ref(database, 'inventory_items/' + id))]);
+    // إخفاء قائمة النتائج فوراً
+    document.getElementById('disburse-search-results').style.display = 'none';
+    document.getElementById('search-inv-disburse').value = "";
+
+    const [pSnap, iSnap] = await Promise.all([
+        get(ref(database, 'products/' + id)),
+        get(ref(database, 'inventory_items/' + id))
+    ]);
+    
     const item = pSnap.val() || iSnap.val();
     if (!item) return;
     
-    document.getElementById('disburse-search-results').style.display = 'none';
-    document.getElementById('search-inv-disburse').value = "";
-    
-    // فتح لوحة الأرقام فوراً
     const currentStock = item.stock || item.branches?.main?.stock || 0;
+    
+    // فتح لوحة الأرقام لإدخال الكمية
     openQtyKeypad(item, currentStock);
 };
 
 // 3. إضافة الصنف من لوحة الأرقام إلى السلة
 window.addCurrentToBasket = function(id, name) {
-    const qty = parseFloat(document.getElementById('keypad-display').value);
-    if (!qty || qty <= 0) return alert("يرجى إدخال كمية صحيحة");
-
-    // التحقق إذا كان الصنف مضافاً مسبقاً لزيادة الكمية فقط
-    const existing = disbursementBasket.find(i => i.id === id);
-    if (existing) {
-        existing.qty += qty;
-    } else {
-        disbursementBasket.push({ id, name, qty });
+    const display = document.getElementById('keypad-display');
+    const qty = parseFloat(display.value);
+    
+    if (!qty || qty <= 0) {
+        alert("يرجى إدخال كمية صحيحة أولاً");
+        return;
     }
 
+    // التحقق إذا كان الصنف مضافاً مسبقاً لزيادة الكمية فقط
+    const existingIndex = window.disbursementBasket.findIndex(i => i.id === id);
+    if (existingIndex > -1) {
+        window.disbursementBasket[existingIndex].qty += qty;
+    } else {
+        window.disbursementBasket.push({ id: id, name: name, qty: qty });
+    }
+
+    // إغلاق لوحة الأرقام وتحديث الجدول الخلفي
     closeKeypad();
     renderDisburseBasket();
 };
@@ -2472,12 +2492,23 @@ window.addCurrentToBasket = function(id, name) {
 // 4. تحديث جدول السلة داخل المودال
 window.renderDisburseBasket = function() {
     const tbody = document.getElementById('disburse-basket-body');
-    tbody.innerHTML = disbursementBasket.map((item, index) => `
-        <tr>
-            <td>${item.name}</td>
-            <td style="font-weight:bold;">${item.qty}</td>
-            <td><button onclick="disbursementBasket.splice(${index}, 1); renderDisburseBasket();" class="btn-clear" style="padding:2px 5px;">❌</button></td>
+    if (!tbody) return;
+    
+    tbody.innerHTML = window.disbursementBasket.map((item, index) => `
+        <tr style="border-bottom:1px solid #333;">
+            <td style="padding:10px;">${item.name}</td>
+            <td style="padding:10px; font-weight:bold; color:var(--gold-accent);">${item.qty}</td>
+            <td style="padding:10px; text-align:center;">
+                <button onclick="window.disbursementBasket.splice(${index}, 1); renderDisburseBasket();" 
+                        class="btn-clear" style="padding:2px 8px; background:#e94560; border:none; color:white; border-radius:4px;">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+            </td>
         </tr>`).join('');
+
+    if (window.disbursementBasket.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:#666;">السلة فارغة.. ابحث عن أصناف لإضافتها</td></tr>`;
+    }
 };
 
     </script>
@@ -4441,23 +4472,30 @@ window.processFinalDisbursement = async function() {
 
 // تعبئة قوائم الموظفين والكاشير داخل مودال الصرف
 window.populateDisburseDropdowns = async function() {
-    const [staffSnap, cashierSnap] = await Promise.all([
-        get(ref(database, 'system_users')),
-        get(ref(database, 'cashiers'))
-    ]);
+    try {
+        const [staffSnap, cashierSnap] = await Promise.all([
+            get(ref(database, 'system_users')),
+            get(ref(database, 'cashiers'))
+        ]);
 
-    const staffSelect = document.getElementById('select-prod-staff');
-    const cashierSelect = document.getElementById('select-cashier-ref');
+        const staffSelect = document.getElementById('select-prod-staff');
+        const cashierSelect = document.getElementById('select-cashier-ref');
 
-    if (staffSelect && staffSnap.exists()) {
-        staffSelect.innerHTML = Object.values(staffSnap.val())
-            .map(u => `<option value="${u.name}">${u.name} (${u.role})</option>`).join('');
-    }
+        if (staffSelect) {
+            const staff = staffSnap.val() || {};
+            // تصفية المستخدمين الذين دورهم "إنتاج" أو عرض الجميع إذا رغبت
+            staffSelect.innerHTML = Object.values(staff).map(u => 
+                `<option value="${u.name}">${u.name} (${u.role})</option>`
+            ).join('') || '<option value="">لا يوجد موظفين</option>';
+        }
 
-    if (cashierSelect && cashierSnap.exists()) {
-        cashierSelect.innerHTML = Object.values(cashierSnap.val())
-            .map(c => `<option value="${c.name}">${c.name}</option>`).join('');
-    }
+        if (cashierSelect) {
+            const cashiers = cashierSnap.val() || {};
+            cashierSelect.innerHTML = Object.values(cashiers).map(c => 
+                `<option value="${c.name}">${c.name}</option>`
+            ).join('') || '<option value="">لا يوجد كاشير</option>';
+        }
+    } catch (e) { console.error("Error populating dropdowns:", e); }
 };
 
 // دالة عرض تفاصيل سند قديم

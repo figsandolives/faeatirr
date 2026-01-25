@@ -1534,7 +1534,7 @@ window.loadProductsPage = function() {
     }
 };
 
-// دالة فتح مودال إضافة منتج
+// استبدل دالة openAddProductModal بهذا الكود المحدث
 window.openAddProductModal = function() {
     let modalHtml = `
         <div id="modal-overlay" class="modal-overlay">
@@ -1547,9 +1547,9 @@ window.openAddProductModal = function() {
                     <input type="number" id="p-price" placeholder="سعر البيع">
                     <select id="p-unit-select"><option>جاري تحميل الوحدات...</option></select>
                     <input type="number" id="p-reorder" placeholder="نقطة إعادة الطلب">
-                    <div style="grid-column: span 2;">
-                        <input type="text" id="p-barcode" placeholder="رقم الباركود (اتركه فارغاً للتوليد آلياً)">
-                        <canvas id="barcode-preview" style="display:none; margin:10px auto;"></canvas>
+                    <input type="number" id="p-initial-stock" placeholder="المخزون الأولي (الفرع الرئيسي)">
+                    <div style="grid-column: span 1;">
+                        <input type="text" id="p-barcode" placeholder="رقم الباركود (اختياري)">
                     </div>
                 </div>
                 <div style="margin-top:20px; display:flex; justify-content: space-around;">
@@ -1634,11 +1634,15 @@ window.saveNewProduct = function() {
     const price = document.getElementById('p-price').value;
     const unit = document.getElementById('p-unit-select').value;
     const reorder = document.getElementById('p-reorder').value;
+    const stock = document.getElementById('p-initial-stock').value; // جلب قيمة المخزون الأولي
     let barcode = document.getElementById('p-barcode').value;
 
     // التحقق من البيانات الأساسية
     if (!nameAr || !price || !unit) {
-        alert("يرجى إكمال الحقول الأساسية: الاسم، سعر البيع، والوحدة");
+        const errorMsg = currentLang === 'ar' 
+            ? "يرجى إكمال الحقول الأساسية: الاسم، سعر البيع، والوحدة" 
+            : "Please complete essential fields: Name, Price, and Unit";
+        alert(errorMsg);
         return;
     }
 
@@ -1655,14 +1659,16 @@ window.saveNewProduct = function() {
         unit,
         reorderPoint: parseFloat(reorder) || 5,
         barcode,
-        stock: 0, // يبدأ بـ 0 ويتم تحديثه من خلال "حركات المخزون" أو الاستيراد
+        stock: parseFloat(stock) || 0, // تم التعديل ليأخذ القيمة المدخلة بدلاً من 0
         salesCount: 0,
         createdAt: new Date().toISOString()
     };
 
-    // إرسال البيانات للمحرك في الموديول
+    // إرسال البيانات للمحرك في الموديول (Firebase)
     if (window.addProductToFirebase) {
         window.addProductToFirebase(productData);
+    } else {
+        console.error("محرك قاعدة البيانات غير متصل");
     }
 };
 
@@ -2694,16 +2700,16 @@ onValue(ref(database, 'units'), (snapshot) => {
 window.addProductToFirebase = async function(data) {
     const productId = Date.now();
     try {
-        // حفظ بيانات المنتج الأساسية
+        // 1. حفظ بيانات المنتج بالكامل
         await set(ref(database, 'products/' + productId), { ...data, id: productId });
         
-        // إنشاء سجل مخزون أولي في الفرع الرئيسي
-        await set(ref(database, 'inventory/main_branch/' + productId), 0);
+        // 2. تحديث المخزون الفعلي للفرع الرئيسي بهذه القيمة
+        await set(ref(database, 'inventory/main_branch/' + productId), data.stock);
         
-        alert("✅ تم إضافة المنتج بنجاح");
-        closeModal(); // إغلاق النافذة
+        alert("✅ تم إضافة المنتج وتعيين المخزون بنجاح");
+        closeModal();
     } catch (e) {
-        alert("خطأ أثناء الحفظ: " + e.message);
+        alert("خطأ: " + e.message);
     }
 };
 

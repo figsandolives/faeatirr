@@ -2928,15 +2928,6 @@ window.downloadSingleBarcode = function(id, nameAr) {
     }
 };
 
-// 3. دالة تعديل المنتج (فتحة نافذة التعديل)
-window.editProduct = async function(id) {
-    const snap = await get(ref(database, 'products/' + id));
-    const p = snap.val();
-    if (p) {
-        // يمكننا برمجة نافذة التعديل هنا بنفس نمط إضافة المنتج
-        alert("سيتم فتح نافذة تعديل المنتج: " + p.nameAr);
-    }
-};
 
 // 4. دالة تحميل تقرير المنتجات إكسل
 window.exportProductsExcel = async function() {

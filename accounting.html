@@ -2698,6 +2698,138 @@ window.printDisbursementSlip = function(slip) {
     printWindow.document.close();
 };
 
+// كائن مؤقت لتخزين بيانات عملية الإنتاج الجارية
+window.currentProdBatch = {
+    itemId: null,
+    itemName: null,
+    prodDate: null,
+    expDate: null,
+    qty: 0,
+    disburseId: null
+};
+
+// 1. بناء صفحة الإنتاج الرئيسية
+window.loadProductionPage = function() {
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-industry"></i> سجلات الإنتاج</h3>
+                <button class="btn-main" onclick="openAddProductionModal()">+ إضافة سند إنتاج</button>
+            </div>
+            
+            <table class="data-table" style="margin-top:20px;">
+                <thead>
+                    <tr>
+                        <th>رقم السند (الباركود)</th>
+                        <th>التاريخ</th>
+                        <th>المنتج</th>
+                        <th>الكمية</th>
+                        <th>المسؤول</th>
+                        <th>سند الصرف</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="production-list-body"></tbody>
+            </table>
+        </div>`;
+    
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initProductionLogic) window.initProductionLogic();
+};
+
+// 2. نافذة إضافة إنتاج جديد (المرحلة 1: البحث والاختيار)
+window.openAddProductionModal = async function() {
+    const storekeeper = sessionStorage.getItem('userName') || "غير مسجل";
+    window.currentProdBatch = { itemId: null, itemName: null, prodDate: null, expDate: null, qty: 0, disburseId: null };
+
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay" style="z-index:1050;">
+            <div class="modal-box" style="width:500px;">
+                <h3>إنشاء سند إنتاج جديد</h3>
+                <div style="text-align:right; margin-bottom:15px;">
+                    <label style="font-size:12px; color:#888;">أمين المخزن (تلقائي)</label>
+                    <input type="text" value="${storekeeper}" readonly style="background:#1a1a2e;">
+                    
+                    <label style="font-size:12px; color:#888; margin-top:10px; display:block;">موظف الإنتاج المسؤول</label>
+                    <select id="prod-staff-select"></select>
+
+                    <label style="font-size:12px; color:#888; margin-top:10px; display:block;">البحث عن المنتج المنتج (أو سكان الباركود)</label>
+                    <input type="text" id="search-prod-production" placeholder="ابحث بالاسم أو الباركود..." onkeydown="handleProductionSearch(event)">
+                    <div id="prod-search-results" class="search-dropdown"></div>
+                </div>
+                <button class="btn-clear" style="width:100%;" onclick="closeModal()">إلغاء</button>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    if(window.populateProdStaffDropdown) window.populateProdStaffDropdown();
+};
+
+// 3. مودال التواريخ (المرحلة 2)
+window.openBatchDatesModal = function() {
+    let modalHtml = `
+        <div id="dates-overlay" class="modal-overlay" style="z-index:2000; background:rgba(0,0,0,0.9);">
+            <div class="modal-box" style="width:350px;">
+                <h4>تحديد الصلاحية: ${currentProdBatch.itemName}</h4>
+                <div style="text-align:right; margin-top:15px;">
+                    <label style="font-size:12px;">تاريخ الإنتاج</label>
+                    <input type="date" id="batch-prod-date" value="${new Date().toISOString().split('T')[0]}">
+                    <label style="font-size:12px; margin-top:10px; display:block;">تاريخ الانتهاء</label>
+                    <input type="date" id="batch-exp-date">
+                </div>
+                <button class="btn-login" style="width:100%; margin-top:20px;" onclick="saveBatchDates()">التالي: تحديد الكمية</button>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+// 4. لوحة أرقام الكمية (المرحلة 3)
+window.openProdQtyKeypad = function() {
+    let keypadHtml = `
+        <div id="prod-qty-overlay" class="modal-overlay" style="z-index:3000; background:rgba(0,0,0,0.95);">
+            <div class="modal-box" style="width:320px;">
+                <h4>الكمية المنتجة</h4>
+                <input type="text" id="prod-keypad-display" readonly style="font-size:2.5rem; text-align:center; height:70px; background:#000; color:var(--gold-accent);">
+                <div class="pin-pad">
+                    ${[1,2,3,4,5,6,7,8,9].map(n => `<button onclick="document.getElementById('prod-keypad-display').value += '${n}'">${n}</button>`).join('')}
+                    <button onclick="document.getElementById('prod-keypad-display').value += '.'">.</button>
+                    <button onclick="document.getElementById('prod-keypad-display').value += '0'">0</button>
+                    <button class="btn-clear" onclick="const d=document.getElementById('prod-keypad-display'); d.value=d.value.slice(0,-1)"><i class="fas fa-backspace"></i></button>
+                </div>
+                <button class="btn-login" style="width:100%; margin-top:20px; padding:15px;" onclick="saveBatchQty()">التالي: ربط سند الصرف</button>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', keypadHtml);
+};
+
+// 5. محرك طباعة الاستيكر (5x3 سم)
+window.printProductionSticker = function(batch) {
+    let printHtml = `
+        <html>
+        <head>
+            <style>
+                @page { size: 50mm 30mm; margin: 0; }
+                body { direction: rtl; font-family: 'Arial', sans-serif; margin: 0; padding: 2mm; display: flex; flex-direction: column; align-items: center; text-align: center; }
+                .name { font-size: 14pt; font-weight: bold; margin-bottom: 1mm; width: 100%; overflow: hidden; white-space: nowrap; }
+                .dates { font-size: 9pt; font-weight: bold; margin-bottom: 1mm; }
+                .barcode-svg { width: 45mm; height: 12mm; }
+            </style>
+            <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
+        </head>
+        <body>
+            <div class="name">${batch.itemName}</div>
+            <div class="dates">P: ${batch.prodDate} | E: ${batch.expDate}</div>
+            <svg id="sticker-bc"></svg>
+            <script>
+                JsBarcode("#sticker-bc", "${batch.batchId}", { height: 35, displayValue: true, fontSize: 10, margin: 0 });
+                window.onload = function() { window.print(); setTimeout(window.close, 500); }
+            <\/script>
+        </body>
+        </html>`;
+    const win = window.open('', '_blank', 'width=300,height=200');
+    win.document.write(printHtml);
+    win.document.close();
+};
+
     </script>
 
     <script type="module">
@@ -5003,6 +5135,105 @@ async function adjustStock(itemId, amount) {
         await set(iRef, (parseFloat(iSnap.val()) || 0) + amount);
     }
 }
+
+// 1. مراقبة سجلات الإنتاج
+window.initProductionLogic = function() {
+    onValue(ref(database, 'production_slips'), (snapshot) => {
+        const tbody = document.getElementById('production-list-body');
+        if (!tbody) return;
+        tbody.innerHTML = "";
+        const slips = snapshot.val() || {};
+        
+        Object.entries(slips).reverse().forEach(([id, s]) => {
+            tbody.innerHTML += `
+                <tr>
+                    <td><canvas id="list-bc-${id}" style="height:30px;"></canvas></td>
+                    <td style="font-size:12px;">${s.createdAt}</td>
+                    <td><b>${s.itemName}</b></td>
+                    <td style="color:var(--gold-accent);"><b>${s.qty}</b></td>
+                    <td>${s.staffName}</td>
+                    <td><button class="btn-clear" style="font-size:11px; padding:3px 7px; color:#3498db; border:1px solid #3498db;" onclick="viewDisburseSlip('${s.disburseId}')">#${s.disburseId.toString().slice(-6)}</button></td>
+                    <td>
+                        <button class="btn-main" style="padding:5px 10px; background:#27ae60;" onclick='printProductionSticker(${JSON.stringify(s)})'><i class="fas fa-print"></i></button>
+                    </td>
+                </tr>`;
+            setTimeout(() => JsBarcode(`#list-bc-${id}`, s.batchId, {displayValue:false, height:25, width:1}), 100);
+        });
+    });
+};
+
+// 2. معالجة البحث والباركود في الإنتاج
+window.handleProductionSearch = async function(e) {
+    const val = e.target.value;
+    if (val.length < 2) return;
+    const [pSnap, iSnap] = await Promise.all([get(ref(database, 'products')), get(ref(database, 'inventory_items'))]);
+    const all = { ...pSnap.val(), ...iSnap.val() };
+
+    if (e.key === 'Enter') {
+        const found = Object.values(all).find(i => i.barcode === val);
+        if (found) {
+            window.currentProdBatch.itemId = found.id;
+            window.currentProdBatch.itemName = found.nameAr;
+            document.getElementById('modal-overlay').remove();
+            window.openBatchDatesModal();
+            return;
+        }
+    }
+    // نتائج البحث النصي
+    const results = Object.values(all).filter(i => i.nameAr.includes(val)).slice(0, 5);
+    document.getElementById('prod-search-results').innerHTML = results.map(i => `<div onclick="selectProdItem('${i.id}', '${i.nameAr}')">${i.nameAr}</div>`).join('');
+};
+
+// 3. الربط بسند الصرف والحفظ النهائي
+window.openLinkDisbursementModal = async function() {
+    const snap = await get(ref(database, 'disbursements'));
+    const allDisburse = snap.val() || {};
+    // تصفية السندات التي نوعها "إنتاج" فقط
+    const prodSlips = Object.entries(allDisburse).filter(([id, s]) => s.type === 'production').reverse().slice(0, 10);
+
+    let listHtml = prodSlips.map(([id, s]) => `
+        <div class="info-card" onclick="finalizeProduction('${id}')" style="cursor:pointer; margin-bottom:10px; border:1px solid #444;">
+            <b>سند صرف #${s.slipNo}</b><br>
+            <small>المستلم: ${s.receiverName} | التاريخ: ${s.date}</small>
+        </div>`).join('');
+
+    let modalHtml = `
+        <div id="link-overlay" class="modal-overlay" style="z-index:4000; background:rgba(0,0,0,0.9);">
+            <div class="modal-box">
+                <h3>ربط بسند صرف الإنتاج</h3>
+                <p style="font-size:12px; color:#aaa; margin-bottom:15px;">اختر سند صرف المواد الخام المرتبط بهذه الطبخة:</p>
+                ${listHtml || '<p>لا توجد سندات صرف إنتاج متاحة</p>'}
+                <button class="btn-clear" style="width:100%; margin-top:15px;" onclick="document.getElementById('link-overlay').remove()">رجوع</button>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.finalizeProduction = async function(disburseId) {
+    const batchId = "BN-" + Date.now().toString().slice(-8); // رقم الوجبة الفريد
+    const prodData = {
+        ...window.currentProdBatch,
+        batchId,
+        disburseId,
+        staffName: document.getElementById('prod-staff-select')?.value,
+        storekeeper: sessionStorage.getItem('userName'),
+        createdAt: new Date().toLocaleString()
+    };
+
+    try {
+        // 1. زيادة مخزون المنتج الجاهز في الفرع الرئيسي
+        const pRef = ref(database, 'products/' + prodData.itemId + '/stock');
+        const pSnap = await get(pRef);
+        await set(pRef, (parseFloat(pSnap.val()) || 0) + prodData.qty);
+
+        // 2. حفظ سند الإنتاج
+        await set(ref(database, 'production_slips/' + Date.now()), prodData);
+
+        alert("✅ تم تسجيل الإنتاج وزيادة المخزون الجاهز");
+        document.querySelectorAll('.modal-overlay').forEach(m => m.remove());
+        window.printProductionSticker(prodData); // طباعة الاستيكر فوراً
+    } catch (e) { alert("خطأ: " + e.message); }
+};
 
 </script>
 </body>

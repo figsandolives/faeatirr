@@ -2865,9 +2865,10 @@ window.selectProdItem = function(id, nameAr, nameEn) {
     const staffSelect = document.getElementById('prod-staff-select');
     if (!staffSelect || !staffSelect.value) return alert("يرجى اختيار موظف الإنتاج أولاً");
 
+    // تخزين البيانات للتأكد من وصولها للمرحلة النهائية
     window.currentProdBatch.itemId = id;
     window.currentProdBatch.itemNameAr = nameAr;
-    window.currentProdBatch.itemNameEn = nameEn; // حفظ الاسم الإنجليزي
+    window.currentProdBatch.itemNameEn = nameEn; 
     window.currentProdBatch.staffName = staffSelect.value;
     
     document.getElementById('modal-overlay').remove();
@@ -5286,24 +5287,37 @@ window.initProductionLogic = function() {
 window.handleProductionSearch = async function(e) {
     const val = e.target.value;
     if (val.length < 2) return;
+    
+    // جلب البيانات من المنتجات والمخزون
     const [pSnap, iSnap] = await Promise.all([get(ref(database, 'products')), get(ref(database, 'inventory_items'))]);
     const all = { ...pSnap.val(), ...iSnap.val() };
 
+    // حالة سكان الباركود (Enter)
     if (e.key === 'Enter') {
         const found = Object.values(all).find(i => i.barcode === val);
         if (found) {
+            // سحب اسم الموظف قبل إغلاق النافذة لضمان عدم ضياعه
+            const staffSelect = document.getElementById('prod-staff-select');
+            if (!staffSelect || !staffSelect.value) return alert("يرجى اختيار موظف الإنتاج أولاً");
+
+            // تخزين كل البيانات المطلوبة في الكائن العام
             window.currentProdBatch.itemId = found.id;
-            window.currentProdBatch.itemNameAr = found.nameAr;
-            window.currentProdBatch.itemNameEn = found.nameEn || ''; // التقاط الاسم الإنجليزي
+            window.currentProdBatch.itemNameAr = found.nameAr || found.name;
+            window.currentProdBatch.itemNameEn = found.nameEn || "";
+            window.currentProdBatch.staffName = staffSelect.value;
+            
             document.getElementById('modal-overlay').remove();
             window.openBatchDatesModal();
             return;
         }
     }
-    // تحديث القائمة المنسدلة للبحث لتشمل النوعين
-    const results = Object.values(all).filter(i => i.nameAr.includes(val)).slice(0, 5);
+    
+    // نتائج البحث النصي
+    const results = Object.values(all).filter(i => (i.nameAr && i.nameAr.includes(val)) || (i.name && i.name.includes(val))).slice(0, 5);
     document.getElementById('prod-search-results').innerHTML = results.map(i => 
-        `<div onclick="selectProdItem('${i.id}', '${i.nameAr}', '${i.nameEn || ''}')">${i.nameAr}</div>`).join('');
+        `<div onclick="selectProdItem('${i.id}', '${i.nameAr || i.name}', '${i.nameEn || ''}')">
+            ${i.nameAr || i.name}
+        </div>`).join('');
 };
 
 // 3. الربط بسند الصرف والحفظ النهائي
@@ -5348,14 +5362,15 @@ window.openLinkDisbursementModal = async function() {
 window.finalizeProduction = async function(disburseId) {
     const batchId = "BN-" + Date.now().toString().slice(-8); 
     
-    // التأكد من أن جميع البيانات مكتملة لتجنب أخطاء Firebase
+    // بناء كائن البيانات مع التحقق من عدم وجود قيم undefined
     const prodData = {
-        itemId: window.currentProdBatch.itemId,
-        itemName: window.currentProdBatch.itemName,
-        prodDate: window.currentProdBatch.prodDate,
-        expDate: window.currentProdBatch.expDate,
-        qty: window.currentProdBatch.qty,
-        staffName: window.currentProdBatch.staffName || "غير محدد", // استخدام القيمة المحفوظة
+        itemId: window.currentProdBatch.itemId || "",
+        itemNameAr: window.currentProdBatch.itemNameAr || "منتج غير مسمى",
+        itemNameEn: window.currentProdBatch.itemNameEn || "",
+        prodDate: window.currentProdBatch.prodDate || "",
+        expDate: window.currentProdBatch.expDate || "",
+        qty: parseFloat(window.currentProdBatch.qty) || 0,
+        staffName: window.currentProdBatch.staffName || "غير محدد", 
         batchId: batchId,
         disburseId: disburseId,
         storekeeper: sessionStorage.getItem('userName') || "غير مسجل",
@@ -5363,24 +5378,20 @@ window.finalizeProduction = async function(disburseId) {
     };
 
     try {
-        //         // زيادة مخزون المنتج الجاهز
+        //         // 1. زيادة المخزون الجاهز
         const pRef = ref(database, 'products/' + prodData.itemId + '/stock');
         const pSnap = await get(pRef);
-        const currentStock = parseFloat(pSnap.val()) || 0;
-        await set(pRef, currentStock + prodData.qty);
+        await set(pRef, (parseFloat(pSnap.val()) || 0) + prodData.qty);
 
-        // حفظ سند الإنتاج
+        // 2. حفظ السند النهائي
         await set(ref(database, 'production_slips/' + Date.now()), prodData);
 
         alert("✅ تم تسجيل الإنتاج بنجاح");
-        
-        // إغلاق كل النوافذ المنبثقة
         document.querySelectorAll('.modal-overlay').forEach(m => m.remove());
         
-        // طباعة الاستيكر فوراً
+        // 3. طباعة الاستيكر بالأسماء الصحيحة
         window.printProductionSticker(prodData);
     } catch (e) { 
-        console.error("Finalize Error:", e);
         alert("خطأ أثناء الحفظ: " + e.message); 
     }
 };

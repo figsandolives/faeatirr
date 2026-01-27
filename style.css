@@ -302,7 +302,7 @@ body.ltr { direction: ltr; }
 
 .data-table th {
     background: #0f3460;
-    color: #ffffff;
+    color: #000000;
     padding: 15px;
     text-align: center;
 }

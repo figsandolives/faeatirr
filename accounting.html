@@ -2723,9 +2723,10 @@ window.loadProductionPage = function() {
             <table class="data-table" style="margin-top:20px;">
                 <thead>
                     <tr>
-                        <th>رقم السند (الباركود)</th>
+                        <th># رقم السند</th>
+                        <th>الباركود</th>
                         <th>التاريخ</th>
-                        <th>المنتج</th>
+                        <th>المنتج (Ar/En)</th>
                         <th>الكمية</th>
                         <th>المسؤول</th>
                         <th>سند الصرف</th>
@@ -2810,49 +2811,66 @@ window.printProductionSticker = function(batch) {
         <html>
         <head>
             <style>
+                @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@700&display=swap');
                 @page { size: 50mm 30mm; margin: 0; }
-                body { direction: rtl; font-family: 'Arial', sans-serif; margin: 0; padding: 2mm; display: flex; flex-direction: column; align-items: center; text-align: center; }
-                .name { font-size: 14pt; font-weight: bold; margin-bottom: 1mm; width: 100%; overflow: hidden; white-space: nowrap; }
-                .dates { font-size: 9pt; font-weight: bold; margin-bottom: 1mm; }
-                .barcode-svg { width: 45mm; height: 12mm; }
+                body { 
+                    direction: rtl; 
+                    font-family: 'Arial', sans-serif; 
+                    margin: 0; 
+                    padding: 1mm 2mm; 
+                    display: flex; 
+                    flex-direction: column; 
+                    align-items: center; 
+                    justify-content: center;
+                    text-align: center; 
+                    overflow: hidden;
+                }
+                .name-ar { font-family: 'Cairo', sans-serif; font-size: 11pt; font-weight: bold; line-height: 1.1; margin-bottom: 0.5mm; }
+                .name-en { font-size: 9pt; font-weight: normal; margin-bottom: 1.5mm; color: #333; text-transform: uppercase; }
+                .dates-row { display: flex; justify-content: space-between; width: 100%; font-size: 8pt; font-weight: bold; margin-bottom: 1mm; border-top: 0.5pt solid #000; padding-top: 1mm; }
+                .barcode-area { width: 45mm; height: 10mm; }
             </style>
             <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
         </head>
         <body>
-            <div class="name">${batch.itemName}</div>
-            <div class="dates">P: ${batch.prodDate} | E: ${batch.expDate}</div>
-            <svg id="sticker-bc"></svg>
+            <div class="name-ar">${batch.itemNameAr}</div>
+            <div class="name-en">${batch.itemNameEn || ''}</div>
+            
+            <div class="dates-row">
+                <span>انتاج: ${batch.prodDate}</span>
+                <span>انتهاء: ${batch.expDate}</span>
+            </div>
+
+            <svg id="sticker-bc" class="barcode-area"></svg>
+
             <script>
-                JsBarcode("#sticker-bc", "${batch.batchId}", { height: 35, displayValue: true, fontSize: 10, margin: 0 });
+                JsBarcode("#sticker-bc", "${batch.batchId}", { 
+                    height: 35, 
+                    displayValue: true, 
+                    fontSize: 9, 
+                    margin: 0,
+                    fontOptions: "bold"
+                });
                 window.onload = function() { window.print(); setTimeout(window.close, 500); }
             <\/script>
         </body>
         </html>`;
-    const win = window.open('', '_blank', 'width=300,height=200');
+    const win = window.open('', '_blank', 'width=400,height=300');
     win.document.write(printHtml);
     win.document.close();
 };
 
 // 1. عند اختيار المنتج من نتائج البحث
-window.selectProdItem = function(id, name) {
-    // 1. التقاط اسم الموظف المختار فوراً قبل إغلاق المودال
+window.selectProdItem = function(id, nameAr, nameEn) {
     const staffSelect = document.getElementById('prod-staff-select');
-    if (!staffSelect || !staffSelect.value) {
-        return alert("يرجى اختيار موظف الإنتاج أولاً");
-    }
+    if (!staffSelect || !staffSelect.value) return alert("يرجى اختيار موظف الإنتاج أولاً");
 
-    // 2. تخزين البيانات في الكائن العام
     window.currentProdBatch.itemId = id;
-    window.currentProdBatch.itemName = name;
-    window.currentProdBatch.staffName = staffSelect.value; // حفظ الاسم هنا لضمان عدم ضياعه
+    window.currentProdBatch.itemNameAr = nameAr;
+    window.currentProdBatch.itemNameEn = nameEn; // حفظ الاسم الإنجليزي
+    window.currentProdBatch.staffName = staffSelect.value;
     
-    const searchResults = document.getElementById('prod-search-results');
-    if(searchResults) searchResults.style.display = 'none';
-    
-    const oldModal = document.getElementById('modal-overlay');
-    if (oldModal) oldModal.remove();
-    
-    // فتح المودال التالي: التواريخ
+    document.getElementById('modal-overlay').remove();
     window.openBatchDatesModal();
 };
 
@@ -5232,19 +5250,34 @@ window.initProductionLogic = function() {
         const slips = snapshot.val() || {};
         
         Object.entries(slips).reverse().forEach(([id, s]) => {
+            const slipNo = s.batchId.replace("BN-", ""); // تحويل المعرف لرقم عادي
+            
             tbody.innerHTML += `
                 <tr>
-                    <td><canvas id="list-bc-${id}" style="height:30px;"></canvas></td>
+                    <td style="font-weight:bold; color:var(--gold-accent);">${slipNo}</td>
+                    <td><canvas id="list-bc-${id}" style="height:35px;"></canvas></td>
                     <td style="font-size:12px;">${s.createdAt}</td>
-                    <td><b>${s.itemName}</b></td>
+                    <td style="text-align:right;">
+                        <div style="font-weight:bold;">${s.itemNameAr}</div>
+                        <div style="font-size:11px; color:#aaa;">${s.itemNameEn || ''}</div>
+                    </td>
                     <td style="color:var(--gold-accent);"><b>${s.qty}</b></td>
                     <td>${s.staffName}</td>
-                    <td><button class="btn-clear" style="font-size:11px; padding:3px 7px; color:#3498db; border:1px solid #3498db;" onclick="viewDisburseSlip('${s.disburseId}')">#${s.disburseId.toString().slice(-6)}</button></td>
                     <td>
-                        <button class="btn-main" style="padding:5px 10px; background:#27ae60;" onclick='printProductionSticker(${JSON.stringify(s)})'><i class="fas fa-print"></i></button>
+                        <button class="btn-clear" style="font-size:11px; padding:3px 7px; color:#3498db; border:1px solid #3498db;" 
+                                onclick="viewDisburseSlip('${s.disburseId}', true)">
+                            #${s.disburseId.toString().slice(-6)}
+                        </button>
+                    </td>
+                    <td>
+                        <button class="btn-main" style="padding:5px 10px; background:#27ae60;" 
+                                onclick='printProductionSticker(${JSON.stringify(s)})'>
+                            <i class="fas fa-print"></i> ستيكر
+                        </button>
                     </td>
                 </tr>`;
-            setTimeout(() => JsBarcode(`#list-bc-${id}`, s.batchId, {displayValue:false, height:25, width:1}), 100);
+            // توليد الباركود في عموده الخاص
+            setTimeout(() => JsBarcode(`#list-bc-${id}`, s.batchId, {displayValue:false, height:25, width:1, margin:0}), 100);
         });
     });
 };
@@ -5260,15 +5293,17 @@ window.handleProductionSearch = async function(e) {
         const found = Object.values(all).find(i => i.barcode === val);
         if (found) {
             window.currentProdBatch.itemId = found.id;
-            window.currentProdBatch.itemName = found.nameAr;
+            window.currentProdBatch.itemNameAr = found.nameAr;
+            window.currentProdBatch.itemNameEn = found.nameEn || ''; // التقاط الاسم الإنجليزي
             document.getElementById('modal-overlay').remove();
             window.openBatchDatesModal();
             return;
         }
     }
-    // نتائج البحث النصي
+    // تحديث القائمة المنسدلة للبحث لتشمل النوعين
     const results = Object.values(all).filter(i => i.nameAr.includes(val)).slice(0, 5);
-    document.getElementById('prod-search-results').innerHTML = results.map(i => `<div onclick="selectProdItem('${i.id}', '${i.nameAr}')">${i.nameAr}</div>`).join('');
+    document.getElementById('prod-search-results').innerHTML = results.map(i => 
+        `<div onclick="selectProdItem('${i.id}', '${i.nameAr}', '${i.nameEn || ''}')">${i.nameAr}</div>`).join('');
 };
 
 // 3. الربط بسند الصرف والحفظ النهائي

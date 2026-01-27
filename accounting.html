@@ -60,7 +60,7 @@
                 <a href="#" class="sidebar-item" id="sub-inv-items" onclick="loadPage('inv-items')">مواد المخزون</a>
                 <a class="sidebar-item" id="sub-storage-locations" onclick="loadPage('storage-locations')">أماكن التخزين</a>
                 <a href="#" class="sidebar-item" id="sub-disbursement" onclick="loadPage('disbursement')">صرف</a>
-                <a class="sidebar-item" id="sub-production">انتاج</a>
+                <a href="#" class="sidebar-item" id="sub-production" onclick="loadPage('production')">انتاج</a>
                 <a class="sidebar-item" id="sub-inventory-check">جرد</a>
                 <a class="sidebar-item" id="sub-transfers">تحويلات</a>
                 <a class="sidebar-item" id="sub-return-store">مرتجع للمخزن</a>
@@ -421,6 +421,9 @@ else if (pageId === 'disbursement') {
 }
 else if (pageId === 'prod-staff') {
     loadProductionStaffPage();
+}
+else if (pageId === 'production') {
+    loadProductionPage();
 }
 };
 
@@ -2828,6 +2831,61 @@ window.printProductionSticker = function(batch) {
     const win = window.open('', '_blank', 'width=300,height=200');
     win.document.write(printHtml);
     win.document.close();
+};
+
+// 1. عند اختيار المنتج من نتائج البحث
+window.selectProdItem = function(id, name) {
+    window.currentProdBatch.itemId = id;
+    window.currentProdBatch.itemName = name;
+    
+    const searchResults = document.getElementById('prod-search-results');
+    if(searchResults) searchResults.style.display = 'none';
+    
+    const oldModal = document.getElementById('modal-overlay');
+    if (oldModal) oldModal.remove();
+    
+    // فتح المودال التالي: التواريخ
+    window.openBatchDatesModal();
+};
+
+// 2. حفظ التواريخ والانتقال للوحة الأرقام
+window.saveBatchDates = function() {
+    const pDate = document.getElementById('batch-prod-date').value;
+    const eDate = document.getElementById('batch-exp-date').value;
+    
+    if(!pDate || !eDate) return alert("يرجى تحديد تاريخ الإنتاج والانتهاء");
+    
+    window.currentProdBatch.prodDate = pDate;
+    window.currentProdBatch.expDate = eDate;
+    
+    document.getElementById('dates-overlay').remove();
+    // فتح المودال التالي: الكمية
+    window.openProdQtyKeypad();
+};
+
+// 3. حفظ الكمية والانتقال لربط سند الصرف
+window.saveBatchQty = function() {
+    const qty = parseFloat(document.getElementById('prod-keypad-display').value);
+    
+    if(!qty || qty <= 0) return alert("يرجى إدخال كمية صحيحة");
+    
+    window.currentProdBatch.qty = qty;
+    
+    document.getElementById('prod-qty-overlay').remove();
+    // فتح المرحلة النهائية: الربط بسند الصرف
+    window.openLinkDisbursementModal();
+};
+
+// 4. تعبئة قائمة موظفي الإنتاج
+window.populateProdStaffDropdown = async function() {
+    const snap = await get(ref(database, 'production_staff'));
+    const staff = snap.val() || {};
+    const select = document.getElementById('prod-staff-select');
+    if(select) {
+        select.innerHTML = Object.values(staff).map(s => 
+            `<option value="${s.nameAr}">${s.nameAr}</option>`
+        ).join('') || '<option value="">لا يوجد موظفين مسجلين</option>';
+    }
 };
 
     </script>

@@ -2835,8 +2835,16 @@ window.printProductionSticker = function(batch) {
 
 // 1. عند اختيار المنتج من نتائج البحث
 window.selectProdItem = function(id, name) {
+    // 1. التقاط اسم الموظف المختار فوراً قبل إغلاق المودال
+    const staffSelect = document.getElementById('prod-staff-select');
+    if (!staffSelect || !staffSelect.value) {
+        return alert("يرجى اختيار موظف الإنتاج أولاً");
+    }
+
+    // 2. تخزين البيانات في الكائن العام
     window.currentProdBatch.itemId = id;
     window.currentProdBatch.itemName = name;
+    window.currentProdBatch.staffName = staffSelect.value; // حفظ الاسم هنا لضمان عدم ضياعه
     
     const searchResults = document.getElementById('prod-search-results');
     if(searchResults) searchResults.style.display = 'none';
@@ -4986,62 +4994,83 @@ window.deleteProductionStaff = async function(id) {
     }
 };
 
-// تحديث دالة عرض السند لتشمل زر الطباعة
-// دالة عرض وتعديل تفاصيل السند بالكامل
-// 1. دالة العرض فقط (المعاينة)
-window.viewDisburseSlip = async function(id) {
-    const snap = await get(ref(database, 'disbursements/' + id));
-    const slip = snap.val();
-    if (!slip) return;
+// دالة عرض تفاصيل سند الصرف (المعاينة فقط)
+// المعامل isOverWizard يُستخدم لرفع مستوى النافذة عند فتحها من شاشة الإنتاج
+window.viewDisburseSlip = async function(id, isOverWizard = false) {
+    try {
+        // 1. جلب بيانات السند من Firebase
+        const snap = await get(ref(database, 'disbursements/' + id));
+        const slip = snap.val();
+        if (!slip) return alert("عذراً، لم يتم العثور على بيانات السند.");
 
-    const isOrder = slip.type === 'order';
-    
-    // بناء جدول الأصناف للعرض فقط (بدون حقول إدخال)
-    let itemsHtml = slip.items.map((i, index) => `
-        <tr style="border-bottom: 1px solid #333;">
-            <td style="padding:12px; text-align:right;">${i.name}</td>
-            <td style="padding:12px; text-align:center; font-weight:bold; color:var(--gold-accent);">${i.qty}</td>
-        </tr>`).join('');
-    
-    let modalHtml = `
-        <div id="modal-overlay" class="modal-overlay" style="z-index:2500;">
-            <div class="modal-box" style="width:600px; max-width:95%; border-top: 4px solid var(--gold-accent);">
-                <div class="header-flex" style="margin-bottom:20px;">
-                    <h3 style="margin:0;"><i class="fas fa-file-alt"></i> تفاصيل سند صرف #${slip.slipNo}</h3>
-                    <span class="rank-badge" style="background:#444;">معاينة فقط</span>
-                </div>
+        const isOrder = slip.type === 'order';
+        // تحديد مستوى الطبقة (Z-index) لمنع تداخل النوافذ
+        const zIndex = isOverWizard ? 5000 : 2500;
 
-                <div class="info-card" style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; text-align:right; margin-bottom:20px; background:rgba(255,255,255,0.03); padding:15px; border-radius:8px; font-size:13px;">
-                    <div><span style="color:#888;">التاريخ:</span> ${slip.date}</div>
-                    <div><span style="color:#888;">أمين المخزن:</span> ${slip.storekeeper}</div>
-                    <div><span style="color:#888;">نوع الصرف:</span> ${slip.type === 'production' ? 'للإنتاج' : 'لطلب مبيعات'}</div>
-                    <div><span style="color:#888;">المستلم:</span> ${slip.receiverName} ${slip.orderInvoiceNo ? `<br><small style="color:var(--gold-accent)">رقم الفاتورة: ${slip.orderInvoiceNo}</small>` : ''}</div>
-                </div>
+        // 2. بناء جدول الأصناف للعرض فقط (بدون حقول إدخال) لضمان عدم التعديل بالخطأ
+        let itemsHtml = slip.items.map((i, index) => `
+            <tr style="border-bottom: 1px solid #333;">
+                <td style="padding:12px; text-align:right; color: #eee;">${i.name}</td>
+                <td style="padding:12px; text-align:center; font-weight:bold; color:var(--gold-accent);">${i.qty}</td>
+            </tr>`).join('');
+        
+        // 3. بناء الواجهة الرسومية (Modal)
+        let modalHtml = `
+            <div id="modal-overlay" class="modal-overlay" style="z-index:${zIndex}; background: rgba(0,0,0,0.85);">
+                <div class="modal-box" style="width:600px; max-width:95%; border-top: 4px solid var(--gold-accent); position: relative;">
+                    <div class="header-flex" style="margin-bottom:20px; border-bottom: 1px solid #333; padding-bottom: 10px;">
+                        <h3 style="margin:0;"><i class="fas fa-file-invoice"></i> سند صرف #${slip.slipNo}</h3>
+                        <span class="rank-badge" style="background:#444; font-size: 11px;">وضع المعاينة</span>
+                    </div>
 
-                <div style="max-height:300px; overflow-y:auto; border:1px solid #333; border-radius:5px; margin-bottom:20px;">
-                    <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                        <thead style="background:#111;">
-                            <tr>
-                                <th style="padding:10px; text-align:right; color:#888;">الصنف</th>
-                                <th style="padding:10px; text-align:center; color:#888;">الكمية</th>
-                            </tr>
-                        </thead>
-                        <tbody>${itemsHtml}</tbody>
-                    </table>
-                </div>
+                    <div class="info-card" style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; text-align:right; margin-bottom:20px; background:rgba(255,255,255,0.03); padding:15px; border-radius:8px; font-size:13px;">
+                        <div><span style="color:#888;">📅 التاريخ:</span> ${slip.date}</div>
+                        <div><span style="color:#888;">👤 أمين المخزن:</span> ${slip.storekeeper}</div>
+                        <div><span style="color:#888;">🏷️ نوع الصرف:</span> ${isOrder ? 'لطلب مبيعات' : 'للإنتاج الداخلي'}</div>
+                        <div>
+                            <span style="color:#888;">📥 المستلم:</span> ${slip.receiverName} 
+                            ${isOrder && slip.orderInvoiceNo ? `<br><small style="color:var(--gold-accent)">رقم الفاتورة: ${slip.orderInvoiceNo}</small>` : ''}
+                        </div>
+                    </div>
 
-                <div style="display:flex; gap:10px;">
-                    <button class="btn-main" style="flex:1; background:#2980b9;" onclick="editDisburseSlip('${id}')">
-                        <i class="fas fa-edit"></i> تعديل السند
-                    </button>
-                    <button class="btn-main" style="flex:1; background:#27ae60;" onclick='printDisbursementSlip(${JSON.stringify(slip)})'>
-                        <i class="fas fa-print"></i> طباعة A4
-                    </button>
-                    <button class="btn-clear" style="flex:1;" onclick="closeModal()">إغلاق</button>
+                    <div style="max-height:300px; overflow-y:auto; border:1px solid #333; border-radius:5px; margin-bottom:20px; background: rgba(0,0,0,0.2);">
+                        <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                            <thead style="background:#111; position: sticky; top: 0;">
+                                <tr>
+                                    <th style="padding:10px; text-align:right; color:#888; border-bottom: 1px solid #333;">الصنف</th>
+                                    <th style="padding:10px; text-align:center; color:#888; border-bottom: 1px solid #333;">الكمية</th>
+                                </tr>
+                            </thead>
+                            <tbody>${itemsHtml}</tbody>
+                        </table>
+                    </div>
+
+                    <div style="display:flex; gap:10px; flex-wrap: wrap;">
+                        <button class="btn-main" style="flex:1; min-width: 140px; background:#2980b9;" onclick="editDisburseSlip('${id}')">
+                            <i class="fas fa-edit"></i> تعديل السند
+                        </button>
+                        
+                        <button class="btn-main" style="flex:1; min-width: 140px; background:#27ae60;" onclick='printDisbursementSlip(${JSON.stringify(slip)})'>
+                            <i class="fas fa-print"></i> طباعة A4
+                        </button>
+                        
+                        <button class="btn-clear" style="flex:1; min-width: 100px; border: 1px solid #444;" onclick="closeModal()">
+                            إغلاق
+                        </button>
+                    </div>
                 </div>
-            </div>
-        </div>`;
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
+            </div>`;
+
+        // إزالة أي مودال سابق لتجنب التكرار
+        const existingModal = document.getElementById('modal-overlay');
+        if(existingModal) existingModal.remove();
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    } catch (error) {
+        console.error("Error viewing slip:", error);
+        alert("حدث خطأ أثناء تحميل بيانات السند.");
+    }
 };
 
 // 2. دالة وضع التعديل (التحكم الكامل)
@@ -5243,54 +5272,82 @@ window.handleProductionSearch = async function(e) {
 };
 
 // 3. الربط بسند الصرف والحفظ النهائي
+// دالة عرض سندات الصرف المتاحة للربط مع زر المعاينة
 window.openLinkDisbursementModal = async function() {
     const snap = await get(ref(database, 'disbursements'));
     const allDisburse = snap.val() || {};
-    // تصفية السندات التي نوعها "إنتاج" فقط
-    const prodSlips = Object.entries(allDisburse).filter(([id, s]) => s.type === 'production').reverse().slice(0, 10);
+    
+    // تصفية السندات التي نوعها "إنتاج" فقط وعرض آخر 10 سندات
+    const prodSlips = Object.entries(allDisburse)
+        .filter(([id, s]) => s.type === 'production')
+        .reverse()
+        .slice(0, 10);
 
     let listHtml = prodSlips.map(([id, s]) => `
-        <div class="info-card" onclick="finalizeProduction('${id}')" style="cursor:pointer; margin-bottom:10px; border:1px solid #444;">
-            <b>سند صرف #${s.slipNo}</b><br>
-            <small>المستلم: ${s.receiverName} | التاريخ: ${s.date}</small>
+        <div class="info-card" style="margin-bottom:10px; border:1px solid #444; display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 8px;">
+            <div onclick="finalizeProduction('${id}')" style="cursor:pointer; flex: 1; text-align: right;">
+                <b style="color: var(--gold-accent);">سند صرف #${s.slipNo}</b><br>
+                <small style="color: #aaa;">المستلم: ${s.receiverName} | التاريخ: ${s.date}</small>
+            </div>
+            <button class="btn-main" style="padding: 8px 12px; background: #3498db; margin-right: 15px;" 
+                    onclick="event.stopPropagation(); viewDisburseSlip('${id}', true)">
+                <i class="fas fa-eye"></i> معاينة
+            </button>
         </div>`).join('');
 
     let modalHtml = `
         <div id="link-overlay" class="modal-overlay" style="z-index:4000; background:rgba(0,0,0,0.9);">
-            <div class="modal-box">
-                <h3>ربط بسند صرف الإنتاج</h3>
-                <p style="font-size:12px; color:#aaa; margin-bottom:15px;">اختر سند صرف المواد الخام المرتبط بهذه الطبخة:</p>
-                ${listHtml || '<p>لا توجد سندات صرف إنتاج متاحة</p>'}
-                <button class="btn-clear" style="width:100%; margin-top:15px;" onclick="document.getElementById('link-overlay').remove()">رجوع</button>
+            <div class="modal-box" style="width: 500px;">
+                <h3 style="margin-bottom: 5px;">ربط بسند صرف الإنتاج</h3>
+                <p style="font-size:12px; color:#888; margin-bottom:15px;">اختر سند صرف المواد الخام المرتبط بهذه "الطبخة":</p>
+                <div style="max-height: 400px; overflow-y: auto; padding-left: 5px;">
+                    ${listHtml || '<p style="text-align:center; color:#666; padding:20px;">لا توجد سندات صرف إنتاج متاحة حالياً</p>'}
+                </div>
+                <button class="btn-clear" style="width:100%; margin-top:15px;" onclick="document.getElementById('link-overlay').remove()">إلغاء والرجوع</button>
             </div>
         </div>`;
+    
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
 window.finalizeProduction = async function(disburseId) {
-    const batchId = "BN-" + Date.now().toString().slice(-8); // رقم الوجبة الفريد
+    const batchId = "BN-" + Date.now().toString().slice(-8); 
+    
+    // التأكد من أن جميع البيانات مكتملة لتجنب أخطاء Firebase
     const prodData = {
-        ...window.currentProdBatch,
-        batchId,
-        disburseId,
-        staffName: document.getElementById('prod-staff-select')?.value,
-        storekeeper: sessionStorage.getItem('userName'),
+        itemId: window.currentProdBatch.itemId,
+        itemName: window.currentProdBatch.itemName,
+        prodDate: window.currentProdBatch.prodDate,
+        expDate: window.currentProdBatch.expDate,
+        qty: window.currentProdBatch.qty,
+        staffName: window.currentProdBatch.staffName || "غير محدد", // استخدام القيمة المحفوظة
+        batchId: batchId,
+        disburseId: disburseId,
+        storekeeper: sessionStorage.getItem('userName') || "غير مسجل",
         createdAt: new Date().toLocaleString()
     };
 
     try {
-        // 1. زيادة مخزون المنتج الجاهز في الفرع الرئيسي
+        //         // زيادة مخزون المنتج الجاهز
         const pRef = ref(database, 'products/' + prodData.itemId + '/stock');
         const pSnap = await get(pRef);
-        await set(pRef, (parseFloat(pSnap.val()) || 0) + prodData.qty);
+        const currentStock = parseFloat(pSnap.val()) || 0;
+        await set(pRef, currentStock + prodData.qty);
 
-        // 2. حفظ سند الإنتاج
+        // حفظ سند الإنتاج
         await set(ref(database, 'production_slips/' + Date.now()), prodData);
 
-        alert("✅ تم تسجيل الإنتاج وزيادة المخزون الجاهز");
+        alert("✅ تم تسجيل الإنتاج بنجاح");
+        
+        // إغلاق كل النوافذ المنبثقة
         document.querySelectorAll('.modal-overlay').forEach(m => m.remove());
-        window.printProductionSticker(prodData); // طباعة الاستيكر فوراً
-    } catch (e) { alert("خطأ: " + e.message); }
+        
+        // طباعة الاستيكر فوراً
+        window.printProductionSticker(prodData);
+    } catch (e) { 
+        console.error("Finalize Error:", e);
+        alert("خطأ أثناء الحفظ: " + e.message); 
+    }
 };
 
 </script>

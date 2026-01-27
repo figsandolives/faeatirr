@@ -336,7 +336,7 @@ body.ltr { direction: ltr; }
     margin-top: 10px;
     background: #1a1a2e;
     border: 1px solid #555;
-    color: rgb(0, 0, 0);
+    color: white;
     border-radius: 5px;
 }
 
@@ -358,8 +358,8 @@ body.ltr { direction: ltr; }
 /* تمييز القسم النشط */
 .sidebar-item.active {
     background: var(--gold-accent) !important;
-    color: white !important;
-    border-inline-start: 4px solid white;
+    color: rgb(0, 0, 0) !important;
+    border-inline-start: 4px solid rgb(255, 0, 0);
     font-weight: bold;
 }
 

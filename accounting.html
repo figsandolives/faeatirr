@@ -3085,6 +3085,111 @@ window.openAuditQtyKeypad = function(item, currentStock) {
     document.body.insertAdjacentHTML('beforeend', keypadHtml);
 };
 
+// 1. إظهار أو إخفاء قائمة أماكن التخزين بناءً على نوع الفرع
+window.toggleAuditStorageSelect = function() {
+    const branchSelect = document.getElementById('audit-branch-select');
+    const storageDiv = document.getElementById('audit-storage-div');
+    const selectedOption = branchSelect.options[branchSelect.selectedIndex];
+    
+    // جلب بيانات الفرع المختار من الذاكرة للتحقق هل هو رئيسي أم لا
+    const branchId = branchSelect.value;
+    const isMain = window.availableBranches && window.availableBranches[branchId] && window.availableBranches[branchId].isMain;
+
+    if (isMain) {
+        storageDiv.style.display = 'block';
+    } else {
+        storageDiv.style.display = 'none';
+    }
+};
+
+// 2. تعبئة قائمة أماكن التخزين من قاعدة البيانات
+window.populateAuditStorageDropdown = async function() {
+    const snap = await get(ref(database, 'storage_locations'));
+    const locations = snap.val() || {};
+    const select = document.getElementById('audit-storage-select');
+    if (!select) return;
+
+    select.innerHTML = '<option value="all">كل أماكن التخزين</option>';
+    for (let id in locations) {
+        select.innerHTML += `<option value="${id}">${locations[id].nameAr}</option>`;
+    }
+};
+
+// 3. عند اختيار صنف من نتائج البحث
+window.selectAuditItem = async function(id, name) {
+    const branchId = document.getElementById('audit-branch-select').value;
+    if (!branchId) return alert("يرجى اختيار الفرع أولاً");
+
+    // إغلاق قائمة البحث
+    document.getElementById('audit-search-results').style.display = 'none';
+    document.getElementById('search-audit-item').value = "";
+
+    // جلب بيانات الصنف ومخزونه الحالي في هذا الفرع
+    const [pSnap, iSnap] = await Promise.all([
+        get(ref(database, 'products/' + id)),
+        get(ref(database, 'inventory_items/' + id))
+    ]);
+
+    const item = pSnap.val() || iSnap.val();
+    const currentStock = item.stock || (item.branches && item.branches[branchId] ? item.branches[branchId].stock : 0);
+
+    // فتح لوحة الأرقام لإدخال الكمية الفعلية
+    window.openAuditQtyKeypad(item, currentStock);
+};
+
+
+// 4. إضافة الصنف المجرود إلى الجدول المؤقت
+window.addAuditItemToBasket = function(id, name, oldQty) {
+    const newQty = parseFloat(document.getElementById('audit-keypad-display').value);
+    
+    if (isNaN(newQty)) return alert("يرجى إدخال الكمية الفعلية");
+
+    // التحقق إذا كان الصنف مضافاً مسبقاً لتحديثه
+    const existingIndex = window.currentAuditBasket.findIndex(i => i.id === id);
+    const auditData = { id, name, oldQty: parseFloat(oldQty), newQty };
+
+    if (existingIndex > -1) {
+        window.currentAuditBasket[existingIndex] = auditData;
+    } else {
+        window.currentAuditBasket.push(auditData);
+    }
+
+    // إغلاق لوحة الأرقام وتحديث جدول السلة
+    document.getElementById('audit-keypad-overlay').remove();
+    window.renderAuditBasket();
+};
+
+// 5. تحديث جدول السلة داخل مودال الجرد
+window.renderAuditBasket = function() {
+    const tbody = document.getElementById('audit-basket-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = window.currentAuditBasket.map((item, index) => `
+        <tr style="border-bottom: 1px solid #222;">
+            <td style="padding:10px;">${item.name}</td>
+            <td style="padding:10px; text-align:center;">
+                <span style="color:#888; font-size:10px;">(${item.oldQty})</span> ⮕ 
+                <b style="color:var(--gold-accent);">${item.newQty}</b>
+            </td>
+            <td style="padding:5px;">
+                <button class="btn-clear" style="padding:2px 5px; background:#e94560;" onclick="window.currentAuditBasket.splice(${index}, 1); renderAuditBasket();">
+                    <i class="fas fa-times"></i>
+                </button>
+            </td>
+        </tr>`).join('');
+};
+
+// 6. محرك البحث في جدول سجلات الجرد القديمة
+window.filterAuditTable = function() {
+    const query = document.getElementById('audit-search-input').value.toLowerCase();
+    const rows = document.querySelectorAll('#audit-list-body tr');
+
+    rows.forEach(row => {
+        const text = row.innerText.toLowerCase();
+        row.style.display = text.includes(query) ? "" : "none";
+    });
+};
+
     </script>
 
     <script type="module">

@@ -61,7 +61,7 @@
                 <a class="sidebar-item" id="sub-storage-locations" onclick="loadPage('storage-locations')">أماكن التخزين</a>
                 <a href="#" class="sidebar-item" id="sub-disbursement" onclick="loadPage('disbursement')">صرف</a>
                 <a href="#" class="sidebar-item" id="sub-production" onclick="loadPage('production')">انتاج</a>
-                <a class="sidebar-item" id="sub-inventory-check">جرد</a>
+                <a class="sidebar-item" id="sub-inventory-check" onclick="loadPage('inventory-check')">جرد</a>
                 <a class="sidebar-item" id="sub-transfers">تحويلات</a>
                 <a class="sidebar-item" id="sub-return-store">مرتجع للمخزن</a>
                 <a class="sidebar-item" id="sub-return-waste">مرتجع توالف</a>
@@ -424,6 +424,9 @@ else if (pageId === 'prod-staff') {
 }
 else if (pageId === 'production') {
     loadProductionPage();
+}
+else if (pageId === 'inventory-check') {
+    loadInventoryCheckPage();
 }
 };
 
@@ -2962,6 +2965,126 @@ window.populateProdStaffDropdown = async function() {
     }
 };
 
+// كائن مؤقت لتخزين بيانات الجرد الجاري
+window.currentAuditBasket = [];
+window.currentAuditMeta = { branchId: null, storageId: null };
+
+// 1. بناء صفحة الجرد الرئيسية
+window.loadInventoryCheckPage = function() {
+    let html = `
+        <div class="admin-section">
+            <div class="header-flex">
+                <h3><i class="fas fa-clipboard-check"></i> سجلات الجرد المخزني</h3>
+                <button class="btn-main" onclick="openNewInventoryCheckModal()">+ جرد جديد (مطابقة مخزون)</button>
+            </div>
+            
+            <div class="info-card" style="margin-top:15px;">
+                <input type="text" id="audit-search-input" placeholder="بحث برقم السند أو اسم المنتج..." oninput="filterAuditTable()" style="width:100%; padding:10px; background:#1a1a2e; color:white; border:1px solid #444; border-radius:8px;">
+            </div>
+
+            <table class="data-table" style="margin-top:15px;">
+                <thead>
+                    <tr>
+                        <th>رقم السند</th>
+                        <th>التاريخ</th>
+                        <th>الفرع / الموقع</th>
+                        <th>أمين المخزن</th>
+                        <th>الأصناف المجرودة</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="audit-list-body"></tbody>
+            </table>
+        </div>`;
+    
+    document.getElementById('content-area').innerHTML = html;
+    if(window.initInventoryCheckLogic) window.initInventoryCheckLogic();
+};
+
+// 2. نافذة اختيار الفرع والموقع (المرحلة 1)
+window.openNewInventoryCheckModal = function() {
+    const storekeeper = sessionStorage.getItem('userName') || "غير مسجل";
+    window.currentAuditBasket = [];
+    
+    let branchOptions = Object.entries(window.availableBranches || {}).map(([id, b]) => 
+        `<option value="${id}">${b.nameAr}</option>`).join('');
+
+    let modalHtml = `
+        <div id="modal-overlay" class="modal-overlay" style="z-index:1050;">
+            <div class="modal-box" style="width:550px;">
+                <h3>بدء عملية جرد جديدة</h3>
+                <div style="text-align:right; margin-bottom:15px;">
+                    <label style="font-size:12px; color:#888;">المسؤول عن الجرد</label>
+                    <input type="text" value="${storekeeper}" readonly style="background:#1a1a2e;">
+                    
+                    <label style="font-size:12px; color:#888; margin-top:10px; display:block;">اختر الفرع</label>
+                    <select id="audit-branch-select" onchange="toggleAuditStorageSelect()">
+                        <option value="">-- اختر الفرع --</option>
+                        ${branchOptions}
+                    </select>
+
+                    <div id="audit-storage-div" style="display:none; margin-top:10px;">
+                        <label style="font-size:12px; color:#888;">مكان التخزين (اختياري)</label>
+                        <select id="audit-storage-select">
+                            <option value="all">كل أماكن التخزين في الفرع</option>
+                        </select>
+                    </div>
+
+                    <hr style="margin:20px 0; opacity:0.1;">
+                    
+                    <label style="font-size:12px; color:#888;">البحث عن صنف للجرد (أو سكان الباركود)</label>
+                    <input type="text" id="search-audit-item" placeholder="ابحث بالاسم أو الباركود..." onkeydown="handleAuditSearch(event)">
+                    <div id="audit-search-results" class="search-dropdown"></div>
+                </div>
+
+                <div style="max-height:200px; overflow-y:auto; border:1px solid #333; border-radius:5px; margin-bottom:15px;">
+                    <table style="width:100%; font-size:12px; border-collapse:collapse;">
+                        <thead style="background:#111;"><tr><th style="padding:8px; text-align:right;">الصنف</th><th>الكمية الفعلية</th></tr></thead>
+                        <tbody id="audit-basket-body"></tbody>
+                    </table>
+                </div>
+
+                <div style="display:flex; gap:10px;">
+                    <button class="btn-login" style="flex:2;" onclick="confirmFinalInventoryCheck()">تأكيد وتعديل المخزون</button>
+                    <button class="btn-clear" style="flex:1;" onclick="closeModal()">إلغاء</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    if(window.populateAuditStorageDropdown) window.populateAuditStorageDropdown();
+};
+
+// 3. لوحة أرقام الجرد (المرحلة 2)
+window.openAuditQtyKeypad = function(item, currentStock) {
+    const oldKeypad = document.getElementById('audit-keypad-overlay');
+    if (oldKeypad) oldKeypad.remove();
+
+    let keypadHtml = `
+        <div id="audit-keypad-overlay" class="modal-overlay" style="z-index: 9999 !important; background:rgba(0,0,0,0.9);">
+            <div class="modal-box" style="width:340px; border: 2px solid var(--gold-accent);">
+                <h4 style="margin:0;">${item.nameAr}</h4>
+                <p style="color:#aaa; font-size:12px;">${item.nameEn || ''}</p>
+                <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:5px; margin-bottom:10px;">
+                    <span style="color:#888; font-size:11px;">المخزون الحالي بالنظام:</span><br>
+                    <b style="font-size:18px; color:var(--gold-accent);">${parseFloat(currentStock).toFixed(2)}</b>
+                </div>
+                
+                <input type="text" id="audit-keypad-display" readonly style="font-size:2.2rem; text-align:center; height:60px; background:#000; color:#fff; width:100%; border:1px solid #444;">
+                
+                <div class="pin-pad" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-top:15px;">
+                    ${[1,2,3,4,5,6,7,8,9].map(n => `<button onclick="document.getElementById('audit-keypad-display').value += '${n}'">${n}</button>`).join('')}
+                    <button onclick="document.getElementById('audit-keypad-display').value += '.'">.</button>
+                    <button onclick="document.getElementById('audit-keypad-display').value += '0'">0</button>
+                    <button class="btn-clear" onclick="const d=document.getElementById('audit-keypad-display'); d.value=d.value.slice(0,-1)"><i class="fas fa-backspace"></i></button>
+                </div>
+                
+                <button class="btn-login" style="width:100%; margin-top:20px; padding:15px;" onclick="addAuditItemToBasket('${item.id}', '${item.nameAr}', '${currentStock}')">إضافة للجرد</button>
+                <button class="btn-clear" style="width:100%; margin-top:10px;" onclick="document.getElementById('audit-keypad-overlay').remove()">إلغاء</button>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', keypadHtml);
+};
+
     </script>
 
     <script type="module">
@@ -5442,6 +5565,114 @@ window.finalizeProduction = async function(disburseId) {
     } catch (e) { 
         alert("خطأ أثناء الحفظ: " + e.message); 
     }
+};
+
+// 1. معالجة البحث والباركود في الجرد
+window.handleAuditSearch = async function(e) {
+    const val = e.target.value;
+    const branchId = document.getElementById('audit-branch-select').value;
+    if (!branchId) return alert("يرجى اختيار الفرع أولاً");
+
+    if (val.length < 2) return;
+    const [pSnap, iSnap] = await Promise.all([get(ref(database, 'products')), get(ref(database, 'inventory_items'))]);
+    const all = { ...pSnap.val(), ...iSnap.val() };
+
+    if (e.key === 'Enter') {
+        const found = Object.values(all).find(i => i.barcode === val);
+        if (found) {
+            e.target.value = "";
+            const currentStock = found.stock || found.branches?.[branchId]?.stock || 0;
+            openAuditQtyKeypad(found, currentStock);
+            return;
+        }
+    }
+    const results = Object.values(all).filter(i => i.nameAr.includes(val)).slice(0, 5);
+    document.getElementById('audit-search-results').innerHTML = results.map(i => 
+        `<div onclick="selectAuditItem('${i.id}', '${i.nameAr}')">${i.nameAr}</div>`).join('');
+};
+
+// 2. تأكيد الجرد وتحديث المخزون
+window.confirmFinalInventoryCheck = async function() {
+    if (window.currentAuditBasket.length === 0) return alert("الجرد فارغ!");
+    
+    const branchId = document.getElementById('audit-branch-select').value;
+    const auditId = Date.now();
+    const slipNo = "AD-" + auditId.toString().slice(-6);
+
+    try {
+        for (let item of window.currentAuditBasket) {
+            // تحديث الكمية في المخزون لتصبح مطابقة للجرد تماماً
+            const pRef = ref(database, 'products/' + item.id);
+            const iRef = ref(database, 'inventory_items/' + item.id + '/branches/' + branchId + '/stock');
+            
+            const pSnap = await get(pRef);
+            if (pSnap.exists()) {
+                await update(pRef, { stock: item.newQty });
+            } else {
+                await set(iRef, item.newQty);
+            }
+        }
+
+        // حفظ سجل الجرد
+        const auditData = {
+            slipNo,
+            date: new Date().toLocaleString(),
+            branchId,
+            branchName: document.getElementById('audit-branch-select').options[document.getElementById('audit-branch-select').selectedIndex].text,
+            storekeeper: sessionStorage.getItem('userName'),
+            items: window.currentAuditBasket
+        };
+        await set(ref(database, 'inventory_audits/' + auditId), auditData);
+
+        alert("✅ تم تحديث المخزون وحفظ سند الجرد بنجاح");
+        closeModal();
+        window.printInventoryCheckSlip(auditData); // طباعة السند
+    } catch (e) { alert("خطأ: " + e.message); }
+};
+
+// 3. طباعة سند الجرد A4 بشعار logoblack
+window.printInventoryCheckSlip = function(audit) {
+    let printHtml = `
+        <html>
+        <head>
+            <title>سند جرد #${audit.slipNo}</title>
+            <style>
+                @media print { @page { size: A4; margin: 15mm; } }
+                body { direction: rtl; font-family: 'Arial', sans-serif; padding: 20px; }
+                .header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 10px; }
+                .data-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                .data-table th, .data-table td { border: 1px solid #000; padding: 10px; text-align: right; }
+                .info-box { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; border: 1px solid #000; padding: 15px; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <img src="logoblack.png" style="width:100px;" onerror="this.src='logo.png'">
+                <div style="text-align:center;"><h2>مخبز التين والزيتون</h2><h3>سند جرد مخزني (مطابقة)</h3></div>
+                <div style="text-align:left;">رقم: ${audit.slipNo}<br>التاريخ: ${audit.date}</div>
+            </div>
+            <div class="info-box">
+                <div><b>الفرع:</b> ${audit.branchName}</div>
+                <div><b>أمين المخزن:</b> ${audit.storekeeper}</div>
+            </div>
+            <table class="data-table">
+                <thead><tr><th>#</th><th>الصنف</th><th>الكمية السابقة</th><th>الكمية المجرودة</th><th>الفرق</th></tr></thead>
+                <tbody>
+                    ${audit.items.map((i, idx) => `
+                        <tr>
+                            <td>${idx+1}</td>
+                            <td>${i.name}</td>
+                            <td>${i.oldQty}</td>
+                            <td><b>${i.newQty}</b></td>
+                            <td>${(i.newQty - i.oldQty).toFixed(2)}</td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>
+            <script>window.onload = function() { window.print(); setTimeout(window.close, 500); }<\/script>
+        </body></html>`;
+    const win = window.open('', '_blank');
+    win.document.write(printHtml);
+    win.document.close();
 };
 
 </script>

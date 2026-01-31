@@ -2302,8 +2302,8 @@ window.saveCustomerUpdate = function(id) {
 // سلة الصرف المؤقتة
 window.disbursementBasket = [];
 
+// تحديث واجهة الصرف بإضافة خانة البحث
 window.loadDisbursementPage = function() {
-    const lang = translations[currentLang];
     let html = `
         <div class="admin-section">
             <div class="header-flex">
@@ -2311,12 +2311,15 @@ window.loadDisbursementPage = function() {
                 <button class="btn-main" onclick="openAddDisbursementModal()">+ إضافة سند صرف</button>
             </div>
 
-            <div class="info-card" style="display:flex; gap:15px; margin:15px 0;">
+            <div class="info-card" style="margin:15px 0; display:grid; grid-template-columns: 1fr 2fr; gap:15px;">
                 <select id="filter-disburse-type" onchange="filterDisburseTable()">
                     <option value="all">كل الأنواع</option>
-                    <option value="order">صرف لطلب (مبيعات)</option>
+                    <option value="order">صرف لطلب</option>
                     <option value="production">صرف للإنتاج</option>
                 </select>
+                <input type="text" id="disburse-search-input" placeholder="بحث برقم السند أو اسم الصنف المنصرف..." 
+                       oninput="filterDisburseTable()" 
+                       style="padding:10px; background:#1a1a2e; color:white; border:1px solid #444; border-radius:8px;">
             </div>
 
             <table class="data-table">
@@ -2337,6 +2340,26 @@ window.loadDisbursementPage = function() {
     
     document.getElementById('content-area').innerHTML = html;
     if(window.initDisbursementLogic) window.initDisbursementLogic();
+};
+
+// محرك البحث المطور في الصرف
+window.filterDisburseTable = function() {
+    const query = document.getElementById('disburse-search-input').value.toLowerCase();
+    const typeFilter = document.getElementById('filter-disburse-type').value;
+    const rows = document.querySelectorAll('#disbursement-list-body tr');
+
+    rows.forEach(row => {
+        const slipNo = row.getAttribute('data-slip').toLowerCase();
+        const items = row.getAttribute('data-items').toLowerCase();
+        const type = row.querySelector('.rank-badge').innerText;
+        
+        const matchesQuery = slipNo.includes(query) || items.includes(query);
+        const matchesType = typeFilter === 'all' || 
+                           (typeFilter === 'order' && type === 'طلب') || 
+                           (typeFilter === 'production' && type === 'إنتاج');
+
+        row.style.display = (matchesQuery && matchesType) ? "" : "none";
+    });
 };
 
 // نافذة إضافة سند جديد
@@ -2711,7 +2734,7 @@ window.currentProdBatch = {
     disburseId: null
 };
 
-// 1. بناء صفحة الإنتاج الرئيسية
+// 1. تحديث واجهة الإنتاج بإضافة خانة البحث
 window.loadProductionPage = function() {
     let html = `
         <div class="admin-section">
@@ -2720,7 +2743,13 @@ window.loadProductionPage = function() {
                 <button class="btn-main" onclick="openAddProductionModal()">+ إضافة سند إنتاج</button>
             </div>
             
-            <table class="data-table" style="margin-top:20px;">
+            <div class="info-card" style="margin-top:15px;">
+                <input type="text" id="prod-search-input" placeholder="بحث برقم السند أو اسم المنتج..." 
+                       oninput="filterProductionTable()" 
+                       style="width:100%; padding:10px; background:#1a1a2e; color:white; border:1px solid #444; border-radius:8px;">
+            </div>
+            
+            <table class="data-table" style="margin-top:15px;">
                 <thead>
                     <tr>
                         <th># رقم السند</th>
@@ -2739,6 +2768,24 @@ window.loadProductionPage = function() {
     
     document.getElementById('content-area').innerHTML = html;
     if(window.initProductionLogic) window.initProductionLogic();
+};
+
+// 2. محرك البحث في جدول الإنتاج
+window.filterProductionTable = function() {
+    const query = document.getElementById('prod-search-input').value.toLowerCase();
+    const rows = document.querySelectorAll('#production-list-body tr');
+
+    rows.forEach(row => {
+        // البحث في رقم السند (العمود 1) واسم المنتج (العمود 4)
+        const slipNo = row.cells[0].innerText.toLowerCase();
+        const productName = row.cells[3].innerText.toLowerCase();
+        
+        if (slipNo.includes(query) || productName.includes(query)) {
+            row.style.display = "";
+        } else {
+            row.style.display = "none";
+        }
+    });
 };
 
 // 2. نافذة إضافة إنتاج جديد (المرحلة 1: البحث والاختيار)
@@ -4793,6 +4840,7 @@ window.initDisbursementLogic = async function() {
         const slips = snapshot.val() || {};
         
         Object.entries(slips).reverse().forEach(([id, slip]) => {
+            const itemNames = slip.items.map(i => i.name).join(' ');
             tbody.innerHTML += `
                 <tr>
                     <td>#${slip.slipNo}</td>

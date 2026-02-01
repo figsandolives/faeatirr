@@ -1,6 +1,11 @@
 import { db, ref, onValue } from "./firebase-config.js";
 import { translations } from "./translation.js";
 
+
+// تعريف هوية فريدة للجهاز وحفظها للأبد في المتصفح
+let deviceId = localStorage.getItem("deviceId") || "dev_" + Math.random().toString(36).substr(2, 9);
+localStorage.setItem("deviceId", deviceId);
+
 // 2. إدارة اللغة
 let currentLang = localStorage.getItem("lang") || "ar";
 
@@ -42,3 +47,41 @@ document.addEventListener("DOMContentLoaded", () => {
     applyLanguage();
     listenToData();
 });
+
+window.checkAuth = function() {
+    const pin = document.getElementById("pin-input").value;
+    
+    // فحص رمز المدير الافتراضي أو الموظفين (سنربطها بفايربيس لاحقاً)
+    if (pin === "123456") {
+        document.getElementById("login-overlay").style.display = "none";
+        sessionStorage.setItem("userRole", "manager");
+        sessionStorage.setItem("userName", "المدير");
+        loadPermissions();
+    } else {
+        alert("الرمز غير صحيح!");
+    }
+};
+
+function loadPermissions() {
+    const role = sessionStorage.getItem("userRole");
+    // إخفاء القوائم بناءً على الدور
+    if (role === "cashier") {
+        document.querySelector('[data-key="inventory"]').style.display = 'none';
+        document.querySelector('[data-key="suppliers"]').style.display = 'none';
+    }
+    if (role === "storekeeper") {
+        document.querySelector('[data-key="management"]').style.display = 'none';
+    }
+}
+
+import { set } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+function syncDevice() {
+    const deviceRef = ref(db, 'authorized_devices/' + deviceId);
+    // نرسل لفايربيس أن هذا الجهاز نشط الآن
+    set(deviceRef, {
+        id: deviceId,
+        lastSeen: new Date().toISOString(),
+        status: "online"
+    });
+}

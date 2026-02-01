@@ -148,6 +148,7 @@ window.assignBranchToDevice = function(devId, branchId) {
     showAlert(currentLang === 'ar' ? "تم ربط الجهاز بالفرع" : "Device linked to branch", 'success');
 };
 window.showSection = function(sectionName) {
+    document.getElementById('loading-text').style.display = 'none';
     // 1. إخفاء كل السكاشن الحالية في منطقة العرض لضمان نظافة الواجهة
     const sections = document.querySelectorAll('#data-display section');
     sections.forEach(s => s.style.display = 'none');
@@ -236,27 +237,32 @@ window.saveCashier = function(name, pin) {
     .then(() => showAlert("تم إضافة الكاشير بنجاح", "success"));
 };
 
-// مراقبة قائمة الكاشيرية
-function listenToCashiers() {
-    onValue(ref(db, 'cashiers'), (snapshot) => {
+
+window.listenToCashiers = function() {
+    const cashierRef = ref(db, 'cashiers');
+    onValue(cashierRef, (snapshot) => {
         const cashiers = snapshot.val();
         const list = document.getElementById('cashiers-list');
         if (!list) return;
         list.innerHTML = "";
-        for (let id in cashiers) {
-            const c = cashiers[id];
-            list.innerHTML += `
-                <div class="login-card" style="padding:15px; display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <strong>${c.name}</strong><br>
-                        <small>PIN: ${c.pin}</small>
+        if (cashiers) {
+            for (let id in cashiers) {
+                const c = cashiers[id];
+                list.innerHTML += `
+                    <div class="login-card" style="padding:15px; display:flex; justify-content:space-between; align-items:center; border:1px solid #eee; margin:5px;">
+                        <div style="text-align:right;">
+                            <strong>${c.name}</strong><br>
+                            <small style="color:var(--accent-color);">PIN: ${c.pin}</small>
+                        </div>
+                        <button onclick="window.deleteCashier('${id}')" style="background:none; border:none; cursor:pointer; font-size:1.2rem;">❌</button>
                     </div>
-                    <button onclick="window.deleteCashier('${id}')" style="background:none; border:none; cursor:pointer;">❌</button>
-                </div>
-            `;
+                `;
+            }
+        } else {
+            list.innerHTML = "<p style='text-align:center; color:#999;'>لا يوجد كاشيرية مسجلين</p>";
         }
     });
-}
+};
 
 // فتح وإغلاق النافذة
 window.openCashierModal = function() {
@@ -305,23 +311,4 @@ window.deleteCashier = function(id) {
             showAlert("تم الحذف", "success");
         });
     }
-};
-
-window.listenToCashiers = function() {
-    const cashierRef = ref(db, 'cashiers');
-    onValue(cashierRef, (snapshot) => {
-        const cashiers = snapshot.val();
-        const list = document.getElementById('cashiers-list');
-        if (!list) return;
-        list.innerHTML = "";
-        if (cashiers) {
-            for (let id in cashiers) {
-                const c = cashiers[id];
-                list.innerHTML += `
-                    <div class="login-card" style="padding:10px; margin:5px; border:1px solid #eee;">
-                        <strong>${c.name}</strong> - PIN: ${c.pin}
-                    </div>`;
-            }
-        }
-    });
 };

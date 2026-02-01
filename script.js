@@ -146,16 +146,23 @@ window.assignBranchToDevice = function(devId, branchId) {
 };
 
 window.showSection = function(sectionName) {
-    // 1. إخفاء كل السكاشن الموجودة في محتوى الصفحة
-    document.querySelectorAll('#data-display section').forEach(s => s.style.display = 'none');
+    // إخفاء كل السكاشن الحالية
+    const sections = document.querySelectorAll('#data-display section');
+    sections.forEach(s => s.style.display = 'none');
     
-    // 2. إظهار السكشن المطلوب وجلب بياناته
-    if (sectionName === 'devices') {
-        const section = document.getElementById('section-devices');
-        if (section) {
-            section.style.display = 'block';
-            listenToDevices(); // جلب بيانات الأجهزة من فايربيس
+    // إظهار السكشن المطلوب
+    const targetSection = document.getElementById('section-' + sectionName);
+    if (targetSection) {
+        targetSection.style.display = 'block';
+        
+        // تشغيل وظيفة جلب البيانات بناءً على القسم
+        if (sectionName === 'devices') {
+            listenToDevices(); 
+        } else if (sectionName === 'branches') {
+            listenToBranches();
         }
+    } else {
+        console.error("القسم المطلوب غير موجود: section-" + sectionName);
     }
 };
 

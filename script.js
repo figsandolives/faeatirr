@@ -58,7 +58,7 @@ window.checkAuth = function() {
         sessionStorage.setItem("userName", "المدير");
         loadPermissions();
     } else {
-        alert("الرمز غير صحيح!");
+        showAlert(translations[currentLang].invalid_pin, 'error');
     }
 };
 
@@ -85,3 +85,21 @@ function syncDevice() {
         status: "online"
     });
 }
+
+window.showAlert = function(message, type = 'info') {
+    const container = document.getElementById('custom-alert-container');
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `custom-alert ${type}`;
+    
+    alertDiv.innerHTML = `
+        <span>${message}</span>
+        <span class="close-alert" onclick="this.parentElement.remove()">×</span>
+    `;
+    
+    container.appendChild(alertDiv);
+
+    // يختفي التنبيه تلقائياً بعد 4 ثوانٍ
+    setTimeout(() => {
+        if(alertDiv) alertDiv.remove();
+    }, 4000);
+};

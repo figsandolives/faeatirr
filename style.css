@@ -1,0 +1,104 @@
+:root {
+    --primary-color: #2c3e50;
+    --accent-color: #3498db;
+    --bg-color: #f4f7f6;
+    --white: #ffffff;
+    --text-dark: #333;
+    --sidebar-width: 260px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background-color: var(--bg-color);
+    direction: rtl; /* الافتراضي عربي */
+}
+
+/* Index Page Style */
+.index-container {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+}
+
+.logo { width: 180px; margin-bottom: 20px; }
+
+.main-btn {
+    width: 300px;
+    padding: 20px;
+    font-size: 1.2rem;
+    border: none;
+    border-radius: 12px;
+    background: var(--primary-color);
+    color: white;
+    cursor: pointer;
+    transition: 0.3s;
+    text-decoration: none;
+    text-align: center;
+}
+
+.main-btn:hover { background: var(--accent-color); transform: translateY(-3px); }
+
+/* Inventory Sidebar Style */
+.dashboard-container { display: flex; height: 100vh; }
+
+.sidebar {
+    width: var(--sidebar-width);
+    background: var(--primary-color);
+    color: white;
+    overflow-y: auto;
+    transition: 0.3s;
+}
+
+.sidebar-header { padding: 20px; text-align: center; border-bottom: 1px solid #3e5871; }
+
+.menu-item {
+    padding: 12px 20px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #3e5871;
+    transition: 0.2s;
+}
+
+.menu-item:hover { background: var(--accent-color); }
+
+.submenu {
+    background: #34495e;
+    display: none;
+}
+
+.submenu div {
+    padding: 10px 40px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-bottom: 1px solid #2c3e50;
+}
+
+.submenu div:hover { color: var(--accent-color); }
+
+.active-submenu { display: block; }
+
+.content { flex: 1; padding: 30px; overflow-y: auto; }
+
+/* Language Switcher */
+.lang-switch {
+    margin-top: 20px;
+    padding: 10px 20px;
+    cursor: pointer;
+    border-radius: 20px;
+    border: 1px solid var(--primary-color);
+    background: white;
+}
+
+/* Utility Classes for LTR */
+body.ltr { direction: ltr; }

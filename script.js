@@ -144,15 +144,15 @@ document.addEventListener("DOMContentLoaded", () => {
     // listenToData(); 
 });
 
-
-function listenToDevices() {
+// استخدام النافذة window يمنع خطأ "Identifier already declared"
+window.listenToDevices = function() {
     const devicesRef = ref(db, 'authorized_devices');
     onValue(devicesRef, (snapshot) => {
         const devices = snapshot.val();
         const grid = document.getElementById('active-devices-grid');
         if (!grid) return;
         
-        grid.innerHTML = ""; // مسح القائمة الحالية قبل التحديث
+        grid.innerHTML = ""; 
         
         if (devices) {
             for (let id in devices) {
@@ -169,4 +169,4 @@ function listenToDevices() {
             grid.innerHTML = "<p>لا توجد أجهزة متصلة حالياً</p>";
         }
     });
-}
+};

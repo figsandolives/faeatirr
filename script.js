@@ -306,3 +306,22 @@ window.deleteCashier = function(id) {
         });
     }
 };
+
+window.listenToCashiers = function() {
+    const cashierRef = ref(db, 'cashiers');
+    onValue(cashierRef, (snapshot) => {
+        const cashiers = snapshot.val();
+        const list = document.getElementById('cashiers-list');
+        if (!list) return;
+        list.innerHTML = "";
+        if (cashiers) {
+            for (let id in cashiers) {
+                const c = cashiers[id];
+                list.innerHTML += `
+                    <div class="login-card" style="padding:10px; margin:5px; border:1px solid #eee;">
+                        <strong>${c.name}</strong> - PIN: ${c.pin}
+                    </div>`;
+            }
+        }
+    });
+};

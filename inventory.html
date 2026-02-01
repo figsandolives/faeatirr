@@ -100,11 +100,20 @@
             </thead>
             <tbody id="branches-list"></tbody>
         </table>
-    </section>
-
     <section id="section-devices" style="display:none;">
-    <h2 data-key="m_devices">الأجهزة والكاشير</h2>
-    <div id="active-devices-grid"></div>
+    <h2 data-key="m_devices" style="margin-bottom: 20px;">الأجهزة والارتباط بالفروع</h2>
+    <div id="active-devices-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px;">
+        </div>
+
+    <hr style="margin: 40px 0; border: 0; border-top: 1px solid #eee;">
+
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 data-key="add_cashier">إدارة الكاشيرية</h2>
+        <button class="main-btn" onclick="openCashierModal()" style="padding: 10px 20px;">+ كاشير جديد</button>
+    </div>
+    
+    <div id="cashiers-list" style="margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px;">
+        </div>
 </section>
 </div>
 
@@ -119,5 +128,29 @@
             document.getElementById(id).classList.toggle('active-submenu');
         }
     </script>
+
+    <div id="cashier-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:10001; align-items:center; justify-content:center;">
+    <div class="login-card" style="width:400px; position:relative;">
+        <span onclick="closeCashierModal()" style="position:absolute; left:20px; top:15px; cursor:pointer; font-size:1.5rem; color:#999;">&times;</span>
+        <h3 data-key="add_cashier" style="margin-bottom:20px; color:var(--primary-color);">إضافة كاشير جديد</h3>
+        
+        <div style="text-align:right; margin-bottom:15px;">
+            <label data-key="cashier_name" style="display:block; margin-bottom:5px;">اسم الكاشير</label>
+            <input type="text" id="new-cashier-name" placeholder="مثال: محمد" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px;">
+        </div>
+
+        <div style="text-align:right; margin-bottom:20px;">
+            <label data-key="cashier_pin" style="display:block; margin-bottom:5px;">رمز الدخول (4 أرقام)</label>
+            <div style="display:flex; gap:10px;">
+                <input type="text" id="new-cashier-pin" maxlength="4" placeholder="1234" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:8px; text-align:center; font-weight:bold;">
+                <button onclick="fillGeneratedPin()" class="main-btn" style="padding:10px; font-size:0.9rem;" data-key="generate">إنشاء</button>
+            </div>
+        </div>
+
+        <button onclick="submitCashier()" class="main-btn" style="width:100%;" data-key="add">إضافة</button>
+    </div>
+</div>
+
+
 </body>
 </html>

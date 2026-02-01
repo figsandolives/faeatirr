@@ -73,7 +73,14 @@ export const translations = {
         status: "الحالة",
         last_online: "آخر ظهور",
         no_branch: "غير معرف لفرع",
-        save: "حفظ"
+        save: "حفظ",
+        add_cashier: "إضافة كاشير",
+    cashier_name: "اسم الكاشير",
+    cashier_pin: "رمز الدخول (4 أرقام)",
+    generate: "إنشاء",
+    device_assigned: "الفرع المخصص",
+    not_authorized: "جهاز غير مصرح له",
+    branch_name: "الفرع"
     },
     en: {
         cashier_btn: "Cashier",
@@ -148,6 +155,13 @@ export const translations = {
         status: "Status",
         last_online: "Last Online",
         no_branch: "No Branch Assigned",
-        save: "Save"
+        save: "Save",
+        add_cashier: "Add Cashier",
+    cashier_name: "Cashier Name",
+    cashier_pin: "PIN (4 Digits)",
+    generate: "Generate",
+    device_assigned: "Assigned Branch",
+    not_authorized: "Unauthorized Device",
+    branch_name: "Branch"
     }
 };

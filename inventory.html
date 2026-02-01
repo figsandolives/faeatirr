@@ -67,7 +67,7 @@
                     <div data-key="users_manag" onclick="showSection('users')">المستخدمين</div>
                     <div data-key="m_staff_inv">موظفي المخازن</div>
                     <div data-key="m_staff_prod">موظفي الانتاج</div>
-                    <div data-key="m_branches">الفروع</div>
+                    <div data-key="m_branches" onclick="showSection('branches')">الفروع</div>
                     <div data-key="m_delivery_zones">مناطق التوصيل</div>
                     <div data-key="m_delivery_prices">أسعار التوصيل</div>
                     <div data-key="m_discounts">خصومات</div>
@@ -100,10 +100,24 @@
             </thead>
             <tbody id="branches-list"></tbody>
         </table>
-    <section id="section-devices" style="display:none;">
-    <h2 data-key="m_devices" style="margin-bottom: 20px;">الأجهزة والارتباط بالفروع</h2>
-    <div id="active-devices-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px;">
+    </section> <section id="section-devices" style="display:none;">
+        <h2 data-key="m_devices" style="margin-bottom: 20px;">الأجهزة والارتباط بالفروع</h2>
+        <div id="active-devices-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px;">
+            </div>
+
+        <hr style="margin: 40px 0; border: 0; border-top: 1px solid #eee;">
+
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2 data-key="add_cashier">إدارة الكاشيرية</h2>
+            <button class="main-btn" onclick="openCashierModal()" style="padding: 10px 20px;">+ كاشير جديد</button>
         </div>
+        
+        <div id="cashiers-list" style="margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px;">
+            </div>
+    </section>
+
+    <p id="loading-text" data-key="loading" style="text-align:center; color:#999; margin-top:20px;">جاري تحميل البيانات الحية...</p>
+</div>
 
     <hr style="margin: 40px 0; border: 0; border-top: 1px solid #eee;">
 

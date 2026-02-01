@@ -109,36 +109,6 @@ function listenToBranches() {
     });
 }
 
-function listenToDevices() {
-    onValue(ref(db, 'authorized_devices'), (snapshot) => {
-        const devices = snapshot.val();
-        const branchesRef = ref(db, 'branches');
-        onValue(branchesRef, (bSnap) => {
-            const branches = bSnap.val();
-            const grid = document.getElementById('active-devices-grid');
-            if (!grid) return;
-            grid.innerHTML = "";
-            for (let id in devices) {
-                const dev = devices[id];
-                let branchOptions = `<option value="">-- ${translations[currentLang].assign_branch} --</option>`;
-                if (branches) {
-                    for (let bId in branches) {
-                        branchOptions += `<option value="${bId}" ${dev.branchId === bId ? 'selected' : ''}>${branches[bId].nameAr}</option>`;
-                    }
-                }
-                grid.innerHTML += `
-                    <div class="login-card" style="padding:15px; text-align:right; width: 100%; max-width: 320px; margin: 10px;">
-                        <p><strong>ID:</strong> ${dev.id} ${dev.id === deviceId ? '(هذا الجهاز)' : ''}</p>
-                        <p><strong>آخر ظهور:</strong> ${dev.lastSeen}</p>
-                        <select onchange="assignBranchToDevice('${dev.id}', this.value)" style="width:100%; padding:10px; margin-top:10px;">
-                            ${branchOptions}
-                        </select>
-                    </div>
-                `;
-            }
-        });
-    });
-}
 
 window.assignBranchToDevice = function(devId, branchId) {
     update(ref(db, 'authorized_devices/' + devId), { branchId });

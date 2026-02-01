@@ -147,37 +147,39 @@ window.assignBranchToDevice = function(devId, branchId) {
     update(ref(db, 'authorized_devices/' + devId), { branchId });
     showAlert(currentLang === 'ar' ? "تم ربط الجهاز بالفرع" : "Device linked to branch", 'success');
 };
-
 window.showSection = function(sectionName) {
-    
-    document.querySelectorAll('#data-display section').forEach(s => s.style.display = 'none');
-    
-    if (sectionName === 'devices') {
-        const section = document.getElementById('section-devices');
-        if (section) {
-            section.style.display = 'block';
-            listenToDevices();  // جلب الأجهزة
-            listenToCashiers(); // جلب الكاشيرية (أضف هذا السطر)
-        }
-    }
-
-    // إخفاء كل السكاشن الحالية
+    // 1. إخفاء كل السكاشن الحالية في منطقة العرض لضمان نظافة الواجهة
     const sections = document.querySelectorAll('#data-display section');
     sections.forEach(s => s.style.display = 'none');
     
-    // إظهار السكشن المطلوب
+    // 2. تحديد السكشن المستهدف بناءً على المعرف (ID) في الـ HTML
+    // ملاحظة: تأكد أن الـ ID في HTML يبدأ بـ -section (مثلاً section-devices)
     const targetSection = document.getElementById('section-' + sectionName);
+    
     if (targetSection) {
+        // إظهار القسم المطلوب
         targetSection.style.display = 'block';
         
-        // تشغيل وظيفة جلب البيانات بناءً على القسم
+        // 3. تشغيل وظائف جلب البيانات الحية (Real-time) من فايربيس بناءً على نوع القسم
         if (sectionName === 'devices') {
-            listenToDevices(); 
-        } else if (sectionName === 'branches') {
-            listenToBranches();
+            // تشغيل جلب الأجهزة المكتشفة وجلب قائمة الكاشيرية معاً في نفس الصفحة
+            if (typeof listenToDevices === 'function') listenToDevices(); 
+            if (typeof listenToCashiers === 'function') listenToCashiers();
+        } 
+        else if (sectionName === 'branches') {
+            // جلب قائمة الفروع (مثل فرع أبو الحصانية والفرع الرئيسي)
+            if (typeof listenToBranches === 'function') listenToBranches();
         }
+        else if (sectionName === 'users') {
+            // جلب إدارة المستخدمين وصلاحياتهم
+            if (typeof listenToUsers === 'function') listenToUsers();
+        }
+        
+        // يمكنك إضافة شروط (else if) هنا لبقية الأقسام (المنتجات، الطلبات، إلخ) عند برمجتها لاحقاً
+        
     } else {
-        console.error("القسم المطلوب غير موجود: section-" + sectionName);
+        // رسالة تنبيه لك في "Console" في حال نسيان إنشاء السكشن في ملف الـ HTML
+        console.error("تنبيه: السكشن المطلوب 'section-" + sectionName + "' غير موجود في كود الـ HTML.");
     }
 };
 

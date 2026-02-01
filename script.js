@@ -41,14 +41,47 @@ window.showAlert = function(message, type = 'info') {
 
 window.checkAuth = function() {
     const pin = document.getElementById("pin-input").value;
+    
+    // 1. فحص إذا كان مدير (123456) - المدير يدخل من أي جهاز
     if (pin === "123456") {
         document.getElementById("login-overlay").style.display = "none";
         sessionStorage.setItem("userRole", "manager");
-        sessionStorage.setItem("userName", "المدير");
-        loadPermissions();
-    } else {
-        showAlert(translations[currentLang].invalid_pin, 'error');
+        return;
     }
+
+    // 2. فحص حالة الجهاز أولاً قبل دخول الكاشير
+    onValue(ref(db, 'authorized_devices/' + deviceId), (snapshot) => {
+        const deviceData = snapshot.val();
+        if (!deviceData || !deviceData.branchId) {
+            showAlert("هذا الجهاز غير معرف لفرع! يرجى التواصل مع الإدارة.", "error");
+            return;
+        }
+
+        // 3. فحص إذا كان الرمز يخص كاشير
+        onValue(ref(db, 'cashiers'), (cSnap) => {
+            const cashiers = cSnap.val();
+            let found = false;
+            for (let id in cashiers) {
+                if (cashiers[id].pin === pin) {
+                    found = true;
+                    // جلب اسم الفرع للتمييز
+                    onValue(ref(db, 'branches/' + deviceData.branchId), (bSnap) => {
+                        const branch = bSnap.val();
+                        const fullName = `${cashiers[id].name} (${branch.nameAr})`;
+                        
+                        document.getElementById("login-overlay").style.display = "none";
+                        sessionStorage.setItem("userRole", "cashier");
+                        sessionStorage.setItem("userName", fullName);
+                        sessionStorage.setItem("branchId", deviceData.branchId);
+                        
+                        showAlert(`أهلاً بك: ${fullName}`, "success");
+                    });
+                    break;
+                }
+            }
+            if (!found) showAlert("رمز الدخول غير صحيح", "error");
+        }, { onlyOnce: true });
+    }, { onlyOnce: true });
 };
 
 function loadPermissions() {
@@ -116,6 +149,18 @@ window.assignBranchToDevice = function(devId, branchId) {
 };
 
 window.showSection = function(sectionName) {
+    
+    document.querySelectorAll('#data-display section').forEach(s => s.style.display = 'none');
+    
+    if (sectionName === 'devices') {
+        const section = document.getElementById('section-devices');
+        if (section) {
+            section.style.display = 'block';
+            listenToDevices();  // جلب الأجهزة
+            listenToCashiers(); // جلب الكاشيرية (أضف هذا السطر)
+        }
+    }
+
     // إخفاء كل السكاشن الحالية
     const sections = document.querySelectorAll('#data-display section');
     sections.forEach(s => s.style.display = 'none');
@@ -146,27 +191,116 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // استخدام النافذة window يمنع خطأ "Identifier already declared"
 window.listenToDevices = function() {
-    const devicesRef = ref(db, 'authorized_devices');
-    onValue(devicesRef, (snapshot) => {
+    onValue(ref(db, 'authorized_devices'), (snapshot) => {
         const devices = snapshot.val();
-        const grid = document.getElementById('active-devices-grid');
-        if (!grid) return;
-        
-        grid.innerHTML = ""; 
-        
-        if (devices) {
+        onValue(ref(db, 'branches'), (bSnap) => {
+            const branches = bSnap.val() || {};
+            const grid = document.getElementById('active-devices-grid');
+            if (!grid) return;
+            grid.innerHTML = "";
+
             for (let id in devices) {
                 const dev = devices[id];
+                let options = `<option value="">-- غير معرف لفرع --</option>`;
+                for (let bId in branches) {
+                    options += `<option value="${bId}" ${dev.branchId === bId ? 'selected' : ''}>${branches[bId].nameAr}</option>`;
+                }
+
                 grid.innerHTML += `
-                    <div class="login-card" style="padding:15px; text-align:right; border:1px solid #eee; margin:10px;">
-                        <p><strong>جهاز ID:</strong> ${dev.id}</p>
-                        <p><strong>الحالة:</strong> ${dev.status === 'online' ? '🟢 متصل' : '⚪ غير متصل'}</p>
-                        <p><strong>آخر ظهور:</strong> ${dev.lastSeen || 'غير معروف'}</p>
+                    <div class="login-card" style="padding:20px; text-align:right; position:relative;">
+                        <span style="font-size:12px; color:#999;">ID: ${dev.id}</span>
+                        <p><strong>حالة الاتصال:</strong> ${dev.status === 'online' ? '🟢' : '⚪'}</p>
+                        <label style="display:block; margin:10px 0 5px;">تخصيص لفرع:</label>
+                        <select onchange="window.assignBranchToDevice('${dev.id}', this.value)" style="width:100%; padding:8px; border-radius:5px;">
+                            ${options}
+                        </select>
+                        ${dev.id === deviceId ? '<p style="color:var(--accent-color); font-size:12px; margin-top:5px;">(هذا الجهاز الحالي)</p>' : ''}
                     </div>
                 `;
             }
-        } else {
-            grid.innerHTML = "<p>لا توجد أجهزة متصلة حالياً</p>";
+        });
+    });
+};
+
+// إنشاء رمز عشوائي 4 أرقام
+window.generatePin = function() {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+};
+
+// إضافة كاشير جديد
+window.saveCashier = function(name, pin) {
+    const cashierRef = push(ref(db, 'cashiers'));
+    set(cashierRef, { name, pin, createdAt: new Date().toISOString() })
+    .then(() => showAlert("تم إضافة الكاشير بنجاح", "success"));
+};
+
+// مراقبة قائمة الكاشيرية
+function listenToCashiers() {
+    onValue(ref(db, 'cashiers'), (snapshot) => {
+        const cashiers = snapshot.val();
+        const list = document.getElementById('cashiers-list');
+        if (!list) return;
+        list.innerHTML = "";
+        for (let id in cashiers) {
+            const c = cashiers[id];
+            list.innerHTML += `
+                <div class="login-card" style="padding:15px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <strong>${c.name}</strong><br>
+                        <small>PIN: ${c.pin}</small>
+                    </div>
+                    <button onclick="window.deleteCashier('${id}')" style="background:none; border:none; cursor:pointer;">❌</button>
+                </div>
+            `;
         }
     });
+}
+
+// فتح وإغلاق النافذة
+window.openCashierModal = function() {
+    document.getElementById('cashier-modal').style.display = 'flex';
+};
+
+window.closeCashierModal = function() {
+    document.getElementById('cashier-modal').style.display = 'none';
+    document.getElementById('new-cashier-name').value = "";
+    document.getElementById('new-cashier-pin').value = "";
+};
+
+// إنشاء رمز تلقائي ووضعه في الحقل
+window.fillGeneratedPin = function() {
+    const pin = Math.floor(1000 + Math.random() * 9000).toString();
+    document.getElementById('new-cashier-pin').value = pin;
+};
+
+// إرسال البيانات لفايربيس
+window.submitCashier = function() {
+    const name = document.getElementById('new-cashier-name').value;
+    const pin = document.getElementById('new-cashier-pin').value;
+
+    if (!name || pin.length < 4) {
+        showAlert(currentLang === 'ar' ? "يرجى إكمال البيانات بشكل صحيح" : "Please complete the data correctly", "error");
+        return;
+    }
+
+    // حفظ الكاشير في قسم الكاشيرية
+    const cashierRef = push(ref(db, 'cashiers'));
+    set(cashierRef, {
+        name: name,
+        pin: pin,
+        createdAt: new Date().toISOString()
+    }).then(() => {
+        showAlert(currentLang === 'ar' ? "تمت إضافة الكاشير بنجاح" : "Cashier added successfully", "success");
+        closeCashierModal();
+        listenToCashiers(); // تحديث القائمة فوراً
+    });
+};
+
+// حذف كاشير
+window.deleteCashier = function(id) {
+    if (confirm(currentLang === 'ar' ? "هل أنت متأكد من الحذف؟" : "Are you sure?")) {
+        set(ref(db, 'cashiers/' + id), null).then(() => {
+            showAlert("تم الحذف", "success");
+        });
+    }
 };

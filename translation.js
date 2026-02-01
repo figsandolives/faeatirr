@@ -63,7 +63,17 @@ export const translations = {
         delete: "حذف",
         users_manag: "المستخدمين",
         generate_code: "إنشاء رمز",
-        invalid_pin: "رمز الدخول الذي أدخلته غير صحيح!"
+        invalid_pin: "رمز الدخول الذي أدخلته غير صحيح!",
+        branch_name_ar: "اسم الفرع (بالعربي)",
+        branch_name_en: "اسم الفرع (بالإنجليزي)",
+        is_primary: "فرع رئيسي؟",
+        add_branch: "إضافة فرع جديد",
+        device_id: "معرف الجهاز",
+        assign_branch: "تحديد الفرع",
+        status: "الحالة",
+        last_online: "آخر ظهور",
+        no_branch: "غير معرف لفرع",
+        save: "حفظ"
     },
     en: {
         cashier_btn: "Cashier",
@@ -128,6 +138,16 @@ export const translations = {
         delete: "Delete",
         users_manag: "Users",
         generate_code: "Generate Code",
-        invalid_pin: "The PIN code you entered is incorrect!"
+        invalid_pin: "The PIN code you entered is incorrect!",
+        branch_name_ar: "Branch Name (AR)",
+        branch_name_en: "Branch Name (EN)",
+        is_primary: "Primary Branch?",
+        add_branch: "Add New Branch",
+        device_id: "Device ID",
+        assign_branch: "Assign Branch",
+        status: "Status",
+        last_online: "Last Online",
+        no_branch: "No Branch Assigned",
+        save: "Save"
     }
 };

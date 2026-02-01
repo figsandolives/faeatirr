@@ -62,7 +62,8 @@ export const translations = {
         edit: "تعديل",
         delete: "حذف",
         users_manag: "المستخدمين",
-        generate_code: "إنشاء رمز"
+        generate_code: "إنشاء رمز",
+        invalid_pin: "رمز الدخول الذي أدخلته غير صحيح!"
     },
     en: {
         cashier_btn: "Cashier",
@@ -126,6 +127,7 @@ export const translations = {
         edit: "Edit",
         delete: "Delete",
         users_manag: "Users",
-        generate_code: "Generate Code"
+        generate_code: "Generate Code",
+        invalid_pin: "The PIN code you entered is incorrect!"
     }
 };

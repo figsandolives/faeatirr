@@ -906,23 +906,32 @@ function renderUsersModule() {
   });
 
   newUserBtn.addEventListener("click", async () => {
-    const name = prompt(window.i18nT("prompt_username") || "Username");
-    if (!name) return;
+    // 1. تعريف الحقول التي نريدها في النافذة
+    const userSchema = {
+        titleKey: "users_title",
+        fields: [
+            { key: "name", labelKey: "label_username", type: "text", required: true },
+            { key: "role", labelKey: "label_role", type: "text", required: true },
+            { key: "pin", labelKey: "label_pin", type: "text", required: true }
+        ]
+    };
 
-    const role = prompt(window.i18nT("prompt_role") || "Role: manager / cashier / storekeeper", "cashier");
-    if (!role) return;
+    // 2. استدعاء النافذة وانتظار المستخدم حتى يضغط "حفظ"
+    const payload = await promptForFields(userSchema, null, {});
+    
+    // إذا أغلق المستخدم النافذة بدون حفظ، نتوقف هنا
+    if (!payload) return;
 
-    const pin = prompt(window.i18nT("prompt_pin") || "PIN");
-    if (!pin) return;
-
+    // 3. حفظ البيانات في فايربيس دفعة واحدة
     const id = db.ref("users").push().key;
     await db.ref(`users/${id}`).set({
-      name: name.trim(),
-      role: String(role).trim(),
-      pin: String(pin).trim(),
+      name: payload.name.trim(),
+      role: payload.role.trim(),
+      pin: payload.pin.trim(),
       active: true,
       createdAt: TS,
     });
+
   });
 }
 
@@ -1060,77 +1069,76 @@ function closeCustomModal() {
   $('customModal').style.display = 'none';
 }
 
-async function promptForFields(schema, existing, refData) {
+// دالة الحذف المخصصة
+async function confirmCustom(msgKey) {
   return new Promise((resolve) => {
-    const container = $('modalFieldsContainer');
     const modal = $('customModal');
+    const container = $('modalFieldsContainer');
     const title = $('modalTitle');
     const saveBtn = $('modalConfirmBtn');
 
-    title.textContent = window.i18nT(schema.titleKey) || "تعديل";
-    container.innerHTML = ""; // مسح الحقول السابقة
+    title.textContent = window.i18nT('confirm_delete') || "تأكيد";
+    container.innerHTML = `<p style="text-align:center; padding:20px;">${window.i18nT(msgKey) || msgKey}</p>`;
+    saveBtn.textContent = window.i18nT('yes');
+    saveBtn.className = "btn danger"; // جعل الزر أحمر للحذف
+    modal.style.display = "flex";
+
+    saveBtn.onclick = () => {
+      modal.style.display = "none";
+      resolve(true);
+    };
+
+    window.closeCustomModal = () => {
+      modal.style.display = "none";
+      resolve(false);
+    };
+  });
+}
+
+// دالة الحقول المخصصة (تعديل لتشمل تصميمك)
+async function promptForFields(schema, existing, refData) {
+  return new Promise((resolve) => {
+    const modal = $('customModal');
+    const container = $('modalFieldsContainer');
+    const title = $('modalTitle');
+    const saveBtn = $('modalConfirmBtn');
+
+    title.textContent = window.i18nT(schema.titleKey) || "بيانات";
+    saveBtn.textContent = window.i18nT('btn_save') || "حفظ";
+    saveBtn.className = "btn primary";
+    container.innerHTML = "";
     modal.style.display = "flex";
 
     const inputsRefs = {};
-
-    // إنشاء الحقول بناءً على السكيما
     schema.fields.forEach(f => {
       if (f.type === "readonly") return;
-
       const fieldDiv = document.createElement('div');
       fieldDiv.className = "field";
       fieldDiv.innerHTML = `<label>${window.i18nT(f.labelKey) || f.key}</label>`;
-
+      
       let input;
       if (f.type === "bool") {
         input = document.createElement('select');
-        input.innerHTML = `
-          <option value="true">${window.i18nT('yes')}</option>
-          <option value="false">${window.i18nT('no')}</option>
-        `;
+        input.innerHTML = `<option value="true">${window.i18nT('yes')}</option><option value="false">${window.i18nT('no')}</option>`;
         input.value = existing ? String(existing[f.key]) : "true";
-      } else if (f.type === "ref") {
-        input = document.createElement('select');
-        const list = refData[f.refPath] || [];
-        input.innerHTML = `<option value="">${window.i18nT('choose')}</option>` +
-          list.map(x => `<option value="${x.id}">${x[f.refLabel]}</option>`).join('');
-        input.value = existing ? (existing[f.key] || "") : "";
       } else {
         input = document.createElement('input');
         input.type = f.type === "number" ? "number" : "text";
         input.value = existing ? (existing[f.key] ?? "") : "";
       }
-
       fieldDiv.appendChild(input);
       container.appendChild(fieldDiv);
       inputsRefs[f.key] = { input, field: f };
     });
 
-    // عند الضغط على حفظ
     saveBtn.onclick = () => {
       const data = {};
       for (const key in inputsRefs) {
         const { input, field } = inputsRefs[key];
-        let val = input.value;
-        if (field.type === "bool") val = (val === "true");
-        if (field.type === "number") val = Number(val);
-        
-        if (field.required && !String(val).trim()) {
-            input.style.borderColor = "var(--danger)";
-            return;
-        }
-        data[key] = val;
+        data[key] = field.type === "bool" ? (input.value === "true") : (field.type === "number" ? Number(input.value) : input.value);
       }
       modal.style.display = "none";
       resolve(data);
-    };
-
-    // إغلاق النافذة عند الإلغاء
-    window.onclick = (event) => {
-      if (event.target == modal) {
-        modal.style.display = "none";
-        resolve(null);
-      }
     };
   });
 }
@@ -1266,4 +1274,3 @@ function enterApp() {
   await ensureSeed();
   await restoreSession();
 })();
-

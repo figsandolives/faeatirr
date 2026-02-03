@@ -175,33 +175,49 @@ pinInput.addEventListener("keydown", (e) => {
 
 async function doLogin() {
   hideAlert(loginAlert);
-  const pin = (pinInput.value || "").trim();
 
+  const pin = (pinInput.value || "").trim();
   if (!pin) return setAlert(loginAlert, "err_enter_pin", "warn");
 
-  // find user by pin
-  const q = db.ref("users").orderByChild("pin").equalTo(pin);
-  const snap = await q.once("value");
-  const obj = snap.val();
+  try {
+    // 1) Try as string (PIN stored as "123456")
+    let snap = await db.ref("users").orderByChild("pin").equalTo(pin).once("value");
 
-  if (!obj) return setAlert(loginAlert, "err_invalid_pin", "warn");
+    // 2) If not found, try as number (PIN stored as 123456)
+    if (!snap.exists() && /^\d+$/.test(pin)) {
+      snap = await db.ref("users").orderByChild("pin").equalTo(Number(pin)).once("value");
+    }
+
+    const obj = snap.val();
+    if (!obj) return setAlert(loginAlert, "err_invalid_pin", "warn");
 
     // pick the first active user with this PIN
-  let picked = null;
-  for (const [id, u] of Object.entries(obj)) {
-    if (u.active === false) continue;
-    picked = { id, ...u };
-    break;
+    let picked = null;
+    for (const [id, u] of Object.entries(obj)) {
+      if (u.active === false) continue;
+      picked = { id, ...u };
+      break;
+    }
+
+    if (!picked) return setAlert(loginAlert, "err_user_inactive", "warn");
+
+    state.user = picked;
+    state.role = picked.role;
+
+    localStorage.setItem(
+      "adminSession",
+      JSON.stringify({ userId: picked.id, ts: Date.now() })
+    );
+
+    enterApp();
+  } catch (err) {
+    console.error("doLogin error:", err);
+
+    // لو المشكلة من القواعد PERMISSION_DENIED غالباً
+    setAlert(loginAlert, "err_firebase_or_rules", "warn");
   }
-
-  if (!picked) return setAlert(loginAlert, "err_user_inactive", "warn");
-
-  state.user = picked;
-  state.role = picked.role;
-
-  localStorage.setItem("adminSession", JSON.stringify({ userId: picked.id, ts: Date.now() }));
-  enterApp();
 }
+
 
 async function restoreSession() {
   try {

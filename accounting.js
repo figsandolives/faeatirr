@@ -180,21 +180,83 @@ async function doLogin() {
   if (!pin) return setAlert(loginAlert, "err_enter_pin", "warn");
 
   try {
-    // 1) Try as string (PIN stored as "123456")
+    // -------- 1) Query as string ----------
     let snap = await db.ref("users").orderByChild("pin").equalTo(pin).once("value");
 
-    // 2) If not found, try as number (PIN stored as 123456)
+    // -------- 2) Query as number (if digits) ----------
     if (!snap.exists() && /^\d+$/.test(pin)) {
       snap = await db.ref("users").orderByChild("pin").equalTo(Number(pin)).once("value");
     }
 
-    const obj = snap.val();
-    if (!obj) return setAlert(loginAlert, "err_invalid_pin", "warn");
+    let obj = snap.val();
 
-    // pick the first active user with this PIN
+    // -------- 3) Fallback: client-side search (diagnostic + works even without index) ----------
+    if (!obj) {
+      const allSnap = await db.ref("users").once("value");
+      const allObj = allSnap.val() || {};
+
+      // Console diagnostics (safe summary)
+      const count = Object.keys(allObj).length;
+      console.warn("[LOGIN] Query returned empty. Falling back to client search.");
+      console.warn("[LOGIN] users count:", count);
+
+      // Try to match by different common shapes
+      const entries = Object.entries(allObj);
+
+      // find any match where:
+      // - u.pin equals pin as string
+      // - u.pin equals pin as number
+      // - u.pin is stored under u.password (common mistake)
+      // - u.pin has spaces
+      const pinNum = /^\d+$/.test(pin) ? Number(pin) : null;
+
+      let picked = null;
+
+      for (const [id, u] of entries) {
+        if (!u || u.active === false) continue;
+
+        const rawPin = u.pin ?? u.PIN ?? u.password ?? u.pass ?? null;
+
+        // normalize
+        const rawPinStr = rawPin !== null && rawPin !== undefined ? String(rawPin).trim() : "";
+        const rawPinNum = rawPinStr && /^\d+$/.test(rawPinStr) ? Number(rawPinStr) : null;
+
+        if (rawPinStr === pin || (pinNum !== null && rawPinNum === pinNum)) {
+          picked = { id, ...u };
+          break;
+        }
+      }
+
+      if (!picked) {
+        // Show extra hint: show first 3 pin samples (masked)
+        const samples = entries.slice(0, 3).map(([id, u]) => {
+          const v = u?.pin ?? u?.PIN ?? u?.password ?? "";
+          const s = String(v ?? "").trim();
+          const masked = s ? s.replace(/\d/g, "•") : "(empty)";
+          return { id, pinShape: typeof v, masked };
+        });
+        console.warn("[LOGIN] sample pins (masked):", samples);
+
+        return setAlert(loginAlert, "err_invalid_pin", "warn");
+      }
+
+      // matched via fallback
+      state.user = picked;
+      state.role = picked.role;
+
+      localStorage.setItem(
+        "adminSession",
+        JSON.stringify({ userId: picked.id, ts: Date.now() })
+      );
+      enterApp();
+      return;
+    }
+
+    // -------- Normal path (query matched) ----------
+    // pick first active user
     let picked = null;
     for (const [id, u] of Object.entries(obj)) {
-      if (u.active === false) continue;
+      if (!u || u.active === false) continue;
       picked = { id, ...u };
       break;
     }
@@ -208,15 +270,13 @@ async function doLogin() {
       "adminSession",
       JSON.stringify({ userId: picked.id, ts: Date.now() })
     );
-
     enterApp();
   } catch (err) {
     console.error("doLogin error:", err);
-
-    // لو المشكلة من القواعد PERMISSION_DENIED غالباً
     setAlert(loginAlert, "err_firebase_or_rules", "warn");
   }
 }
+
 
 
 async function restoreSession() {
@@ -995,40 +1055,84 @@ async function renderCrudModule(schemaKey) {
   });
 }
 
+// دوال التحكم في النافذة المنبثقة
+function closeCustomModal() {
+  $('customModal').style.display = 'none';
+}
+
 async function promptForFields(schema, existing, refData) {
-  const data = {};
-  for (const f of schema.fields) {
-    if (f.type === "readonly") continue;
+  return new Promise((resolve) => {
+    const container = $('modalFieldsContainer');
+    const modal = $('customModal');
+    const title = $('modalTitle');
+    const saveBtn = $('modalConfirmBtn');
 
-    if (f.type === "bool") {
-      const current = existing ? (existing[f.key] !== false) : true;
-      const ok = confirm(`${window.i18nT(f.labelKey) || f.key} ? (${current ? (window.i18nT("yes")||"Yes") : (window.i18nT("no")||"No")})`);
-      data[f.key] = ok;
-      continue;
-    }
+    title.textContent = window.i18nT(schema.titleKey) || "تعديل";
+    container.innerHTML = ""; // مسح الحقول السابقة
+    modal.style.display = "flex";
 
-    if (f.type === "ref") {
-      const list = refData[f.refPath] || [];
-      const options = list.map(x => `${x.id} = ${x[f.refLabel]}`).join("\n");
-      const current = existing ? (existing[f.key] || "") : "";
-      const v = prompt(`${window.i18nT(f.labelKey) || f.key}\n${options}\n${window.i18nT("prompt_enter_id") || "Enter ID"}:`, current);
-      if (v === null) return null;
-      if (f.required && !String(v).trim()) return null;
-      data[f.key] = String(v).trim();
-      continue;
-    }
+    const inputsRefs = {};
 
-    const current = existing ? (existing[f.key] ?? "") : "";
-    const v = prompt(`${window.i18nT(f.labelKey) || f.key}:`, String(current));
-    if (v === null) return null;
-    if (f.required && !String(v).trim()) return null;
+    // إنشاء الحقول بناءً على السكيما
+    schema.fields.forEach(f => {
+      if (f.type === "readonly") return;
 
-    if (f.type === "number") data[f.key] = Number(v || 0);
-    else data[f.key] = String(v).trim();
-  }
-  // default active if exists in schema
-  if (!existing && schema.fields.some(f => f.key === "active") && data.active === undefined) data.active = true;
-  return data;
+      const fieldDiv = document.createElement('div');
+      fieldDiv.className = "field";
+      fieldDiv.innerHTML = `<label>${window.i18nT(f.labelKey) || f.key}</label>`;
+
+      let input;
+      if (f.type === "bool") {
+        input = document.createElement('select');
+        input.innerHTML = `
+          <option value="true">${window.i18nT('yes')}</option>
+          <option value="false">${window.i18nT('no')}</option>
+        `;
+        input.value = existing ? String(existing[f.key]) : "true";
+      } else if (f.type === "ref") {
+        input = document.createElement('select');
+        const list = refData[f.refPath] || [];
+        input.innerHTML = `<option value="">${window.i18nT('choose')}</option>` +
+          list.map(x => `<option value="${x.id}">${x[f.refLabel]}</option>`).join('');
+        input.value = existing ? (existing[f.key] || "") : "";
+      } else {
+        input = document.createElement('input');
+        input.type = f.type === "number" ? "number" : "text";
+        input.value = existing ? (existing[f.key] ?? "") : "";
+      }
+
+      fieldDiv.appendChild(input);
+      container.appendChild(fieldDiv);
+      inputsRefs[f.key] = { input, field: f };
+    });
+
+    // عند الضغط على حفظ
+    saveBtn.onclick = () => {
+      const data = {};
+      for (const key in inputsRefs) {
+        const { input, field } = inputsRefs[key];
+        let val = input.value;
+        if (field.type === "bool") val = (val === "true");
+        if (field.type === "number") val = Number(val);
+        
+        if (field.required && !String(val).trim()) {
+            input.style.borderColor = "var(--danger)";
+            return;
+        }
+        data[key] = val;
+      }
+      modal.style.display = "none";
+      resolve(data);
+    };
+
+    // إغلاق النافذة عند الإلغاء
+    window.onclick = (event) => {
+      if (event.target == modal) {
+        modal.style.display = "none";
+        resolve(null);
+      }
+    };
+  });
 }
 
 /***********************

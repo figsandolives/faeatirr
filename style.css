@@ -300,3 +300,31 @@ input:focus, select:focus{
   margin-bottom:12px;
 }
 .contentHead h2{ margin:0; font-size:20px; font-weight:950; }
+
+
+/* تنسيقات النافذة المنبثقة */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(11, 18, 32, 0.4); /* خلفية معتمة خفيفة */
+  backdrop-filter: blur(8px); /* تأثير الضبابية */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-card {
+  width: min(500px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: modalSlideUp 0.3s ease-out;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+}
+
+@keyframes modalSlideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}

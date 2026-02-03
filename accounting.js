@@ -817,15 +817,12 @@ function renderDevicesModule() {
  * - تعديل الاسم/الرمز/الدور/تفعيل
  ***********************/
 function renderUsersModule() {
-  moduleTitle.textContent = window.i18nT("nav_users") || "Users";
+  moduleTitle.textContent = window.i18nT("nav_users");
   moduleBody.innerHTML = `
     <div class="card">
       <div class="row between">
         <h3 data-i18n="users_title">المستخدمين</h3>
-        <button class="btn mini" id="newUserBtn" data-i18n="btn_add">إضافة</button>
-      </div>
-      <div class="muted small" data-i18n="users_note">
-        المدير يصل لكل الأقسام. أمين الصندوق لا يدخل المخازن/الموردون. أمين المخازن لا يدخل الإدارة.
+        <button class="btn mini" id="newUserBtn" data-i18n="btn_add">إضافة مستخدم</button>
       </div>
       <div class="list mt" id="usersList"></div>
     </div>
@@ -835,104 +832,60 @@ function renderUsersModule() {
   const usersList = moduleBody.querySelector("#usersList");
   const newUserBtn = moduleBody.querySelector("#newUserBtn");
 
+  // 1. عرض المستخدمين من قاعدة البيانات
   db.ref("users").on("value", (s) => {
     const obj = s.val() || {};
-    const users = Object.entries(obj).map(([id, u]) => ({ id, ...u }))
-      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-
     usersList.innerHTML = "";
-    users.forEach((u) => {
+    Object.entries(obj).forEach(([id, u]) => {
       const row = document.createElement("div");
       row.className = "itemRow";
       row.innerHTML = `
         <div class="itemMain">
-          <div class="itemTitle">${escapeHtml(u.name || "-")}</div>
-          <div class="itemSub muted">
-            ${window.i18nT("label_role") || "Role"}: <b>${escapeHtml(u.role || "")}</b>
-            • ${window.i18nT("label_pin") || "PIN"}: <b>${escapeHtml(u.pin || "")}</b>
-            • ${window.i18nT("field_active") || "Active"}: <b>${u.active !== false ? (window.i18nT("yes")||"Yes") : (window.i18nT("no")||"No")}</b>
-          </div>
+          <div class="itemTitle">${u.name}</div>
+          <div class="itemSub muted">الدور: <b>${u.role}</b> • الرمز: <b>${u.pin}</b></div>
         </div>
         <div class="itemRight">
-          <div class="row">
-            <button class="btn mini" data-i18n="btn_edit">تعديل</button>
-            <button class="btn mini danger" data-i18n="btn_delete">حذف</button>
-          </div>
+          <button class="btn mini edit-btn">تعديل</button>
         </div>
       `;
-      const [editBtn, delBtn] = row.querySelectorAll("button");
-
-      editBtn.addEventListener("click", async () => {
-        const name = prompt(window.i18nT("prompt_username") || "Username", u.name || "");
-        if (name === null) return;
-
-        const role = prompt(window.i18nT("prompt_role") || "Role: manager / cashier / storekeeper", u.role || "manager");
-        if (role === null) return;
-
-        const pin = prompt(window.i18nT("prompt_pin") || "PIN", u.pin || "");
-        if (pin === null) return;
-
-        const active = confirm(window.i18nT("prompt_active_confirm") || "Active?");
-        await db.ref(`users/${u.id}`).update({
-          name: name.trim(),
-          role: String(role).trim(),
-          pin: String(pin).trim(),
-          active,
-          updatedAt: TS,
-        });
-
-        // if editing myself, refresh state live
-        if (state.user?.id === u.id) {
-          state.user.name = name.trim();
-          state.role = String(role).trim();
-          applyRolePermissions();
-          refreshUserBadge();
-        }
-      });
-
-      delBtn.addEventListener("click", async () => {
-        if (u.id === state.user?.id) {
-          alert(window.i18nT("err_cannot_delete_self") || "Cannot delete yourself");
-          return;
-        }
-        const ok = confirm(window.i18nT("confirm_delete") || "Delete?");
-        if (!ok) return;
-        await db.ref(`users/${u.id}`).remove();
-      });
+      
+      // زر التعديل (لتغيير الاسم والرمز)
+      row.querySelector(".edit-btn").onclick = async () => {
+        const payload = await promptForFields({
+          titleKey: "btn_edit",
+          fields: [
+            { key: "name", labelKey: "label_username", type: "text" },
+            { key: "pin", labelKey: "label_pin", type: "text" }
+          ]
+        }, u);
+        if (payload) await db.ref(`users/${id}`).update(payload);
+      };
 
       usersList.appendChild(row);
-      window.i18nApplyWithin(row);
     });
   });
 
-  newUserBtn.addEventListener("click", async () => {
-    // 1. تعريف الحقول التي نريدها في النافذة
+  // 2. إضافة مستخدم جديد بالأدوار الثلاثة
+  newUserBtn.onclick = async () => {
     const userSchema = {
-        titleKey: "users_title",
-        fields: [
-            { key: "name", labelKey: "label_username", type: "text", required: true },
-            { key: "role", labelKey: "label_role", type: "text", required: true },
-            { key: "pin", labelKey: "label_pin", type: "text", required: true }
-        ]
+      titleKey: "btn_add",
+      fields: [
+        { key: "name", labelKey: "label_username", type: "text", required: true },
+        { key: "pin", labelKey: "label_pin", type: "text", required: true },
+        { key: "role", labelKey: "label_role", type: "select", options: [
+            { value: "manager", label: "مدير" },
+            { value: "cashier", label: "أمين صندوق" },
+            { value: "storekeeper", label: "أمين مخازن" }
+          ] 
+        }
+      ]
     };
-
-    // 2. استدعاء النافذة وانتظار المستخدم حتى يضغط "حفظ"
-    const payload = await promptForFields(userSchema, null, {});
-    
-    // إذا أغلق المستخدم النافذة بدون حفظ، نتوقف هنا
-    if (!payload) return;
-
-    // 3. حفظ البيانات في فايربيس دفعة واحدة
-    const id = db.ref("users").push().key;
-    await db.ref(`users/${id}`).set({
-      name: payload.name.trim(),
-      role: payload.role.trim(),
-      pin: payload.pin.trim(),
-      active: true,
-      createdAt: TS,
-    });
-
-  });
+    const payload = await promptForFields(userSchema, null);
+    if (payload) {
+      const id = db.ref("users").push().key;
+      await db.ref(`users/${id}`).set({ ...payload, active: true, createdAt: TS });
+    }
+  };
 }
 
 /***********************

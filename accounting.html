@@ -6,7 +6,7 @@
   <title data-i18n="admin_title">المحاسبة والمخازن</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>  
+<body>
   <div class="topbar">
     <div class="topbar-left">
       <a class="brand" href="index.html">
@@ -133,6 +133,21 @@
       <div id="moduleBody"></div>
     </main>
   </div>
+
+  <div id="customModal" class="modal-overlay" style="display:none;">
+  <div class="card modal-card">
+    <div class="row between">
+      <h3 id="modalTitle">عنوان النافذة</h3>
+      <button class="btn mini ghost" onclick="closeCustomModal()">×</button>
+    </div>
+    <div id="modalFieldsContainer" class="stack mt">
+      </div>
+    <div class="row mt" style="justify-content: flex-end;">
+      <button class="btn primary" id="modalConfirmBtn">حفظ</button>
+      <button class="btn" onclick="closeCustomModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
 
   <script src="translation.js"></script>
 

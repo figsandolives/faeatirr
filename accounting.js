@@ -300,30 +300,21 @@ async function restoreSession() {
  * Role permissions
  ***********************/
 function applyRolePermissions() {
-  // manager: all
-  // cashier: no stores group + no suppliers group
-  // storekeeper: no admin group
   const role = state.role;
+  const storesGroup = nav.querySelector('[data-group="stores"]')?.parentElement;
+  const suppliersGroup = nav.querySelector('[data-group="suppliers"]')?.parentElement;
+  const adminGroup = nav.querySelector('[data-group="admin"]')?.parentElement;
 
-  // mark restricted items with data-perm
-  // We'll hide whole groups with simple rules:
-  const storesGroup = nav.querySelector('[data-group-body="stores"]')?.parentElement;
-  const suppliersGroup = nav.querySelector('[data-group-body="suppliers"]')?.parentElement;
-  const adminGroup = nav.querySelector('[data-group-body="admin"]')?.parentElement;
-
-  if (role === "cashier") {
+  if (role === "cashier") { // أمين صندوق: لا مخازن ولا موردون
     if (storesGroup) storesGroup.style.display = "none";
     if (suppliersGroup) suppliersGroup.style.display = "none";
     if (adminGroup) adminGroup.style.display = "";
-  } else if (role === "storekeeper") {
+  } else if (role === "storekeeper") { // أمين مخازن: لا إدارة
     if (storesGroup) storesGroup.style.display = "";
     if (suppliersGroup) suppliersGroup.style.display = "";
     if (adminGroup) adminGroup.style.display = "none";
-  } else {
-    // manager
-    if (storesGroup) storesGroup.style.display = "";
-    if (suppliersGroup) suppliersGroup.style.display = "";
-    if (adminGroup) adminGroup.style.display = "";
+  } else { // مدير: كل شيء
+    if (storesGroup) [storesGroup, suppliersGroup, adminGroup].forEach(g => g && (g.style.display = ""));
   }
 }
 
@@ -822,17 +813,13 @@ function renderUsersModule() {
     <div class="card">
       <div class="row between">
         <h3 data-i18n="users_title">المستخدمين</h3>
-        <button class="btn mini" id="newUserBtn" data-i18n="btn_add">إضافة مستخدم</button>
+        <button class="btn mini primary" id="newUserBtn">إضافة مستخدم +</button>
       </div>
       <div class="list mt" id="usersList"></div>
     </div>
   `;
-  window.i18nApplyWithin(moduleBody);
 
   const usersList = moduleBody.querySelector("#usersList");
-  const newUserBtn = moduleBody.querySelector("#newUserBtn");
-
-  // 1. عرض المستخدمين من قاعدة البيانات
   db.ref("users").on("value", (s) => {
     const obj = s.val() || {};
     usersList.innerHTML = "";
@@ -841,33 +828,35 @@ function renderUsersModule() {
       row.className = "itemRow";
       row.innerHTML = `
         <div class="itemMain">
-          <div class="itemTitle">${u.name}</div>
+          <div class="itemTitle">${u.name} ${u.id === state.user?.id ? '(أنت)' : ''}</div>
           <div class="itemSub muted">الدور: <b>${u.role}</b> • الرمز: <b>${u.pin}</b></div>
         </div>
         <div class="itemRight">
           <button class="btn mini edit-btn">تعديل</button>
         </div>
       `;
-      
-      // زر التعديل (لتغيير الاسم والرمز)
       row.querySelector(".edit-btn").onclick = async () => {
         const payload = await promptForFields({
           titleKey: "btn_edit",
           fields: [
             { key: "name", labelKey: "label_username", type: "text" },
-            { key: "pin", labelKey: "label_pin", type: "text" }
+            { key: "pin", labelKey: "label_pin", type: "text" },
+            { key: "role", labelKey: "label_role", type: "select", options: [
+                { value: "manager", label: "مدير" },
+                { value: "cashier", label: "أمين صندوق" },
+                { value: "storekeeper", label: "أمين مخازن" }
+              ] 
+            }
           ]
         }, u);
         if (payload) await db.ref(`users/${id}`).update(payload);
       };
-
       usersList.appendChild(row);
     });
   });
 
-  // 2. إضافة مستخدم جديد بالأدوار الثلاثة
-  newUserBtn.onclick = async () => {
-    const userSchema = {
+  moduleBody.querySelector("#newUserBtn").onclick = async () => {
+    const payload = await promptForFields({
       titleKey: "btn_add",
       fields: [
         { key: "name", labelKey: "label_username", type: "text", required: true },
@@ -879,8 +868,7 @@ function renderUsersModule() {
           ] 
         }
       ]
-    };
-    const payload = await promptForFields(userSchema, null);
+    }, null);
     if (payload) {
       const id = db.ref("users").push().key;
       await db.ref(`users/${id}`).set({ ...payload, active: true, createdAt: TS });
@@ -1067,50 +1055,46 @@ async function confirmCustom(msgKey) {
 }
 
 // دالة الحقول المخصصة (تعديل لتشمل تصميمك)
-async function promptForFields(schema, existing, refData) {
+async function promptForFields(schema, existing, refData = {}) {
   return new Promise((resolve) => {
     const modal = $('customModal');
     const container = $('modalFieldsContainer');
-    const title = $('modalTitle');
     const saveBtn = $('modalConfirmBtn');
-
-    title.textContent = window.i18nT(schema.titleKey) || "بيانات";
-    saveBtn.textContent = window.i18nT('btn_save') || "حفظ";
-    saveBtn.className = "btn primary";
+    
     container.innerHTML = "";
     modal.style.display = "flex";
+    const inputs = {};
 
-    const inputsRefs = {};
     schema.fields.forEach(f => {
-      if (f.type === "readonly") return;
       const fieldDiv = document.createElement('div');
       fieldDiv.className = "field";
-      fieldDiv.innerHTML = `<label>${window.i18nT(f.labelKey) || f.key}</label>`;
+      fieldDiv.innerHTML = `<label>${window.i18nT(f.labelKey) || f.labelKey || f.key}</label>`;
       
       let input;
-      if (f.type === "bool") {
+      if (f.type === "select") {
         input = document.createElement('select');
-        input.innerHTML = `<option value="true">${window.i18nT('yes')}</option><option value="false">${window.i18nT('no')}</option>`;
-        input.value = existing ? String(existing[f.key]) : "true";
+        f.options.forEach(opt => {
+          const o = document.createElement('option');
+          o.value = opt.value; o.textContent = opt.label;
+          input.appendChild(o);
+        });
       } else {
         input = document.createElement('input');
-        input.type = f.type === "number" ? "number" : "text";
-        input.value = existing ? (existing[f.key] ?? "") : "";
+        input.type = f.type;
       }
+      input.value = existing ? (existing[f.key] ?? "") : "";
       fieldDiv.appendChild(input);
       container.appendChild(fieldDiv);
-      inputsRefs[f.key] = { input, field: f };
+      inputs[f.key] = input;
     });
 
     saveBtn.onclick = () => {
-      const data = {};
-      for (const key in inputsRefs) {
-        const { input, field } = inputsRefs[key];
-        data[key] = field.type === "bool" ? (input.value === "true") : (field.type === "number" ? Number(input.value) : input.value);
-      }
+      const result = {};
+      for(let k in inputs) result[k] = inputs[k].value;
       modal.style.display = "none";
-      resolve(data);
+      resolve(result);
     };
+    window.closeCustomModal = () => { modal.style.display = "none"; resolve(null); };
   });
 }
 

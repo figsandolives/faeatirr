@@ -1266,3 +1266,4 @@ function enterApp() {
   await ensureSeed();
   await restoreSession();
 })();
+

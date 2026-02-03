@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Accounting & Inventory</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="logo-wrap">
+        <img src="logo.png" alt="logo" />
+        <h3 data-i18n="app_title"></h3>
+      </div>
+
+      <div class="user-badge">
+        <div id="userName">-</div>
+        <div id="userRole" class="role">-</div>
+      </div>
+
+      <div class="row">
+        <button class="btn ghost small" data-lang="ar" data-i18n="arabic"></button>
+        <button class="btn ghost small" data-lang="en" data-i18n="english"></button>
+      </div>
+
+      <nav class="menu">
+        <button class="nav-item" data-section="orders" data-i18n="orders"></button>
+        <button class="nav-item" data-section="customers" data-i18n="customers"></button>
+        <button class="nav-item" data-section="products" data-i18n="products"></button>
+        <button class="nav-item" data-section="productCategories" data-i18n="product_categories"></button>
+        <button class="nav-item" data-section="units" data-i18n="units"></button>
+        <button class="nav-item" data-section="itemCards" data-i18n="item_cards"></button>
+
+        <div class="nav-group" data-group="inventory">
+          <button class="nav-item group-toggle">
+            <span data-i18n="inventory"></span>
+            <span>▾</span>
+          </button>
+          <div class="nav-children">
+            <button class="nav-item" data-section="stockMaterials" data-group="inventory" data-i18n="stock_materials"></button>
+            <button class="nav-item" data-section="materialCategories" data-group="inventory" data-i18n="material_categories"></button>
+            <button class="nav-item" data-section="storageLocations" data-group="inventory" data-i18n="storage_locations"></button>
+            <button class="nav-item" data-section="issue" data-group="inventory" data-i18n="issue"></button>
+            <button class="nav-item" data-section="production" data-group="inventory" data-i18n="production"></button>
+            <button class="nav-item" data-section="inventoryCount" data-group="inventory" data-i18n="inventory_count"></button>
+            <button class="nav-item" data-section="receiving" data-group="inventory" data-i18n="receiving"></button>
+            <button class="nav-item" data-section="transfers" data-group="inventory" data-i18n="transfers"></button>
+            <button class="nav-item" data-section="stockReturn" data-group="inventory" data-i18n="stock_return"></button>
+            <button class="nav-item" data-section="scrapReturn" data-group="inventory" data-i18n="scrap_return"></button>
+          </div>
+        </div>
+
+        <div class="nav-group" data-group="suppliers">
+          <button class="nav-item group-toggle">
+            <span data-i18n="suppliers"></span>
+            <span>▾</span>
+          </button>
+          <div class="nav-children">
+            <button class="nav-item" data-section="suppliers" data-group="suppliers" data-i18n="supplier_list"></button>
+            <button class="nav-item" data-section="purchase" data-group="suppliers" data-i18n="purchase"></button>
+            <button class="nav-item" data-section="supplierReturn" data-group="suppliers" data-i18n="supplier_return"></button>
+          </div>
+        </div>
+
+        <div class="nav-group" data-group="administration">
+          <button class="nav-item group-toggle">
+            <span data-i18n="administration"></span>
+            <span>▾</span>
+          </button>
+          <div class="nav-children">
+            <button class="nav-item" data-section="pendingStockMoves" data-group="administration" data-i18n="pending_stock_moves"></button>
+            <button class="nav-item" data-section="devicesCashiers" data-group="administration" data-i18n="devices_cashier"></button>
+            <button class="nav-item" data-section="users" data-group="administration" data-i18n="users"></button>
+            <button class="nav-item" data-section="warehouseStaff" data-group="administration" data-i18n="warehouse_staff"></button>
+            <button class="nav-item" data-section="productionStaff" data-group="administration" data-i18n="production_staff"></button>
+            <button class="nav-item" data-section="branches" data-group="administration" data-i18n="branches"></button>
+            <button class="nav-item" data-section="deliveryZones" data-group="administration" data-i18n="delivery_zones"></button>
+            <button class="nav-item" data-section="deliveryPrices" data-group="administration" data-i18n="delivery_prices"></button>
+            <button class="nav-item" data-section="discounts" data-group="administration" data-i18n="discounts"></button>
+            <button class="nav-item" data-section="orderTypes" data-group="administration" data-i18n="order_types"></button>
+            <button class="nav-item" data-section="paymentMethods" data-group="administration" data-i18n="payment_methods"></button>
+          </div>
+        </div>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <section id="section-orders" class="section"></section>
+      <section id="section-customers" class="section"></section>
+      <section id="section-products" class="section"></section>
+      <section id="section-productCategories" class="section"></section>
+      <section id="section-units" class="section"></section>
+      <section id="section-itemCards" class="section"></section>
+      <section id="section-stockMaterials" class="section"></section>
+      <section id="section-materialCategories" class="section"></section>
+      <section id="section-storageLocations" class="section"></section>
+      <section id="section-issue" class="section"></section>
+      <section id="section-production" class="section"></section>
+      <section id="section-inventoryCount" class="section"></section>
+      <section id="section-receiving" class="section"></section>
+      <section id="section-transfers" class="section"></section>
+      <section id="section-stockReturn" class="section"></section>
+      <section id="section-scrapReturn" class="section"></section>
+      <section id="section-suppliers" class="section"></section>
+      <section id="section-purchase" class="section"></section>
+      <section id="section-supplierReturn" class="section"></section>
+      <section id="section-pendingStockMoves" class="section"></section>
+      <section id="section-devicesCashiers" class="section"></section>
+      <section id="section-users" class="section"></section>
+      <section id="section-warehouseStaff" class="section"></section>
+      <section id="section-productionStaff" class="section"></section>
+      <section id="section-branches" class="section"></section>
+      <section id="section-deliveryZones" class="section"></section>
+      <section id="section-deliveryPrices" class="section"></section>
+      <section id="section-discounts" class="section"></section>
+      <section id="section-orderTypes" class="section"></section>
+      <section id="section-paymentMethods" class="section"></section>
+    </main>
+  </div>
+
+  <div id="loginOverlay" class="overlay">
+    <div class="modal card">
+      <h2 data-i18n="login_title"></h2>
+      <p class="helper" data-i18n="access_code"></p>
+      <input id="loginCode" class="input" data-i18n-placeholder="enter_code" />
+      <button id="loginBtn" class="btn primary" data-i18n="login"></button>
+      <p id="loginError" class="helper" style="color: var(--danger);"></p>
+    </div>
+  </div>
+
+  <div id="detailOverlay" class="overlay hidden">
+    <div class="modal card" style="max-width: 560px; text-align: start;">
+      <h3 data-i18n="order_details"></h3>
+      <div id="detailBody"></div>
+      <button id="detailClose" class="btn ghost" data-i18n="cancel"></button>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <script src="translation.js"></script>
+  <script src="accounting.js"></script>
+</body>
+</html>

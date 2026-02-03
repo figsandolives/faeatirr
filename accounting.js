@@ -1033,20 +1033,38 @@ async function renderCrudModule(schemaKey) {
       const [editBtn, delBtn] = row.querySelectorAll("button");
 
       editBtn.addEventListener("click", async () => {
-        const payload = await promptForFields(schema, r, refData);
-        if (!payload) return;
-        payload.updatedAt = TS;
-        await db.ref(`${schema.path}/${r.id}`).update(payload);
-      });
+    const userSchema = {
+        titleKey: "users_title",
+        fields: [
+            { key: "name", labelKey: "label_username", type: "text", required: true },
+            { key: "role", labelKey: "label_role", type: "text", required: true },
+            { key: "pin", labelKey: "label_pin", type: "text", required: true },
+            { key: "active", labelKey: "field_active", type: "bool" }
+        ]
+    };
+
+    // نمرر بيانات المستخدم الحالي (u) لتظهر تلقائياً في الخانات
+    const payload = await promptForFields(userSchema, u, {});
+    if (!payload) return;
+
+    await db.ref(`users/${u.id}`).update({
+        ...payload,
+        updatedAt: TS
+    });
+});
 
       delBtn.addEventListener("click", async () => {
-        const ok = confirm(window.i18nT("confirm_delete") || "Delete?");
-        if (!ok) return;
-        // soft delete if supports active
-        const hasActive = schema.fields.some(f => f.key === "active");
-        if (hasActive) await db.ref(`${schema.path}/${r.id}`).update({ active: false, updatedAt: TS });
-        else await db.ref(`${schema.path}/${r.id}`).remove();
-      });
+    if (u.id === state.user?.id) {
+        alert(window.i18nT("err_cannot_delete_self"));
+        return;
+    }
+    
+    // استخدام نافذة التأكيد الخاصة بالموقع
+    const ok = await confirmCustom("confirm_delete"); 
+    if (!ok) return;
+    
+    await db.ref(`users/${u.id}`).remove();
+});
 
       rowsList.appendChild(row);
       window.i18nApplyWithin(row);

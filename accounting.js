@@ -5815,7 +5815,8 @@ function printProductionLabel(record) {
   const labelWidthMm = 50;
   const labelHeightMm = 30;
   const offsetXmm = 0;
-  const offsetYmm = -10;
+  const offsetYmm = -9;
+  const contentShiftYmm = 4;
   const paddingXmm = 4;
   const paddingYmm = 3;
   const html = `
@@ -5834,8 +5835,14 @@ function printProductionLabel(record) {
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
-            gap: 1mm;
             transform: translate(${offsetXmm}mm, ${offsetYmm}mm);
+          }
+          .label-content {
+            display: flex;
+            flex-direction: column;
+            gap: 1mm;
+            height: 100%;
+            transform: translateY(${contentShiftYmm}mm);
           }
           .title { font-size: 11px; font-weight: 700; text-align: center; line-height: 1.2; }
           .title.en { font-size: 9.5px; font-weight: 600; direction: ltr; }
@@ -5848,16 +5855,18 @@ function printProductionLabel(record) {
       <body>
         <div class="sheet">
           <div class="label">
-            <div class="title">${names.nameAr || record.itemName || ''}</div>
-            <div class="title en">${names.nameEn || record.itemName || ''}</div>
-            <div class="dates">انتاج: ${record.productionDate || '-'} / انتهاء: ${record.expiryDate || '-'}</div>
-            <div class="barcode">
-              <svg id="labelBarcode"></svg>
+            <div class="label-content">
+              <div class="title">${names.nameAr || record.itemName || ''}</div>
+              <div class="title en">${names.nameEn || record.itemName || ''}</div>
+              <div class="dates">انتاج: ${record.productionDate || '-'} / انتهاء: ${record.expiryDate || '-'}</div>
+              <div class="barcode">
+                <svg id="labelBarcode"></svg>
+              </div>
             </div>
           </div>
         </div>
         <script>
-          JsBarcode("#labelBarcode", "${barcodeValue}", { format: "CODE128", displayValue: true, height: 32, margin: 0, fontSize: 9 });
+          JsBarcode("#labelBarcode", "${barcodeValue}", { format: "CODE128", displayValue: true, height: 24, width: 1.1, margin: 0, fontSize: 8, textMargin: 1 });
           window.onload = () => { window.print(); };
         </script>
       </body>

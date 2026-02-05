@@ -114,6 +114,15 @@ function getUnitName(unitId) {
   return name && name !== '-' ? name : '';
 }
 
+function formatUnitWithDefinition(unitId, definitionQty, definitionUnitId) {
+  const baseName = getUnitName(unitId);
+  if (!baseName) return '-';
+  const qty = String(definitionQty || '').trim();
+  const defUnitName = getUnitName(definitionUnitId);
+  if (!qty || !defUnitName) return baseName;
+  return `${baseName} (${qty} ${defUnitName})`;
+}
+
 function formatItemNameWithUnit(name, unitId) {
   const baseName = name || '-';
   const unitName = getUnitName(unitId);
@@ -2288,7 +2297,6 @@ function renderProductsSection() {
 
   renderProductFilters();
   const products = state.cache.products || {};
-  const units = state.cache.units || {};
   const categories = state.cache.productCategories || {};
   const storageLocations = state.cache.storageLocations || {};
   const branchId = state.productFilters.branchId;
@@ -2338,7 +2346,7 @@ function renderProductsSection() {
       <td>${getLocalizedName(product)}</td>
       <td>${formatNumber(product.price)}</td>
       <td>${formatNumber(product.cost)}</td>
-      <td>${getLocalizedName(units[product.unitId]) || '-'}</td>
+      <td>${formatUnitWithDefinition(product.unitId, product.unitDefinitionQty, product.unitDefinitionUnitId)}</td>
       <td>${formatNumber(stock)}</td>
       <td>${getLocalizedName(categories[product.categoryId]) || '-'}</td>
       <td>${getLocalizedName(storageLocations[product.storageLocationId]) || '-'}</td>
@@ -2551,7 +2559,6 @@ function renderStockMaterialsSection() {
 
   renderMaterialFilters();
   const materials = state.cache.stockMaterials || {};
-  const units = state.cache.units || {};
   const categories = state.cache.materialCategories || {};
   const storageLocations = state.cache.storageLocations || {};
   const branchId = state.materialFilters.branchId;
@@ -2593,7 +2600,7 @@ function renderStockMaterialsSection() {
       <td>${material.code || '-'}</td>
       <td>${getLocalizedName(material)}</td>
       <td>${formatNumber(material.cost)}</td>
-      <td>${getLocalizedName(units[material.unitId]) || '-'}</td>
+      <td>${formatUnitWithDefinition(material.unitId, material.unitDefinitionQty, material.unitDefinitionUnitId)}</td>
       <td>${formatNumber(stock)}</td>
       <td>${getLocalizedName(categories[material.categoryId]) || '-'}</td>
       <td>${getLocalizedName(storageLocations[material.storageLocationId]) || '-'}</td>
@@ -2737,6 +2744,8 @@ function openMaterialModal(material = null) {
     barcodeInput.value = generateBarcodeValue();
   }
 
+  setupUnitDefinitionControls('material', material);
+
   renderMaterialBarcodePreview();
   els.materialModal.classList.remove('hidden');
 
@@ -2770,6 +2779,8 @@ function saveMaterial() {
   const nameEn = document.getElementById('materialNameEn').value.trim();
   const cost = Number(document.getElementById('materialCost').value || 0);
   const unitId = document.getElementById('materialUnit').value;
+  const unitDefinitionQtyRaw = document.getElementById('materialUnitDefinitionQty')?.value.trim() || '';
+  const unitDefinitionUnitId = document.getElementById('materialUnitDefinitionUnit')?.value || '';
   const openingQty = Number(document.getElementById('materialOpeningQty').value || 0);
   const minStock = Number(document.getElementById('materialMinStock').value || 0);
   const reorderPoint = Number(document.getElementById('materialReorderPoint').value || 0);
@@ -2779,6 +2790,12 @@ function saveMaterial() {
     els.materialError.textContent = window.i18n.t('error');
     return;
   }
+  if ((unitDefinitionQtyRaw && !unitDefinitionUnitId) || (!unitDefinitionQtyRaw && unitDefinitionUnitId)) {
+    els.materialError.textContent = window.i18n.t('error');
+    return;
+  }
+  const unitDefinitionQty = unitDefinitionQtyRaw && unitDefinitionUnitId ? unitDefinitionQtyRaw : null;
+  const unitDefinitionUnitIdFinal = unitDefinitionQtyRaw && unitDefinitionUnitId ? unitDefinitionUnitId : null;
 
   const payload = {
     code: editId ? rawCode : normalizeCode(rawCode, 'SK'),
@@ -2787,6 +2804,8 @@ function saveMaterial() {
     nameEn,
     cost,
     unitId,
+    unitDefinitionQty,
+    unitDefinitionUnitId: unitDefinitionUnitIdFinal,
     openingQty,
     minStock,
     reorderPoint,
@@ -3057,6 +3076,59 @@ async function downloadMaterialBarcodesZip() {
   URL.revokeObjectURL(link.href);
 }
 
+function setupUnitDefinitionControls(prefix, item) {
+  const unitSelect = document.getElementById(`${prefix}Unit`);
+  const wrap = document.getElementById(`${prefix}UnitDefinitionWrap`);
+  const toggle = document.getElementById(`${prefix}UnitDefinitionToggle`);
+  const fields = document.getElementById(`${prefix}UnitDefinitionFields`);
+  const qtyInput = document.getElementById(`${prefix}UnitDefinitionQty`);
+  const unitSelectDef = document.getElementById(`${prefix}UnitDefinitionUnit`);
+  if (!unitSelect || !wrap || !toggle || !fields || !qtyInput || !unitSelectDef) return;
+
+  renderSelectOptions(unitSelectDef, { type: 'select', optionsPath: 'units' });
+
+  const definitionQty = item?.unitDefinitionQty ?? '';
+  const definitionUnitId = item?.unitDefinitionUnitId ?? '';
+
+  qtyInput.value = definitionQty || '';
+  unitSelectDef.value = definitionUnitId || '';
+
+  if (unitSelect.value) {
+    wrap.classList.remove('hidden');
+  } else {
+    wrap.classList.add('hidden');
+  }
+
+  if (definitionQty || definitionUnitId) {
+    fields.classList.remove('hidden');
+  } else {
+    fields.classList.add('hidden');
+  }
+
+  unitSelect.onchange = () => {
+    if (!unitSelect.value) {
+      wrap.classList.add('hidden');
+      fields.classList.add('hidden');
+      qtyInput.value = '';
+      unitSelectDef.value = '';
+      return;
+    }
+    wrap.classList.remove('hidden');
+  };
+
+  toggle.onclick = () => {
+    const isHidden = fields.classList.contains('hidden');
+    if (isHidden) {
+      fields.classList.remove('hidden');
+      qtyInput.focus();
+    } else {
+      fields.classList.add('hidden');
+      qtyInput.value = '';
+      unitSelectDef.value = '';
+    }
+  };
+}
+
 function openProductModal(product = null) {
   if (!els.productModal) return;
   const form = els.productForm;
@@ -3087,6 +3159,8 @@ function openProductModal(product = null) {
     codeInput.value = generateProductCode();
     barcodeInput.value = generateBarcodeValue();
   }
+
+  setupUnitDefinitionControls('product', product);
 
   renderBarcodePreview();
   els.productModal.classList.remove('hidden');
@@ -3122,6 +3196,8 @@ function saveProduct() {
   const cost = Number(document.getElementById('productCost').value || 0);
   const price = Number(document.getElementById('productPrice').value || 0);
   const unitId = document.getElementById('productUnit').value;
+  const unitDefinitionQtyRaw = document.getElementById('productUnitDefinitionQty')?.value.trim() || '';
+  const unitDefinitionUnitId = document.getElementById('productUnitDefinitionUnit')?.value || '';
   const openingQty = Number(document.getElementById('productOpeningQty').value || 0);
   const minStock = Number(document.getElementById('productMinStock').value || 0);
   const reorderPoint = Number(document.getElementById('productReorderPoint').value || 0);
@@ -3131,6 +3207,12 @@ function saveProduct() {
     els.productError.textContent = window.i18n.t('error');
     return;
   }
+  if ((unitDefinitionQtyRaw && !unitDefinitionUnitId) || (!unitDefinitionQtyRaw && unitDefinitionUnitId)) {
+    els.productError.textContent = window.i18n.t('error');
+    return;
+  }
+  const unitDefinitionQty = unitDefinitionQtyRaw && unitDefinitionUnitId ? unitDefinitionQtyRaw : null;
+  const unitDefinitionUnitIdFinal = unitDefinitionQtyRaw && unitDefinitionUnitId ? unitDefinitionUnitId : null;
 
   const payload = {
     code: editId ? rawCode : normalizeCode(rawCode, 'FG'),
@@ -3140,6 +3222,8 @@ function saveProduct() {
     cost,
     price,
     unitId,
+    unitDefinitionQty,
+    unitDefinitionUnitId: unitDefinitionUnitIdFinal,
     openingQty,
     minStock,
     reorderPoint,
@@ -5728,14 +5812,31 @@ function printProductionLabel(record) {
   if (!record) return;
   const names = getProductionLabelNames(record);
   const barcodeValue = record.productionBarcode || generateBarcodeValue();
+  const labelWidthMm = 50;
+  const labelHeightMm = 30;
+  const offsetXmm = 0;
+  const offsetYmm = 0;
+  const paddingXmm = 4;
+  const paddingYmm = 3;
   const html = `
     <html>
       <head>
         <title>${names.nameAr || names.nameEn || record.itemName || ''}</title>
         <style>
-          @page { size: 50mm 30mm; margin: 0; }
-          body { margin: 0; font-family: "Cairo", sans-serif; }
-          .label { width: 50mm; height: 30mm; padding: 3mm 4mm; box-sizing: border-box; display: flex; flex-direction: column; gap: 1mm; }
+          @page { size: ${labelWidthMm}mm ${labelHeightMm}mm; margin: 0; }
+          html, body { width: ${labelWidthMm}mm; height: ${labelHeightMm}mm; margin: 0; padding: 0; }
+          body { font-family: "Cairo", sans-serif; overflow: hidden; }
+          .sheet { width: ${labelWidthMm}mm; height: ${labelHeightMm}mm; overflow: hidden; }
+          .label {
+            width: ${labelWidthMm}mm;
+            height: ${labelHeightMm}mm;
+            padding: ${paddingYmm}mm ${paddingXmm}mm;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 1mm;
+            transform: translate(${offsetXmm}mm, ${offsetYmm}mm);
+          }
           .title { font-size: 11px; font-weight: 700; text-align: center; line-height: 1.2; }
           .title.en { font-size: 9.5px; font-weight: 600; direction: ltr; }
           .dates { font-size: 9px; font-weight: 700; text-align: center; line-height: 1.2; white-space: nowrap; }
@@ -5745,12 +5846,14 @@ function printProductionLabel(record) {
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
       </head>
       <body>
-        <div class="label">
-          <div class="title">${names.nameAr || record.itemName || ''}</div>
-          <div class="title en">${names.nameEn || record.itemName || ''}</div>
-          <div class="dates">انتاج: ${record.productionDate || '-'} / انتهاء: ${record.expiryDate || '-'}</div>
-          <div class="barcode">
-            <svg id="labelBarcode"></svg>
+        <div class="sheet">
+          <div class="label">
+            <div class="title">${names.nameAr || record.itemName || ''}</div>
+            <div class="title en">${names.nameEn || record.itemName || ''}</div>
+            <div class="dates">انتاج: ${record.productionDate || '-'} / انتهاء: ${record.expiryDate || '-'}</div>
+            <div class="barcode">
+              <svg id="labelBarcode"></svg>
+            </div>
           </div>
         </div>
         <script>

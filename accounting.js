@@ -5,7 +5,7 @@ const firebaseConfig = {
   projectId: "fawatirr-75242",
   storageBucket: "fawatirr-75242.firebasestorage.app",
   messagingSenderId: "1059799456100",
-  appId: "1:1059799456100:web:d624eb6f98aaee78950271",
+  appId: "1:1059799456100:web:d624eb6f98aaee78950271", 
   measurementId: "G-7SQXEJQY6Y"
 };
 

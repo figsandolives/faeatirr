@@ -188,6 +188,52 @@ function normalizeDigits(value) {
     .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)));
 }
 
+function normalizeSearchValue(value) {
+  return normalizeDigits(value).toLowerCase().trim();
+}
+
+const scanState = {
+  buffer: '',
+  lastTime: 0,
+  timer: null
+};
+
+function isEditableTarget(target) {
+  if (!target) return false;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
+}
+
+function handleGlobalScan(event) {
+  if (isEditableTarget(event.target)) return;
+  const key = event.key;
+  if (key === 'Enter' || key === 'Tab') {
+    if (scanState.buffer) {
+      const value = scanState.buffer;
+      scanState.buffer = '';
+      routeScanValue(value);
+    }
+    return;
+  }
+  if (key.length !== 1) return;
+  const now = Date.now();
+  if (now - scanState.lastTime > 80) {
+    scanState.buffer = '';
+  }
+  scanState.buffer += key;
+  scanState.lastTime = now;
+  clearTimeout(scanState.timer);
+  scanState.timer = setTimeout(() => {
+    if (scanState.buffer.length >= 4) {
+      const value = scanState.buffer;
+      scanState.buffer = '';
+      routeScanValue(value);
+    } else {
+      scanState.buffer = '';
+    }
+  }, 120);
+}
+
 function getCustomerLevelLabel(level) {
   if (level === 'vip') return window.i18n.t('level_vip');
   if (level === 'vvip') return window.i18n.t('level_vvip');
@@ -442,6 +488,7 @@ function init() {
   bindProductionDateModal();
   bindProductionLinkModal();
   ensureSeedData();
+  document.addEventListener('keydown', handleGlobalScan);
   initSections();
   watchData();
 
@@ -622,6 +669,7 @@ function handleLogout() {
   if (els.loginCode) els.loginCode.value = '';
   if (els.loginError) els.loginError.textContent = '';
   if (els.loginOverlay) els.loginOverlay.classList.remove('hidden');
+  window.location.href = 'index.html';
 }
 
 function updateUserBadge() {
@@ -784,6 +832,73 @@ function bindNavigation() {
   }
 }
 
+function routeScanValue(value) {
+  const applyTo = (inputId, handler) => {
+    const input = document.getElementById(inputId);
+    if (!input) return false;
+    input.value = value;
+    if (typeof handler === 'function') handler();
+    return true;
+  };
+
+  const isOpen = (id) => {
+    const el = document.getElementById(id);
+    return el && !el.classList.contains('hidden');
+  };
+
+  if (isOpen('issueVoucherModal')) {
+    return applyTo('issueSearchInput', handleIssueBarcodeScan);
+  }
+  if (isOpen('productionVoucherModal')) {
+    return applyTo('productionSearchInput', handleProductionBarcodeScan);
+  }
+  if (isOpen('inventoryCountModal')) {
+    return applyTo('inventorySearchInput', handleInventoryBarcodeScan);
+  }
+  if (isOpen('transferVoucherModal')) {
+    return applyTo('transferSearchInput', handleTransferBarcodeScan);
+  }
+  if (isOpen('stockReturnModal')) {
+    return applyTo('stockReturnSearchInput', handleStockReturnBarcodeScan);
+  }
+  if (isOpen('scrapReturnModal')) {
+    return applyTo('scrapReturnSearchInput', handleScrapReturnBarcodeScan);
+  }
+  if (isOpen('purchaseModal')) {
+    return applyTo('purchaseSearchInput', handlePurchaseBarcodeScan);
+  }
+  if (isOpen('purchaseReceiveModal')) {
+    return applyTo('purchaseReceiveSearchInput', handlePurchaseReceiveBarcodeScan);
+  }
+  if (isOpen('supplierReturnModal')) {
+    return applyTo('supplierReturnSearchInput', handleSupplierReturnBarcodeScan);
+  }
+  if (isOpen('itemCardPicker')) {
+    return applyTo('itemCardSearchInput', handleItemCardBarcodeScan);
+  }
+
+  if (state.currentSection === 'products') {
+    const input = document.getElementById('productSearch');
+    if (input) {
+      input.value = value;
+      state.productFilters.query = value.trim();
+      renderProductsSection();
+      return true;
+    }
+  }
+
+  if (state.currentSection === 'stockMaterials') {
+    const input = document.getElementById('materialSearch');
+    if (input) {
+      input.value = value;
+      state.materialFilters.query = value.trim();
+      renderStockMaterialsSection();
+      return true;
+    }
+  }
+
+  return false;
+}
 function selectSection(sectionId) {
   if (!state.user) return;
   navItems.forEach((item) => item.classList.remove('active'));
@@ -2162,7 +2277,7 @@ function bindProductsSection() {
     renderProductsSection();
   });
   document.getElementById('productSearch').addEventListener('input', (e) => {
-    state.productFilters.query = e.target.value.trim().toLowerCase();
+    state.productFilters.query = e.target.value.trim();
     renderProductsSection();
   });
 }
@@ -2189,10 +2304,11 @@ function renderProductsSection() {
   if (state.productFilters.query) {
     entries = entries.filter((item) => {
       const name = `${item.nameAr || ''} ${item.nameEn || ''} ${item.name || ''}`.toLowerCase();
-      const code = String(item.code || '').toLowerCase();
-      const barcode = String(item.barcode || '').toLowerCase();
-      const query = state.productFilters.query;
-      return name.includes(query) || code.includes(query) || barcode.includes(query);
+      const code = normalizeSearchValue(item.code || '');
+      const barcode = normalizeSearchValue(item.barcode || '');
+      const queryRaw = state.productFilters.query;
+      const query = normalizeSearchValue(queryRaw);
+      return name.includes(String(queryRaw || '').toLowerCase()) || code.includes(query) || barcode.includes(query);
     });
   }
 
@@ -2424,7 +2540,7 @@ function bindStockMaterialsSection() {
     renderStockMaterialsSection();
   });
   document.getElementById('materialSearch').addEventListener('input', (e) => {
-    state.materialFilters.query = e.target.value.trim().toLowerCase();
+    state.materialFilters.query = e.target.value.trim();
     renderStockMaterialsSection();
   });
 }
@@ -2450,10 +2566,11 @@ function renderStockMaterialsSection() {
   if (state.materialFilters.query) {
     entries = entries.filter((item) => {
       const name = `${item.nameAr || ''} ${item.nameEn || ''} ${item.name || ''}`.toLowerCase();
-      const code = String(item.code || '').toLowerCase();
-      const barcode = String(item.barcode || '').toLowerCase();
-      const query = state.materialFilters.query;
-      return name.includes(query) || code.includes(query) || barcode.includes(query);
+      const code = normalizeSearchValue(item.code || '');
+      const barcode = normalizeSearchValue(item.barcode || '');
+      const queryRaw = state.materialFilters.query;
+      const query = normalizeSearchValue(queryRaw);
+      return name.includes(String(queryRaw || '').toLowerCase()) || code.includes(query) || barcode.includes(query);
     });
   }
 
@@ -4418,20 +4535,21 @@ function getUnassignedSupplierItems() {
 }
 
 function filterItemEntries(entries, query) {
-  const q = query.toLowerCase();
+  const q = normalizeSearchValue(query);
+  const nameQuery = String(query || '').toLowerCase();
   return entries.filter((entry) => {
     const name = `${entry.item.nameAr || ''} ${entry.item.nameEn || ''} ${entry.item.name || ''}`.toLowerCase();
-    const code = String(entry.item.code || '').toLowerCase();
-    const barcode = String(entry.item.barcode || '').toLowerCase();
-    return name.includes(q) || code.includes(q) || barcode.includes(q);
+    const code = normalizeSearchValue(entry.item.code || '');
+    const barcode = normalizeSearchValue(entry.item.barcode || '');
+    return name.includes(nameQuery) || code.includes(q) || barcode.includes(q);
   });
 }
 
 function findExactItemMatch(entries, query) {
-  const q = query.toLowerCase();
+  const q = normalizeSearchValue(query);
   const exact = entries.filter((entry) => {
-    const code = String(entry.item.code || '').toLowerCase();
-    const barcode = String(entry.item.barcode || '').toLowerCase();
+    const code = normalizeSearchValue(entry.item.code || '');
+    const barcode = normalizeSearchValue(entry.item.barcode || '');
     return (code && code === q) || (barcode && barcode === q);
   });
   return exact.length === 1 ? exact[0] : null;
@@ -7430,13 +7548,17 @@ function addPurchaseReceiveItem(entry, qty) {
   const existing = state.purchaseReceiveDraft.items.find((item) => item.itemId === entry.id && item.itemType === entry.type);
   if (existing) {
     existing.qty += qty;
+    if (existing.cost === undefined || existing.cost === null) {
+      existing.cost = Number(entry.item?.cost || 0);
+    }
   } else {
     state.purchaseReceiveDraft.items.push({
       itemId: entry.id,
       itemType: entry.type,
       name: getLocalizedName(entry.item),
       qty,
-      unitId: entry.item.unitId || null
+      unitId: entry.item.unitId || null,
+      cost: Number(entry.item?.cost || 0)
     });
   }
   renderPurchaseReceiveItems();

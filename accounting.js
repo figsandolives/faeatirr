@@ -5815,7 +5815,7 @@ function printProductionLabel(record) {
   const labelWidthMm = 50;
   const labelHeightMm = 30;
   const offsetXmm = 0;
-  const offsetYmm = -9;
+  const offsetYmm = -15;
   const contentShiftYmm = 4;
   const paddingXmm = 4;
   const paddingYmm = 3;

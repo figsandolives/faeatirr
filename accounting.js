@@ -5811,6 +5811,7 @@ function getProductionLabelNames(record) {
 const labelPrintSettings = {
   widthMm: 50,
   heightMm: 25,
+  rotateDeg: -90,
   offsetXmm: 0,
   offsetYmm: 0,
   contentShiftYmm: 0,
@@ -5845,12 +5846,15 @@ function buildProductionLabelHtml(record) {
   const {
     widthMm,
     heightMm,
+    rotateDeg,
     offsetXmm,
     offsetYmm,
     contentShiftYmm,
     paddingXmm,
     paddingYmm
   } = labelPrintSettings;
+  const rotateShiftXmm = rotateDeg === -90 ? heightMm : rotateDeg === 180 ? widthMm : 0;
+  const rotateShiftYmm = rotateDeg === 90 ? widthMm : rotateDeg === 180 ? heightMm : 0;
 
   return `
     <html>
@@ -5871,6 +5875,17 @@ function buildProductionLabelHtml(record) {
             flex-direction: column;
             transform: translate(${offsetXmm}mm, ${offsetYmm}mm);
           }
+          .label-shift {
+            width: 100%;
+            height: 100%;
+            transform: translate(${rotateShiftXmm}mm, ${rotateShiftYmm}mm);
+          }
+          .label-rotator {
+            width: 100%;
+            height: 100%;
+            transform: rotate(${rotateDeg}deg);
+            transform-origin: top left;
+          }
           .label-content {
             display: flex;
             flex-direction: column;
@@ -5888,11 +5903,15 @@ function buildProductionLabelHtml(record) {
       <body>
         <div class="sheet">
           <div class="label">
-            <div class="label-content">
-              <div class="title">${names.nameAr || record.itemName || ''}</div>
-              <div class="title en">${names.nameEn || record.itemName || ''}</div>
-              <div class="dates">انتاج: ${record.productionDate || '-'} / انتهاء: ${record.expiryDate || '-'}</div>
-              <div class="barcode">${barcodeSvg}</div>
+            <div class="label-shift">
+              <div class="label-rotator">
+                <div class="label-content">
+                  <div class="title">${names.nameAr || record.itemName || ''}</div>
+                  <div class="title en">${names.nameEn || record.itemName || ''}</div>
+                  <div class="dates">انتاج: ${record.productionDate || '-'} / انتهاء: ${record.expiryDate || '-'}</div>
+                  <div class="barcode">${barcodeSvg}</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

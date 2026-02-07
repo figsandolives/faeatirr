@@ -5814,11 +5814,12 @@ const labelPrintSettings = {
   rotateDeg: 0,
   offsetXmm: 0,
   offsetYmm: 0,
-  contentShiftYmm: 0,
+  contentShiftXmm: -3.4,
+  contentShiftYmm: 3.5,
   paddingXmm: 3,
-  paddingYmm: 2.5,
-  barcodeHeight: 18,
-  barcodeWidth: 1.0,
+  paddingYmm: 2.2,
+  barcodeHeight: 16,
+  barcodeWidth: 0.9,
   barcodeFontSize: 7,
   barcodeTextMargin: 1
 };
@@ -5849,6 +5850,7 @@ function buildProductionLabelHtml(record) {
     rotateDeg,
     offsetXmm,
     offsetYmm,
+    contentShiftXmm,
     contentShiftYmm,
     paddingXmm,
     paddingYmm
@@ -5887,13 +5889,13 @@ function buildProductionLabelHtml(record) {
           .label-content {
             display: flex;
             flex-direction: column;
-            gap: 0.6mm;
+            gap: 0.5mm;
             height: 100%;
-            transform: translateY(${contentShiftYmm}mm);
+            transform: translate(${contentShiftXmm}mm, ${contentShiftYmm}mm);
           }
-          .title { font-size: 10px; font-weight: 700; text-align: center; line-height: 1.15; }
-          .title.en { font-size: 9px; font-weight: 600; direction: ltr; }
-          .dates { font-size: 8px; font-weight: 700; text-align: center; line-height: 1.1; white-space: nowrap; }
+          .title { font-size: 11px; font-weight: 700; text-align: center; line-height: 1.15; }
+          .title.en { font-size: 10px; font-weight: 600; direction: ltr; }
+          .dates { font-size: 9px; font-weight: 700; text-align: center; line-height: 1.1; white-space: nowrap; }
           .barcode { margin-top: auto; text-align: center; }
           .barcode svg { width: 100%; }
         </style>

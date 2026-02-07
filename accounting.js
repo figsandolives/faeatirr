@@ -5853,8 +5853,11 @@ function buildProductionLabelHtml(record) {
     paddingXmm,
     paddingYmm
   } = labelPrintSettings;
-  const rotateShiftXmm = rotateDeg === -90 ? heightMm : rotateDeg === 180 ? widthMm : 0;
-  const rotateShiftYmm = rotateDeg === 90 ? widthMm : rotateDeg === 180 ? heightMm : 0;
+  const isRotated = Math.abs(rotateDeg) === 90;
+  const rotatorWidthMm = isRotated ? heightMm : widthMm;
+  const rotatorHeightMm = isRotated ? widthMm : heightMm;
+  const rotateShiftXmm = rotateDeg === 90 ? rotatorHeightMm : rotateDeg === 180 ? rotatorWidthMm : 0;
+  const rotateShiftYmm = rotateDeg === -90 ? rotatorWidthMm : rotateDeg === 180 ? rotatorHeightMm : 0;
 
   return `
     <html>
@@ -5875,15 +5878,10 @@ function buildProductionLabelHtml(record) {
             flex-direction: column;
             transform: translate(${offsetXmm}mm, ${offsetYmm}mm);
           }
-          .label-shift {
-            width: 100%;
-            height: 100%;
-            transform: translate(${rotateShiftXmm}mm, ${rotateShiftYmm}mm);
-          }
           .label-rotator {
-            width: 100%;
-            height: 100%;
-            transform: rotate(${rotateDeg}deg);
+            width: ${rotatorWidthMm}mm;
+            height: ${rotatorHeightMm}mm;
+            transform: translate(${rotateShiftXmm}mm, ${rotateShiftYmm}mm) rotate(${rotateDeg}deg);
             transform-origin: top left;
           }
           .label-content {
@@ -5903,14 +5901,12 @@ function buildProductionLabelHtml(record) {
       <body>
         <div class="sheet">
           <div class="label">
-            <div class="label-shift">
-              <div class="label-rotator">
-                <div class="label-content">
-                  <div class="title">${names.nameAr || record.itemName || ''}</div>
-                  <div class="title en">${names.nameEn || record.itemName || ''}</div>
-                  <div class="dates">انتاج: ${record.productionDate || '-'} / انتهاء: ${record.expiryDate || '-'}</div>
-                  <div class="barcode">${barcodeSvg}</div>
-                </div>
+            <div class="label-rotator">
+              <div class="label-content">
+                <div class="title">${names.nameAr || record.itemName || ''}</div>
+                <div class="title en">${names.nameEn || record.itemName || ''}</div>
+                <div class="dates">انتاج: ${record.productionDate || '-'} / انتهاء: ${record.expiryDate || '-'}</div>
+                <div class="barcode">${barcodeSvg}</div>
               </div>
             </div>
           </div>

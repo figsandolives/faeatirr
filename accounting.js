@@ -5811,7 +5811,7 @@ function getProductionLabelNames(record) {
 const labelPrintSettings = {
   widthMm: 50,
   heightMm: 25,
-  rotateDeg: 0,
+  rotateDeg: 90,
   offsetXmm: 0,
   offsetYmm: 0,
   contentShiftXmm: -3.4,

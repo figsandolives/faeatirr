@@ -5544,7 +5544,7 @@ function getFilteredItemCardMovements() {
   const movements = Array.isArray(state.itemCard?.movements) ? state.itemCard.movements : [];
   const selected = getItemCardSelectedMovementTypes();
   const selectedSet = new Set(selected);
-  return movements.filter((move) => selectedSet.has(move.docType));
+  return movements.filter((move) => move.isOpening || selectedSet.has(move.docType));
 }
 
 function renderItemCardMovementFilterOptions() {
@@ -6043,8 +6043,7 @@ function handleItemCardSearch() {
       state.itemCard.branchId,
       state.itemCard.fromDate,
       state.itemCard.toDate
-    ))
-    .sort((a, b) => (a.date || 0) - (b.date || 0));
+    ));
   state.itemCard.movements = movements;
   renderItemCardMovements();
 }
@@ -6068,7 +6067,6 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     if (!key) return;
     if (!ordersByNumber[key]) ordersByNumber[key] = { id, ...order };
   });
-  const issuedInvoices = new Set();
 
   const addMove = (record, docType, qtyChange, docNumber, typeLabel, date, price, affectsBalance = true, extra = {}) => {
     moves.push({
@@ -6107,9 +6105,6 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
         ? window.i18n.t('issue_production')
         : window.i18n.t('issue_order');
       const invoiceNumber = issue.issueType === 'order' ? issue.invoiceNumber || issue.issueNumber : issue.issueNumber;
-      if (issue.issueType === 'order' && issue.invoiceNumber) {
-        issuedInvoices.add(normalizeDigits(String(issue.invoiceNumber)).trim());
-      }
       const orderKey = issue.issueType === 'order' ? normalizeDigits(String(issue.invoiceNumber || '')).trim() : '';
       const order = orderKey ? ordersByNumber[orderKey] : null;
       let price = null;
@@ -6120,7 +6115,16 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
         });
         price = orderItem ? Number(orderItem.price || 0) : null;
       }
-      addMove(record, 'issue', -Number(item.qty || 0), invoiceNumber, typeLabel, issue.createdAt, price);
+      addMove(
+        record,
+        'issue',
+        -Number(item.qty || 0),
+        invoiceNumber,
+        typeLabel,
+        issue.createdAt,
+        price,
+        issue.issueType === 'production'
+      );
     });
   });
 
@@ -6128,7 +6132,6 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     if (order.branchId !== branchId) return;
     const orderNumber = order.orderNumber || order.invoiceNumber || id;
     const invoiceKey = normalizeDigits(String(orderNumber)).trim();
-    if (invoiceKey && issuedInvoices.has(invoiceKey)) return;
     normalizeItems(order.items).forEach((item) => {
       const lineId = item.productId || item.itemId || item.id;
       if (itemType !== 'product' || String(lineId) !== String(itemId)) return;
@@ -6293,11 +6296,40 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
   const end = toDate ? new Date(toDate) : null;
   if (start) start.setHours(0, 0, 0, 0);
   if (end) end.setHours(23, 59, 59, 999);
+  const startTime = start ? start.getTime() : null;
+  const endTime = end ? end.getTime() : null;
+
+  let openingBalance = itemData ? getItemStock(itemData, branchId) : 0;
+  if (startTime !== null) {
+    moves.forEach((move) => {
+      if (move.date >= startTime && move.affectsBalance !== false) {
+        openingBalance -= Number(move.qtyChange || 0);
+      }
+    });
+  }
+
   const filtered = moves.filter((move) => {
-    if (!start || !end) return true;
-    return move.date >= start.getTime() && move.date <= end.getTime();
+    if (startTime === null || endTime === null) return true;
+    return move.date >= startTime && move.date <= endTime;
   });
-  return filtered.reverse();
+  const chronological = filtered.reverse();
+  const openingMove = {
+    record: null,
+    docType: 'opening',
+    itemName,
+    itemCode,
+    qtyChange: null,
+    docNumber: '-',
+    typeLabel: window.i18n.t('opening_qty'),
+    date: startTime || (chronological[0]?.date || Date.now()),
+    price: null,
+    affectsBalance: false,
+    purchaseInvoiceNumber: '-',
+    invoiceValue: null,
+    balance: openingBalance,
+    isOpening: true
+  };
+  return [openingMove, ...chronological];
 }
 
 function renderItemCardMovements() {

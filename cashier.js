@@ -3228,6 +3228,7 @@ function printThermalReceipt(order) {
   const deliveryFee = Number(order.deliveryFee || 0);
   const discount = Number(order.discount || 0);
   const total = Number(order.total || 0);
+  const unitHeader = window.i18n.getLanguage() === 'ar' ? 'الوحدة' : 'Unit';
   overlay.innerHTML = `
     <div class="modal-content p-4" style="background:#f3f4f6; width:min(92vw,820px); max-height:92vh; overflow:auto; border-radius:10px;">
       <div class="thermal-invoice" style="width:72mm; margin:0 auto; padding:10px; background:#fff; border-radius:8px;">
@@ -3278,7 +3279,8 @@ function printThermalReceipt(order) {
             <tr>
               <th style="text-align:right; border-bottom:1px solid #000; padding:4px 0;">${window.i18n.t('product_single')}</th>
               <th style="text-align:center; width:42px; border-bottom:1px solid #000; padding:4px 0;">${window.i18n.t('quantity')}</th>
-              <th style="text-align:left; width:64px; border-bottom:1px solid #000; padding:4px 0;">${window.i18n.t('price')}</th>
+              <th style="text-align:center; width:70px; border-bottom:1px solid #000; padding:4px 0;">${unitHeader}</th>
+              <th style="text-align:left; width:70px; border-bottom:1px solid #000; padding:4px 0;">${window.i18n.t('total')}</th>
             </tr>
           </thead>
           <tbody>
@@ -3292,6 +3294,7 @@ function printThermalReceipt(order) {
                   ${item.note ? `<div style="font-size:10px; color:#0066cc; margin-top:2px; font-weight:600;">${escapeHtml(item.note)}</div>` : ''}
                 </td>
                 <td style="text-align:center; font-weight:700; padding:4px 0; border-bottom:1px dotted #eee;">${escapeHtml(formatNumber(item.qty))}</td>
+                <td style="text-align:center; padding:4px 0; border-bottom:1px dotted #eee;">${escapeHtml(formatCurrency(Number(item.price || 0)))}</td>
                 <td style="text-align:left; padding:4px 0; border-bottom:1px dotted #eee;">${escapeHtml(formatCurrency(Number(item.price || 0) * Number(item.qty || 0)))}</td>
               </tr>
             `).join('')}

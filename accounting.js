@@ -1,12 +1,6 @@
 const firebaseConfig = {
-  apiKey: "AIzaSyBdDFbWuByBWsDqEmC18nSlIKG6QZ5s0wA",
-  authDomain: "fawatirr-75242.firebaseapp.com",
-  databaseURL: "https://fawatirr-75242-default-rtdb.firebaseio.com",
-  projectId: "fawatirr-75242",
-  storageBucket: "fawatirr-75242.firebasestorage.app",
-  messagingSenderId: "1059799456100",
-  appId: "1:1059799456100:web:d624eb6f98aaee78950271", 
-  measurementId: "G-7SQXEJQY6Y"
+  supabaseUrl: window.__SUPABASE_CONFIG__?.url || '',
+  supabaseAnonKey: window.__SUPABASE_CONFIG__?.anonKey || ''
 };
 
 const app = firebase.apps.length ? firebase.app() : firebase.initializeApp(firebaseConfig);
@@ -18,6 +12,7 @@ const state = {
   user: null,
   role: null,
   cache: {},
+  pendingDataRefresh: false,
   currentSection: 'reports',
   reports: {
     view: 'dashboard',
@@ -67,7 +62,16 @@ const state = {
       toDate: '',
       query: '',
       sortKey: 'total',
-      sortDir: 'desc'
+      sortDir: 'desc',
+      mode: 'top',
+      limit: 10,
+      dashboardRunRequested: false
+    },
+    orderSalesFilters: {
+      fromDate: '',
+      toDate: '',
+      branchId: 'all',
+      query: ''
     },
     details: {
       productId: null,
@@ -335,8 +339,97 @@ function normalizeDigits(value) {
     .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)));
 }
 
+function normalizeArabicSearchText(value) {
+  return String(value || '')
+    .replace(/[\u0640]/g, '')
+    .replace(/[\u064B-\u0652\u0670]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/ؤ/g, 'و')
+    .replace(/ئ/g, 'ي');
+}
+
 function normalizeSearchValue(value) {
-  return normalizeDigits(value).toLowerCase().trim();
+  return normalizeArabicSearchText(normalizeDigits(value))
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function debounce(fn, wait = 280) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), wait);
+  };
+}
+
+function bindDebouncedQueryInput(input, handler, wait = 280) {
+  if (!input || typeof handler !== 'function') return;
+  const run = debounce(() => handler(input.value || ''), wait);
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    handler(input.value || '');
+  });
+}
+
+function normalizeNumericInputValue(value) {
+  let text = normalizeDigits(value);
+  text = text.replace(/[٫٬،]/g, '.').replace(/,/g, '.').replace(/[−]/g, '-');
+  text = text.replace(/[^0-9.\-]/g, '');
+  text = text.replace(/(?!^)-/g, '');
+  const firstDot = text.indexOf('.');
+  if (firstDot !== -1) {
+    text = text.slice(0, firstDot + 1) + text.slice(firstDot + 1).replace(/\./g, '');
+  }
+  return text;
+}
+
+function normalizeInputDigitsInPlace(input) {
+  if (!input || typeof input.value !== 'string') return;
+  if (input.type === 'number') {
+    const normalized = normalizeNumericInputValue(input.value);
+    if (normalized !== input.value) input.value = normalized;
+    return;
+  }
+  const normalized = normalizeDigits(input.value);
+  if (normalized !== input.value) input.value = normalized;
+}
+
+function prepareNumericInput(input) {
+  if (!input || input.dataset.numericReady === '1') return;
+  input.dataset.numericReady = '1';
+  if (input.type === 'number') {
+    input.step = 'any';
+    input.setAttribute('inputmode', 'decimal');
+  }
+  input.addEventListener('input', () => normalizeInputDigitsInPlace(input));
+  input.addEventListener('change', () => normalizeInputDigitsInPlace(input));
+  normalizeInputDigitsInPlace(input);
+}
+
+function initNumericInputEnhancer() {
+  const applyOnRoot = (root) => {
+    if (!root || !(root instanceof Element || root instanceof Document)) return;
+    root.querySelectorAll?.('input, textarea').forEach((input) => prepareNumericInput(input));
+  };
+
+  applyOnRoot(document);
+  if (!document.body || document.body.dataset.numericObserverReady === '1') return;
+  document.body.dataset.numericObserverReady = '1';
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (!(node instanceof Element)) return;
+        if (node.matches('input, textarea')) prepareNumericInput(node);
+        applyOnRoot(node);
+      });
+    });
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 const scanState = {
@@ -504,6 +597,13 @@ const listConfigs = [
 
 let currentDiscountType = 'code';
 const MANAGER_DISCOUNT_ID = 'managerDiscount';
+const DEFAULT_MANAGER_USER_ID = 'manager';
+const DEFAULT_MANAGER_USER = {
+  name: 'غير معرف',
+  role: 'manager',
+  code: '123456',
+  active: true
+};
 
 const sectionGroups = {
   itemCards: 'inventory',
@@ -642,7 +742,11 @@ function init() {
   ensureSeedData();
   document.addEventListener('keydown', handleGlobalScan);
   initSections();
+  initNumericInputEnhancer();
   watchData();
+  document.addEventListener('focusout', () => setTimeout(flushPendingDataRefresh, 0));
+  document.addEventListener('click', () => setTimeout(flushPendingDataRefresh, 0));
+  window.addEventListener('focus', () => flushPendingDataRefresh());
 
   document.addEventListener('languageChanged', () => {
     rebuildSections();
@@ -684,14 +788,19 @@ function initPresence(page) {
 
 function ensureSeedData() {
   const usersRef = db.ref('users');
-  usersRef.child('manager').once('value').then((snap) => {
+  usersRef.child(DEFAULT_MANAGER_USER_ID).once('value').then((snap) => {
     if (!snap.exists()) {
-      usersRef.child('manager').set({
-        name: 'غير معرف',
-        role: 'manager',
-        code: '123456',
-        active: true
-      });
+      usersRef.child(DEFAULT_MANAGER_USER_ID).set({ ...DEFAULT_MANAGER_USER });
+      return;
+    }
+    const current = snap.val() || {};
+    const updates = {};
+    if (current.role !== 'manager') updates.role = 'manager';
+    if (current.active !== true) updates.active = true;
+    if (!String(current.name || '').trim()) updates.name = DEFAULT_MANAGER_USER.name;
+    if (!String(current.code || '').trim()) updates.code = DEFAULT_MANAGER_USER.code;
+    if (Object.keys(updates).length) {
+      usersRef.child(DEFAULT_MANAGER_USER_ID).update(updates);
     }
   }).catch(() => {});
 }
@@ -775,13 +884,13 @@ function findUserByCode(code) {
         return { id: userId, ...snap.val()[userId] };
       }
     }
-    if (codeStr === '123456') {
-      return db.ref('users/manager').once('value').then((snap) => {
+    if (codeStr === DEFAULT_MANAGER_USER.code) {
+      return db.ref(`users/${DEFAULT_MANAGER_USER_ID}`).once('value').then((snap) => {
         if (snap.exists()) {
-          return { id: 'manager', ...snap.val() };
+          return { id: DEFAULT_MANAGER_USER_ID, ...snap.val() };
         }
-        const managerData = { name: 'غير معرف', role: 'manager', code: '123456', active: true };
-        return db.ref('users/manager').set(managerData).then(() => ({ id: 'manager', ...managerData }));
+        const managerData = { ...DEFAULT_MANAGER_USER };
+        return db.ref(`users/${DEFAULT_MANAGER_USER_ID}`).set(managerData).then(() => ({ id: DEFAULT_MANAGER_USER_ID, ...managerData }));
       });
     }
     return null;
@@ -1718,7 +1827,16 @@ function ensureReportsState() {
         toDate: '',
         query: '',
         sortKey: 'total',
-        sortDir: 'desc'
+        sortDir: 'desc',
+        mode: 'top',
+        limit: 10,
+        dashboardRunRequested: false
+      },
+      orderSalesFilters: {
+        fromDate: '',
+        toDate: '',
+        branchId: 'all',
+        query: ''
       },
       details: {
         productId: null,
@@ -1795,9 +1913,29 @@ function ensureReportsState() {
       toDate: '',
       query: '',
       sortKey: 'total',
-      sortDir: 'desc'
+      sortDir: 'desc',
+      mode: 'top',
+      limit: 10,
+      dashboardRunRequested: false
     };
   }
+  if (!['top', 'bottom'].includes(state.reports.topProductsFilters.mode)) state.reports.topProductsFilters.mode = 'top';
+  if (![10, 50, 100].includes(Number(state.reports.topProductsFilters.limit))) state.reports.topProductsFilters.limit = 10;
+  if (state.reports.topProductsFilters.dashboardRunRequested === undefined) {
+    state.reports.topProductsFilters.dashboardRunRequested = false;
+  }
+  if (!state.reports.orderSalesFilters) {
+    state.reports.orderSalesFilters = {
+      fromDate: '',
+      toDate: '',
+      branchId: 'all',
+      query: ''
+    };
+  }
+  if (state.reports.orderSalesFilters.fromDate === undefined) state.reports.orderSalesFilters.fromDate = '';
+  if (state.reports.orderSalesFilters.toDate === undefined) state.reports.orderSalesFilters.toDate = '';
+  if (!state.reports.orderSalesFilters.branchId) state.reports.orderSalesFilters.branchId = 'all';
+  if (state.reports.orderSalesFilters.query === undefined) state.reports.orderSalesFilters.query = '';
   if (!Array.isArray(state.reports.salesFilters.productIds)) {
     state.reports.salesFilters.productIds = [];
   }
@@ -1850,6 +1988,10 @@ function renderReportsSection() {
   }
   if (state.reports.view === 'returns') {
     renderReturnsReportView(section);
+    return;
+  }
+  if (state.reports.view === 'orderSales') {
+    renderOrderSalesReportView(section);
     return;
   }
   if (state.reports.view === 'topProducts') {
@@ -2600,6 +2742,19 @@ function renderReportsDashboardView(section) {
   }
   const compareRange = buildCompareRange(range, compareValue, state.reports.date);
   const metrics = buildDashboardMetrics(range, compareRange, state.reports.branchId);
+  const topProductsFilters = state.reports.topProductsFilters || {};
+  const topProductsMode = topProductsFilters.mode === 'bottom' ? 'bottom' : 'top';
+  const topProductsLimit = [10, 50, 100].includes(Number(topProductsFilters.limit))
+    ? Number(topProductsFilters.limit)
+    : 10;
+  const topProductsResult = buildTopProductsReportRows({
+    ...topProductsFilters,
+    mode: topProductsMode,
+    limit: topProductsLimit
+  });
+  const topProductsRows = topProductsResult.rows || [];
+  const topProductsBranchColumns = topProductsResult.branchColumns || [];
+  const topProductsChartMarkup = renderTopProductsCreativeChart(topProductsRows, topProductsBranchColumns);
 
   section.innerHTML = `
     <div class="card">
@@ -2623,10 +2778,9 @@ function renderReportsDashboardView(section) {
         </div>
       </div>
     </div>
-    <div class="grid three">
+    <div class="grid two">
       ${getReportMetricCard('orders', window.i18n.t('orders'), metrics.totals.orders, metrics.compareTotals.orders, metrics.series.orders, metrics.compareSeries.orders, true, range, compareRange)}
       ${getReportMetricCard('revenue', window.i18n.t('reports_revenue'), metrics.totals.revenue, metrics.compareTotals.revenue, metrics.series.revenue, metrics.compareSeries.revenue, false, range, compareRange)}
-      ${getReportMetricCard('netRevenue', window.i18n.t('reports_net_revenue'), metrics.totals.netRevenue, metrics.compareTotals.netRevenue, metrics.series.netRevenue, metrics.compareSeries.netRevenue, false, range, compareRange)}
     </div>
     <div class="card">
       <h3>${window.i18n.t('reports_available')}</h3>
@@ -2634,7 +2788,27 @@ function renderReportsDashboardView(section) {
         <button id="openSalesReportBtn" class="btn primary">${window.i18n.t('sales')}</button>
         <button id="openCashierSalesReportBtn" class="btn ghost">${window.i18n.t('reports_cashier_sales')}</button>
         <button id="openReturnsReportBtn" class="btn ghost">${window.i18n.t('reports_returns')}</button>
-        <button id="openTopProductsReportBtn" class="btn ghost">${window.i18n.t('reports_top_products')}</button>
+        <button id="openOrderSalesReportBtn" class="btn ghost">${window.i18n.t('reports_orders_sales')}</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <h3>${window.i18n.t('reports_top_products_chart_title')}</h3>
+        <div class="row" style="gap: 8px; flex-wrap: wrap;">
+          <select id="dashboardTopProductsMode" class="input" style="max-width: 220px;">
+            <option value="top" ${topProductsMode === 'top' ? 'selected' : ''}>${window.i18n.t('reports_top_products_mode_top')}</option>
+            <option value="bottom" ${topProductsMode === 'bottom' ? 'selected' : ''}>${window.i18n.t('reports_top_products_mode_bottom')}</option>
+          </select>
+          <select id="dashboardTopProductsLimit" class="input" style="max-width: 140px;">
+            <option value="10" ${topProductsLimit === 10 ? 'selected' : ''}>10</option>
+            <option value="50" ${topProductsLimit === 50 ? 'selected' : ''}>50</option>
+            <option value="100" ${topProductsLimit === 100 ? 'selected' : ''}>100</option>
+          </select>
+          <button id="openTopProductsReportBtn" class="btn primary">${window.i18n.t('show_report')}</button>
+        </div>
+      </div>
+      <div class="top-products-chart-card" style="margin-top: 12px;">
+        ${topProductsChartMarkup}
       </div>
     </div>
   `;
@@ -2746,10 +2920,35 @@ function renderReportsDashboardView(section) {
     });
   }
 
+  const openOrderSalesReportBtn = document.getElementById('openOrderSalesReportBtn');
+  if (openOrderSalesReportBtn) {
+    openOrderSalesReportBtn.addEventListener('click', () => {
+      state.reports.view = 'orderSales';
+      renderReportsSection();
+    });
+  }
+
   const openTopProductsReportBtn = document.getElementById('openTopProductsReportBtn');
   if (openTopProductsReportBtn) {
     openTopProductsReportBtn.addEventListener('click', () => {
       state.reports.view = 'topProducts';
+      renderReportsSection();
+    });
+  }
+
+  const dashboardTopProductsMode = document.getElementById('dashboardTopProductsMode');
+  if (dashboardTopProductsMode) {
+    dashboardTopProductsMode.addEventListener('change', () => {
+      state.reports.topProductsFilters.mode = dashboardTopProductsMode.value === 'bottom' ? 'bottom' : 'top';
+      renderReportsSection();
+    });
+  }
+
+  const dashboardTopProductsLimit = document.getElementById('dashboardTopProductsLimit');
+  if (dashboardTopProductsLimit) {
+    dashboardTopProductsLimit.addEventListener('change', () => {
+      const nextLimit = Number(dashboardTopProductsLimit.value || 10);
+      state.reports.topProductsFilters.limit = [10, 50, 100].includes(nextLimit) ? nextLimit : 10;
       renderReportsSection();
     });
   }
@@ -2906,7 +3105,7 @@ function renderMetricDetailsView(section) {
         <div class="card light"><strong>${window.i18n.t('reports_total_invoices')}</strong><div class="report-total-value">${details.totals.invoices}</div></div>
         <div class="card light"><strong>${window.i18n.t('reports_total_products_amount')}</strong><div class="report-total-value">${formatMoney(details.totals.products)}</div></div>
         <div class="card light"><strong>${window.i18n.t('reports_total_delivery_amount')}</strong><div class="report-total-value">${formatMoney(details.totals.delivery)}</div></div>
-        <div class="card light"><strong>${window.i18n.t('grand_total')}</strong><div class="report-total-value">${formatMoney(details.totals.total)}</div></div>
+        <div class="card light"><strong>${window.i18n.t('total_sales')}</strong><div class="report-total-value">${formatMoney(details.totals.total)}</div></div>
         <div class="card light"><strong>${window.i18n.t('reports_total_net_revenue')}</strong><div class="report-total-value">${formatMoney(details.totals.netRevenue)}</div></div>
       </div>
       <div class="grid three" style="margin-top: 12px;">
@@ -3027,8 +3226,8 @@ function renderMetricDetailsView(section) {
 
   const queryInput = document.getElementById('metricDetailsQuery');
   if (queryInput) {
-    queryInput.addEventListener('input', () => {
-      state.reports.metricDetails.query = queryInput.value.trim();
+    bindDebouncedQueryInput(queryInput, (value) => {
+      state.reports.metricDetails.query = String(value || '').trim();
       renderReportsSection();
     });
   }
@@ -3437,8 +3636,8 @@ function renderSalesReportView(section) {
 
   const queryInput = document.getElementById('salesReportQuery');
   if (queryInput) {
-    queryInput.addEventListener('input', () => {
-      state.reports.salesFilters.query = queryInput.value.trim();
+    bindDebouncedQueryInput(queryInput, (value) => {
+      state.reports.salesFilters.query = String(value || '').trim();
       state.reports.salesFilters.selectedRowKeys = [];
       state.reports.salesFilters.autoSelectAll = true;
       renderReportsSection();
@@ -4011,7 +4210,7 @@ function renderCashierSalesDetailsView(section) {
       <div class="grid three" style="margin-top: 12px;">
         <div class="card light"><strong>${window.i18n.t('reports_total_products_amount')}</strong><div class="report-total-value">${formatMoney(totals.products)}</div></div>
         <div class="card light"><strong>${window.i18n.t('reports_total_delivery_amount')}</strong><div class="report-total-value">${formatMoney(totals.delivery)}</div></div>
-        <div class="card light"><strong>${window.i18n.t('grand_total')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
+        <div class="card light"><strong>${window.i18n.t('total_sales')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
       </div>
     </div>
     <div class="card">
@@ -4295,8 +4494,8 @@ function renderReturnsReportView(section) {
 
   const queryInput = document.getElementById('returnsQuery');
   if (queryInput) {
-    queryInput.addEventListener('input', () => {
-      state.reports.returnsFilters.query = queryInput.value.trim();
+    bindDebouncedQueryInput(queryInput, (value) => {
+      state.reports.returnsFilters.query = String(value || '').trim();
       renderReportsSection();
     });
   }
@@ -4400,12 +4599,106 @@ function renderReturnsReportView(section) {
   }
 }
 
-function buildTopProductsReportRows(filters) {
+function getTopProductsBranchColumns() {
   const branches = state.cache.branches || {};
+  const entries = Object.entries(branches).map(([id, branch]) => ({
+    id,
+    name: getLocalizedName(branch) || '-',
+    isMain: !!branch?.isMain,
+    search: normalizeSearchValue(`${branch?.nameAr || ''} ${branch?.nameEn || ''} ${branch?.name || ''}`)
+  }));
+  const used = new Set();
+  const pick = (predicate) => {
+    const found = entries.find((entry) => !used.has(entry.id) && predicate(entry));
+    if (!found) return null;
+    used.add(found.id);
+    return found;
+  };
+  const hasAnyKeyword = (entry, keywords) => keywords.some((keyword) => entry.search.includes(normalizeSearchValue(keyword)));
+
+  const mainEntry = pick((entry) => entry.isMain) || pick((entry) => hasAnyKeyword(entry, ['الفرع الرئيسي', 'رئيسي', 'main', 'head']));
+  const yarmoukEntry = pick((entry) => hasAnyKeyword(entry, ['اليرموك', 'يرموك', 'yarmouk']));
+  const abuHasaniyaEntry = pick((entry) => hasAnyKeyword(entry, ['ابو الحصانيه', 'ابو الحصانية', 'الحصانيه', 'abuhasaniya', 'abu hasaniya']));
+
+  return [
+    {
+      key: 'main',
+      id: mainEntry?.id || '',
+      label: window.i18n.t('reports_main_branch_sales'),
+      branchName: mainEntry?.name || window.i18n.t('main_branch')
+    },
+    {
+      key: 'yarmouk',
+      id: yarmoukEntry?.id || '',
+      label: window.i18n.t('reports_yarmouk_branch_sales'),
+      branchName: yarmoukEntry?.name || 'اليرموك'
+    },
+    {
+      key: 'abuHasaniya',
+      id: abuHasaniyaEntry?.id || '',
+      label: window.i18n.t('reports_abu_hasaniya_branch_sales'),
+      branchName: abuHasaniyaEntry?.name || 'أبو الحصانية'
+    }
+  ];
+}
+
+function renderTopProductsCreativeChart(rows, branchColumns) {
+  if (!rows.length) {
+    return `<div class="top-products-chart-empty">${window.i18n.t('no_data')}</div>`;
+  }
+  const maxTotal = Math.max(...rows.map((row) => Number(row.totalSales || 0)), 1);
+  const legend = branchColumns.map((column, index) => `
+    <span class="top-products-legend-item">
+      <span class="top-products-legend-dot tone-${index + 1}"></span>
+      ${column.label}
+    </span>
+  `).join('');
+
+  const rowsHtml = rows.map((row, index) => {
+    const totalValue = Number(row.totalSales || 0);
+    const totalPercent = maxTotal > 0 ? Math.min(100, (totalValue / maxTotal) * 100) : 0;
+    const visiblePercent = totalValue > 0 ? Math.max(totalPercent, 4) : 0;
+    const segments = branchColumns.map((column, colorIndex) => {
+      const branchValue = column.id ? Number(row.branchSales?.[column.id] || 0) : 0;
+      const width = totalValue > 0 ? Math.max(0, Math.min(100, (branchValue / totalValue) * 100)) : 0;
+      return `<span class="top-products-segment tone-${colorIndex + 1}" style="width:${width.toFixed(2)}%"></span>`;
+    }).join('');
+    const showNameEn = row.nameEn && normalizeSearchValue(row.nameEn) !== normalizeSearchValue(row.nameAr || '');
+    return `
+      <div class="top-products-chart-row">
+        <div class="top-products-rank">${index + 1}</div>
+        <div class="top-products-product-name">
+          <div class="name-ar">${row.nameAr || '-'}</div>
+          <div class="name-en">${showNameEn ? row.nameEn : '-'}</div>
+        </div>
+        <div class="top-products-bar-wrap">
+          <div class="top-products-bar-track">
+            <div class="top-products-bar-total" style="width:${visiblePercent.toFixed(2)}%"></div>
+            <div class="top-products-bar-branches" style="width:${visiblePercent.toFixed(2)}%">${segments}</div>
+          </div>
+        </div>
+        <div class="top-products-bar-value">${formatMoney(totalValue)}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="top-products-chart-head">
+      <h3>${window.i18n.t('reports_top_products_chart_title')}</h3>
+      <div class="top-products-legend">${legend}</div>
+    </div>
+    <div class="top-products-chart-list">${rowsHtml}</div>
+  `;
+}
+
+function buildTopProductsReportRows(filters) {
   const products = state.cache.products || {};
   const orders = getOrdersForCashierReport(filters.fromDate, filters.toDate, 'all');
   const rowsMap = {};
   const query = normalizeSearchValue(filters.query || '');
+  const branchColumns = getTopProductsBranchColumns();
+  const mode = filters.mode === 'bottom' ? 'bottom' : 'top';
+  const limit = [10, 50, 100].includes(Number(filters.limit)) ? Number(filters.limit) : 10;
 
   orders.forEach((order) => {
     const branchId = order.branchId || 'unknown';
@@ -4413,14 +4706,13 @@ function buildTopProductsReportRows(filters) {
       const productId = String(item.productId || item.itemId || item.id || '');
       if (!productId) return;
       const product = products[productId] || {};
-      const name = getLocalizedName(product) || item.name || '-';
-      const code = product.code || '-';
       const lineRevenue = Number(item.qty || 0) * Number(item.price || 0);
       if (!rowsMap[productId]) {
         rowsMap[productId] = {
           productId,
-          code,
-          name,
+          code: product.code || '-',
+          nameAr: product.nameAr || item.productName || item.name || '-',
+          nameEn: product.nameEn || item.productNameEn || '',
           branchSales: {},
           totalSales: 0
         };
@@ -4430,26 +4722,18 @@ function buildTopProductsReportRows(filters) {
     });
   });
 
-  const branchOptions = Object.entries(branches)
-    .map(([id, branch]) => ({ id, name: getLocalizedName(branch) || '-' }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
   let rows = Object.values(rowsMap);
   if (query) {
-    rows = rows.filter((row) => normalizeSearchValue(`${row.code} ${row.name}`).includes(query));
+    rows = rows.filter((row) => normalizeSearchValue(`${row.code} ${row.nameAr} ${row.nameEn}`).includes(query));
   }
-
-  const sortKey = filters.sortKey || 'total';
-  const sortDir = filters.sortDir === 'asc' ? 1 : -1;
-  rows.sort((a, b) => {
-    const aValue = sortKey === 'total' ? Number(a.totalSales || 0) : Number(a.branchSales?.[sortKey] || 0);
-    const bValue = sortKey === 'total' ? Number(b.totalSales || 0) : Number(b.branchSales?.[sortKey] || 0);
-    if (aValue === bValue) return String(a.name || '').localeCompare(String(b.name || ''));
-    return (aValue - bValue) * sortDir;
-  });
-
-  const totalSales = rows.reduce((sum, row) => sum + Number(row.totalSales || 0), 0);
-  return { rows, branchOptions, totalSales };
+  rows.sort((a, b) => (
+    mode === 'bottom'
+      ? Number(a.totalSales || 0) - Number(b.totalSales || 0)
+      : Number(b.totalSales || 0) - Number(a.totalSales || 0)
+  ));
+  const limitedRows = rows.slice(0, limit);
+  const totalTopSales = limitedRows.reduce((sum, row) => sum + Number(row.totalSales || 0), 0);
+  return { rows: limitedRows, branchColumns, totalTopSales, mode, limit };
 }
 
 function renderTopProductsReportView(section) {
@@ -4457,11 +4741,18 @@ function renderTopProductsReportView(section) {
     fromDate: '',
     toDate: '',
     query: '',
-    sortKey: 'total',
-    sortDir: 'desc'
+    mode: 'top',
+    limit: 10
   };
-  const { rows, branchOptions, totalSales } = buildTopProductsReportRows(filters);
-  const branchHeaders = branchOptions.map((branch) => `<th>${window.i18n.t('branch_sales')} ${branch.name}</th>`).join('');
+  const mode = filters.mode === 'bottom' ? 'bottom' : 'top';
+  const limit = [10, 50, 100].includes(Number(filters.limit)) ? Number(filters.limit) : 10;
+  const { rows, branchColumns, totalTopSales } = buildTopProductsReportRows({
+    ...filters,
+    mode,
+    limit
+  });
+  const chartMarkup = renderTopProductsCreativeChart(rows, branchColumns);
+  const branchHeaders = branchColumns.map((column) => `<th>${column.label}</th>`).join('');
 
   section.innerHTML = `
     <div class="card">
@@ -4479,60 +4770,37 @@ function renderTopProductsReportView(section) {
         <input id="topProductsDateFrom" class="input" type="date" style="max-width: 180px;" value="${filters.fromDate || ''}" />
         <input id="topProductsDateTo" class="input" type="date" style="max-width: 180px;" value="${filters.toDate || ''}" />
         <input id="topProductsQuery" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('reports_search_product_placeholder')}" value="${filters.query || ''}" />
-        <select id="topProductsSortKey" class="input" style="max-width: 240px;"></select>
-        <select id="topProductsSortDir" class="input" style="max-width: 220px;">
-          <option value="desc">${window.i18n.t('sort_desc')}</option>
-          <option value="asc">${window.i18n.t('sort_asc')}</option>
+        <select id="topProductsMode" class="input" style="max-width: 220px;">
+          <option value="top" ${mode === 'top' ? 'selected' : ''}>${window.i18n.t('reports_top_products_mode_top')}</option>
+          <option value="bottom" ${mode === 'bottom' ? 'selected' : ''}>${window.i18n.t('reports_top_products_mode_bottom')}</option>
+        </select>
+        <select id="topProductsLimit" class="input" style="max-width: 140px;">
+          <option value="10" ${limit === 10 ? 'selected' : ''}>10</option>
+          <option value="50" ${limit === 50 ? 'selected' : ''}>50</option>
+          <option value="100" ${limit === 100 ? 'selected' : ''}>100</option>
         </select>
       </div>
-      <div class="card light" style="margin-top: 12px;">
-        <strong>${window.i18n.t('total_sales')}</strong>
-        <div class="report-total-value">${formatMoney(totalSales)}</div>
+      <div class="grid two" style="margin-top: 12px;">
+        <div class="card light"><strong>${window.i18n.t('reports_products_count_label')}</strong><div class="report-total-value">${rows.length}</div></div>
+        <div class="card light"><strong>${window.i18n.t('reports_products_sales_total_label')}</strong><div class="report-total-value">${formatMoney(totalTopSales)}</div></div>
       </div>
+    </div>
+    <div class="card top-products-chart-card">
+      ${chartMarkup}
     </div>
     <div class="card">
       <table class="table">
         <thead>
           <tr>
-            <th>${window.i18n.t('product_code')}</th>
-            <th>${window.i18n.t('name')}</th>
+            <th>${window.i18n.t('item_name_ar')}</th>
+            <th>${window.i18n.t('item_name_en')}</th>
             ${branchHeaders}
-            <th>${window.i18n.t('total_sales')}</th>
           </tr>
         </thead>
         <tbody id="topProductsTableBody"></tbody>
       </table>
     </div>
   `;
-
-  const sortKeySelect = document.getElementById('topProductsSortKey');
-  if (sortKeySelect) {
-    sortKeySelect.innerHTML = '';
-    const totalOption = document.createElement('option');
-    totalOption.value = 'total';
-    totalOption.textContent = window.i18n.t('sort_by_total_sales');
-    sortKeySelect.appendChild(totalOption);
-    branchOptions.forEach((branch) => {
-      const option = document.createElement('option');
-      option.value = branch.id;
-      option.textContent = `${window.i18n.t('sort_by_branch_sales')} ${branch.name}`;
-      sortKeySelect.appendChild(option);
-    });
-    sortKeySelect.value = filters.sortKey || 'total';
-    sortKeySelect.addEventListener('change', () => {
-      state.reports.topProductsFilters.sortKey = sortKeySelect.value || 'total';
-      renderReportsSection();
-    });
-  }
-
-  const sortDirSelect = document.getElementById('topProductsSortDir');
-  if (sortDirSelect) {
-    sortDirSelect.value = filters.sortDir || 'desc';
-    sortDirSelect.addEventListener('change', () => {
-      state.reports.topProductsFilters.sortDir = sortDirSelect.value || 'desc';
-      renderReportsSection();
-    });
-  }
 
   const fromInput = document.getElementById('topProductsDateFrom');
   if (fromInput) {
@@ -4552,8 +4820,25 @@ function renderTopProductsReportView(section) {
 
   const queryInput = document.getElementById('topProductsQuery');
   if (queryInput) {
-    queryInput.addEventListener('input', () => {
-      state.reports.topProductsFilters.query = queryInput.value.trim();
+    bindDebouncedQueryInput(queryInput, (value) => {
+      state.reports.topProductsFilters.query = String(value || '').trim();
+      renderReportsSection();
+    });
+  }
+
+  const modeSelect = document.getElementById('topProductsMode');
+  if (modeSelect) {
+    modeSelect.addEventListener('change', () => {
+      state.reports.topProductsFilters.mode = modeSelect.value === 'bottom' ? 'bottom' : 'top';
+      renderReportsSection();
+    });
+  }
+
+  const limitSelect = document.getElementById('topProductsLimit');
+  if (limitSelect) {
+    limitSelect.addEventListener('change', () => {
+      const nextLimit = Number(limitSelect.value || 10);
+      state.reports.topProductsFilters.limit = [10, 50, 100].includes(nextLimit) ? nextLimit : 10;
       renderReportsSection();
     });
   }
@@ -4561,20 +4846,19 @@ function renderTopProductsReportView(section) {
   const tbody = document.getElementById('topProductsTableBody');
   if (tbody) {
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="${branchOptions.length + 3}">${window.i18n.t('no_data')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="${branchColumns.length + 2}">${window.i18n.t('no_data')}</td></tr>`;
     } else {
       tbody.innerHTML = rows.map((row) => {
-        const branchCells = branchOptions.map((branch) => {
-          const value = Number(row.branchSales?.[branch.id] || 0);
-          if (!value) return `<td>${formatMoney(0)}</td>`;
-          return `<td><button class="btn ghost small" data-action="open-top-product-details" data-product-id="${row.productId}" data-branch-id="${branch.id}">${formatMoney(value)}</button></td>`;
+        const branchCells = branchColumns.map((column) => {
+          const value = column.id ? Number(row.branchSales?.[column.id] || 0) : 0;
+          if (!value || !column.id) return `<td>${formatMoney(0)}</td>`;
+          return `<td><button class="btn ghost small" data-action="open-top-product-details" data-product-id="${row.productId}" data-branch-id="${column.id}">${formatMoney(value)}</button></td>`;
         }).join('');
         return `
           <tr>
-            <td>${row.code || '-'}</td>
-            <td>${row.name || '-'}</td>
+            <td>${row.nameAr || '-'}</td>
+            <td>${row.nameEn || '-'}</td>
             ${branchCells}
-            <td>${formatMoney(row.totalSales)}</td>
           </tr>
         `;
       }).join('');
@@ -4610,16 +4894,15 @@ function renderTopProductsReportView(section) {
       if (!rows.length) return;
       const exportRows = rows.map((row) => {
         const payload = {
-          [window.i18n.t('product_code')]: row.code || '-',
-          [window.i18n.t('name')]: row.name || '-'
+          [window.i18n.t('item_name_ar')]: row.nameAr || '-',
+          [window.i18n.t('item_name_en')]: row.nameEn || '-'
         };
-        branchOptions.forEach((branch) => {
-          payload[`${window.i18n.t('branch_sales')} ${branch.name}`] = formatMoney(row.branchSales?.[branch.id] || 0);
+        branchColumns.forEach((column) => {
+          payload[column.label] = formatMoney(column.id ? Number(row.branchSales?.[column.id] || 0) : 0);
         });
-        payload[window.i18n.t('total_sales')] = formatMoney(row.totalSales);
         return payload;
       });
-      exportToExcel(exportRows, 'top-products-report.xlsx');
+      exportToExcel(exportRows, 'top-10-products-report.xlsx');
     });
   }
 
@@ -4627,16 +4910,14 @@ function renderTopProductsReportView(section) {
   if (printBtn) {
     printBtn.addEventListener('click', () => {
       const headers = [
-        window.i18n.t('product_code'),
-        window.i18n.t('name'),
-        ...branchOptions.map((branch) => `${window.i18n.t('branch_sales')} ${branch.name}`),
-        window.i18n.t('total_sales')
+        window.i18n.t('item_name_ar'),
+        window.i18n.t('item_name_en'),
+        ...branchColumns.map((column) => column.label)
       ];
       const bodyRows = rows.map((row) => ([
-        row.code || '-',
-        row.name || '-',
-        ...branchOptions.map((branch) => formatMoney(row.branchSales?.[branch.id] || 0)),
-        formatMoney(row.totalSales)
+        row.nameAr || '-',
+        row.nameEn || '-',
+        ...branchColumns.map((column) => formatMoney(column.id ? Number(row.branchSales?.[column.id] || 0) : 0))
       ]));
       printA4Report(
         window.i18n.t('reports_top_products'),
@@ -4646,7 +4927,7 @@ function renderTopProductsReportView(section) {
         ],
         headers,
         bodyRows,
-        [{ label: window.i18n.t('total_sales'), value: formatMoney(totalSales) }]
+        [{ label: window.i18n.t('reports_products_sales_total_label'), value: formatMoney(totalTopSales) }]
       );
     });
   }
@@ -4658,7 +4939,6 @@ function buildTopProductDetailsRows(filters) {
   const orders = getOrdersForCashierReport(filters.fromDate, filters.toDate, 'all');
   const cashiers = state.cache.cashiers || {};
   const orderTypes = state.cache.orderTypes || {};
-  const paymentMethods = state.cache.paymentMethods || {};
   const rows = [];
   const query = normalizeSearchValue(filters.query || '');
 
@@ -4674,20 +4954,18 @@ function buildTopProductDetailsRows(filters) {
     if (!productValue) return;
     const row = {
       invoiceNumber: order.orderNumber || order.invoiceNumber || order.id || '-',
-      customerName: order.customerName || '-',
-      customerPhone: order.customerPhone || '-',
       branchName: getLocalizedName(state.cache.branches?.[order.branchId]) || order.branchName || '-',
       cashierId: order.cashierId || '',
       cashierName: order.cashierName || cashiers[order.cashierId]?.name || '-',
+      customerAddress: getOrderDeliveryAddressLabel(order),
       productsAmount: productValue,
       orderType: getLocalizedName(orderTypes[order.orderTypeId]) || order.orderTypeName || '-',
       deliveryFee: Number(order.deliveryFee || 0),
       total: Number(order.total || 0),
-      paymentMethod: getLocalizedName(paymentMethods[order.paymentMethodId]) || order.paymentMethodName || '-',
       createdAt: Number(order.createdAt || 0)
     };
     if (query) {
-      const blob = normalizeSearchValue(`${row.invoiceNumber} ${row.customerName} ${row.customerPhone} ${row.cashierName}`);
+      const blob = normalizeSearchValue(`${row.invoiceNumber} ${row.branchName} ${row.cashierName} ${row.orderType} ${row.customerAddress}`);
       if (!blob.includes(query)) return;
     }
     rows.push(row);
@@ -4758,7 +5036,7 @@ function renderTopProductDetailsView(section) {
       <div class="grid three" style="margin-top: 12px;">
         <div class="card light"><strong>${window.i18n.t('reports_products_amount')}</strong><div class="report-total-value">${formatMoney(totals.products)}</div></div>
         <div class="card light"><strong>${window.i18n.t('delivery_fee')}</strong><div class="report-total-value">${formatMoney(totals.delivery)}</div></div>
-        <div class="card light"><strong>${window.i18n.t('grand_total')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
+        <div class="card light"><strong>${window.i18n.t('total_sales')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
       </div>
     </div>
     <div class="card">
@@ -4766,15 +5044,13 @@ function renderTopProductDetailsView(section) {
         <thead>
           <tr>
             <th>${window.i18n.t('invoice_number')}</th>
-            <th>${window.i18n.t('customer_name')}</th>
-            <th>${window.i18n.t('customer_phone')}</th>
             <th>${window.i18n.t('branch')}</th>
             <th>${window.i18n.t('cashier')}</th>
-            <th>${window.i18n.t('reports_products_amount')}</th>
             <th>${window.i18n.t('order_type')}</th>
+            <th>${window.i18n.t('customer_address')}</th>
+            <th>${window.i18n.t('reports_products_amount')}</th>
             <th>${window.i18n.t('delivery_fee')}</th>
             <th>${window.i18n.t('grand_total')}</th>
-            <th>${window.i18n.t('payment_method')}</th>
             <th>${window.i18n.t('date_time')}</th>
           </tr>
         </thead>
@@ -4821,8 +5097,8 @@ function renderTopProductDetailsView(section) {
   }
   const queryInput = document.getElementById('topProductDetailsQuery');
   if (queryInput) {
-    queryInput.addEventListener('input', () => {
-      state.reports.topProductDetails.query = queryInput.value.trim();
+    bindDebouncedQueryInput(queryInput, (value) => {
+      state.reports.topProductDetails.query = String(value || '').trim();
       renderReportsSection();
     });
   }
@@ -4830,20 +5106,18 @@ function renderTopProductDetailsView(section) {
   const tbody = document.getElementById('topProductDetailsTableBody');
   if (tbody) {
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="11">${window.i18n.t('no_data')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9">${window.i18n.t('no_data')}</td></tr>`;
     } else {
       tbody.innerHTML = rows.map((row) => `
         <tr>
           <td>${row.invoiceNumber}</td>
-          <td>${row.customerName}</td>
-          <td>${row.customerPhone}</td>
           <td>${row.branchName}</td>
           <td>${row.cashierName}</td>
-          <td>${formatMoney(row.productsAmount)}</td>
           <td>${row.orderType}</td>
+          <td>${row.customerAddress}</td>
+          <td>${formatMoney(row.productsAmount)}</td>
           <td>${formatMoney(row.deliveryFee)}</td>
           <td>${formatMoney(row.total)}</td>
-          <td>${row.paymentMethod}</td>
           <td>${formatDate(row.createdAt)}</td>
         </tr>
       `).join('');
@@ -4856,15 +5130,13 @@ function renderTopProductDetailsView(section) {
       if (!rows.length) return;
       const exportRows = rows.map((row) => ({
         [window.i18n.t('invoice_number')]: row.invoiceNumber,
-        [window.i18n.t('customer_name')]: row.customerName,
-        [window.i18n.t('customer_phone')]: row.customerPhone,
         [window.i18n.t('branch')]: row.branchName,
         [window.i18n.t('cashier')]: row.cashierName,
-        [window.i18n.t('reports_products_amount')]: formatMoney(row.productsAmount),
         [window.i18n.t('order_type')]: row.orderType,
+        [window.i18n.t('customer_address')]: row.customerAddress,
+        [window.i18n.t('reports_products_amount')]: formatMoney(row.productsAmount),
         [window.i18n.t('delivery_fee')]: formatMoney(row.deliveryFee),
         [window.i18n.t('grand_total')]: formatMoney(row.total),
-        [window.i18n.t('payment_method')]: row.paymentMethod,
         [window.i18n.t('date_time')]: formatDate(row.createdAt)
       }));
       exportToExcel(exportRows, 'top-product-branch-details.xlsx');
@@ -4876,28 +5148,24 @@ function renderTopProductDetailsView(section) {
     printBtn.addEventListener('click', () => {
       const headers = [
         window.i18n.t('invoice_number'),
-        window.i18n.t('customer_name'),
-        window.i18n.t('customer_phone'),
         window.i18n.t('branch'),
         window.i18n.t('cashier'),
-        window.i18n.t('reports_products_amount'),
         window.i18n.t('order_type'),
+        window.i18n.t('customer_address'),
+        window.i18n.t('reports_products_amount'),
         window.i18n.t('delivery_fee'),
         window.i18n.t('grand_total'),
-        window.i18n.t('payment_method'),
         window.i18n.t('date_time')
       ];
       const bodyRows = rows.map((row) => [
         row.invoiceNumber,
-        row.customerName,
-        row.customerPhone,
         row.branchName,
         row.cashierName,
-        formatMoney(row.productsAmount),
         row.orderType,
+        row.customerAddress,
+        formatMoney(row.productsAmount),
         formatMoney(row.deliveryFee),
         formatMoney(row.total),
-        row.paymentMethod,
         formatDate(row.createdAt)
       ]);
       printA4Report(
@@ -4914,6 +5182,262 @@ function renderTopProductDetailsView(section) {
           { label: window.i18n.t('reports_products_amount'), value: formatMoney(totals.products) },
           { label: window.i18n.t('delivery_fee'), value: formatMoney(totals.delivery) },
           { label: window.i18n.t('grand_total'), value: formatMoney(totals.total) }
+        ]
+      );
+    });
+  }
+}
+
+function buildOrderSalesReportRows(filters) {
+  const fromDate = filters.fromDate || '';
+  const toDate = filters.toDate || '';
+  const branchId = filters.branchId || 'all';
+  const query = normalizeSearchValue(filters.query || '');
+  if (!fromDate || !toDate) {
+    return {
+      rows: [],
+      totals: { products: 0, delivery: 0, total: 0, runningBalance: 0 },
+      missingPeriod: true
+    };
+  }
+  const customers = state.cache.customers || {};
+  const orders = getOrdersForCashierReport(fromDate, toDate, branchId)
+    .slice()
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const rows = [];
+  let runningBalance = 0;
+  orders.forEach((order) => {
+    const customer = customers[order.customerId];
+    const invoiceNumber = order.orderNumber || order.invoiceNumber || order.id || '-';
+    const customerName = order.customerName || getLocalizedName(customer) || '-';
+    const customerPhone = order.customerPhone || customer?.phone || '-';
+    if (query) {
+      const blob = normalizeSearchValue(`${invoiceNumber} ${customerName} ${customerPhone}`);
+      if (!blob.includes(query)) return;
+    }
+    const productsAmount = Number(order.subtotal ?? order.netTotal ?? ((order.total || 0) - (order.deliveryFee || 0)));
+    const deliveryFee = Number(order.deliveryFee || 0);
+    const total = Number(order.total || 0);
+    runningBalance += total;
+    rows.push({
+      id: order.id,
+      invoiceNumber,
+      customerName,
+      customerPhone,
+      productsAmount,
+      deliveryFee,
+      total,
+      createdAt: Number(order.createdAt || 0),
+      runningBalance
+    });
+  });
+  const totals = rows.reduce((acc, row) => {
+    acc.products += Number(row.productsAmount || 0);
+    acc.delivery += Number(row.deliveryFee || 0);
+    acc.total += Number(row.total || 0);
+    return acc;
+  }, { products: 0, delivery: 0, total: 0 });
+  totals.runningBalance = rows.length ? Number(rows[rows.length - 1].runningBalance || 0) : 0;
+  return { rows, totals, missingPeriod: false };
+}
+
+function renderOrderSalesReportView(section) {
+  const filters = state.reports.orderSalesFilters || {
+    fromDate: '',
+    toDate: '',
+    branchId: 'all',
+    query: ''
+  };
+  const { rows, totals, missingPeriod } = buildOrderSalesReportRows(filters);
+
+  section.innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <div class="row">
+          <button id="orderSalesBackBtn" class="btn ghost">${window.i18n.t('back')}</button>
+          <h2>${window.i18n.t('reports_orders_sales')}</h2>
+        </div>
+        <div class="row">
+          <button id="orderSalesExportBtn" class="btn ghost">${window.i18n.t('download_report_excel')}</button>
+          <button id="orderSalesPrintBtn" class="btn ghost">${window.i18n.t('print_report')}</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top: 12px; flex-wrap: wrap;">
+        <input id="orderSalesDateFrom" class="input" type="date" style="max-width: 180px;" value="${filters.fromDate || ''}" />
+        <input id="orderSalesDateTo" class="input" type="date" style="max-width: 180px;" value="${filters.toDate || ''}" />
+        <select id="orderSalesBranch" class="input" style="max-width: 240px;"></select>
+        <input id="orderSalesQuery" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('reports_search_placeholder')}" value="${filters.query || ''}" />
+      </div>
+      ${missingPeriod ? `<p class="helper form-error" style="margin-top: 8px;">${window.i18n.t('select_period_prompt')}</p>` : ''}
+      <div class="grid three" style="margin-top: 12px;">
+        <div class="card light"><strong>${window.i18n.t('reports_products_amount')}</strong><div class="report-total-value">${formatMoney(totals.products)}</div></div>
+        <div class="card light"><strong>${window.i18n.t('delivery_price')}</strong><div class="report-total-value">${formatMoney(totals.delivery)}</div></div>
+        <div class="card light"><strong>${window.i18n.t('total_sales')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>${window.i18n.t('row_number')}</th>
+            <th>${window.i18n.t('invoice_number')}</th>
+            <th>${window.i18n.t('customer_name')}</th>
+            <th>${window.i18n.t('customer_phone')}</th>
+            <th>${window.i18n.t('reports_products_amount')}</th>
+            <th>${window.i18n.t('delivery_price')}</th>
+            <th>${window.i18n.t('grand_total')}</th>
+            <th>${window.i18n.t('date_time')}</th>
+            <th>${window.i18n.t('running_balance')}</th>
+          </tr>
+        </thead>
+        <tbody id="orderSalesTableBody"></tbody>
+      </table>
+    </div>
+  `;
+
+  const branchSelect = document.getElementById('orderSalesBranch');
+  if (branchSelect) {
+    fillReportBranchSelect(branchSelect, filters.branchId || 'all');
+    branchSelect.addEventListener('change', () => {
+      state.reports.orderSalesFilters.branchId = branchSelect.value || 'all';
+      renderReportsSection();
+    });
+  }
+
+  const fromInput = document.getElementById('orderSalesDateFrom');
+  if (fromInput) {
+    fromInput.addEventListener('change', () => {
+      state.reports.orderSalesFilters.fromDate = fromInput.value || '';
+      renderReportsSection();
+    });
+  }
+
+  const toInput = document.getElementById('orderSalesDateTo');
+  if (toInput) {
+    toInput.addEventListener('change', () => {
+      state.reports.orderSalesFilters.toDate = toInput.value || '';
+      renderReportsSection();
+    });
+  }
+
+  const queryInput = document.getElementById('orderSalesQuery');
+  if (queryInput) {
+    bindDebouncedQueryInput(queryInput, (value) => {
+      state.reports.orderSalesFilters.query = String(value || '').trim();
+      renderReportsSection();
+    });
+  }
+
+  const tbody = document.getElementById('orderSalesTableBody');
+  if (tbody) {
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="9">${window.i18n.t('no_data')}</td></tr>`;
+    } else {
+      const rowsHtml = rows.map((row, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${row.invoiceNumber || '-'}</td>
+          <td>${row.customerName || '-'}</td>
+          <td>${row.customerPhone || '-'}</td>
+          <td>${formatMoney(row.productsAmount)}</td>
+          <td>${formatMoney(row.deliveryFee)}</td>
+          <td>${formatMoney(row.total)}</td>
+          <td>${formatDate(row.createdAt)}</td>
+          <td>${formatMoney(row.runningBalance)}</td>
+        </tr>
+      `).join('');
+      const totalRow = `
+        <tr>
+          <td colspan="4"><strong>${window.i18n.t('total')}</strong></td>
+          <td><strong>${formatMoney(totals.products)}</strong></td>
+          <td><strong>${formatMoney(totals.delivery)}</strong></td>
+          <td><strong>${formatMoney(totals.total)}</strong></td>
+          <td>-</td>
+          <td><strong>${formatMoney(totals.runningBalance)}</strong></td>
+        </tr>
+      `;
+      tbody.innerHTML = `${rowsHtml}${totalRow}`;
+    }
+  }
+
+  const backBtn = document.getElementById('orderSalesBackBtn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      state.reports.view = 'dashboard';
+      renderReportsSection();
+    });
+  }
+
+  const exportBtn = document.getElementById('orderSalesExportBtn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => {
+      if (!rows.length) return;
+      const exportRows = rows.map((row, index) => ({
+        [window.i18n.t('row_number')]: index + 1,
+        [window.i18n.t('invoice_number')]: row.invoiceNumber || '-',
+        [window.i18n.t('customer_name')]: row.customerName || '-',
+        [window.i18n.t('customer_phone')]: row.customerPhone || '-',
+        [window.i18n.t('reports_products_amount')]: formatMoney(row.productsAmount),
+        [window.i18n.t('delivery_price')]: formatMoney(row.deliveryFee),
+        [window.i18n.t('grand_total')]: formatMoney(row.total),
+        [window.i18n.t('date_time')]: formatDate(row.createdAt),
+        [window.i18n.t('running_balance')]: formatMoney(row.runningBalance)
+      }));
+      exportRows.push({
+        [window.i18n.t('row_number')]: '',
+        [window.i18n.t('invoice_number')]: window.i18n.t('total'),
+        [window.i18n.t('customer_name')]: '',
+        [window.i18n.t('customer_phone')]: '',
+        [window.i18n.t('reports_products_amount')]: formatMoney(totals.products),
+        [window.i18n.t('delivery_price')]: formatMoney(totals.delivery),
+        [window.i18n.t('grand_total')]: formatMoney(totals.total),
+        [window.i18n.t('date_time')]: '',
+        [window.i18n.t('running_balance')]: formatMoney(totals.runningBalance)
+      });
+      exportToExcel(exportRows, 'orders-sales-report.xlsx');
+    });
+  }
+
+  const printBtn = document.getElementById('orderSalesPrintBtn');
+  if (printBtn) {
+    printBtn.addEventListener('click', () => {
+      if (!rows.length) return;
+      const headers = [
+        window.i18n.t('row_number'),
+        window.i18n.t('invoice_number'),
+        window.i18n.t('customer_name'),
+        window.i18n.t('customer_phone'),
+        window.i18n.t('reports_products_amount'),
+        window.i18n.t('delivery_price'),
+        window.i18n.t('grand_total'),
+        window.i18n.t('date_time'),
+        window.i18n.t('running_balance')
+      ];
+      const bodyRows = rows.map((row, index) => ([
+        index + 1,
+        row.invoiceNumber || '-',
+        row.customerName || '-',
+        row.customerPhone || '-',
+        formatMoney(row.productsAmount),
+        formatMoney(row.deliveryFee),
+        formatMoney(row.total),
+        formatDate(row.createdAt),
+        formatMoney(row.runningBalance)
+      ]));
+      printA4Report(
+        window.i18n.t('reports_orders_sales'),
+        [
+          { label: window.i18n.t('filter_from'), value: filters.fromDate || '-' },
+          { label: window.i18n.t('filter_to'), value: filters.toDate || '-' },
+          { label: window.i18n.t('branch'), value: filters.branchId === 'all' ? window.i18n.t('all_branches') : getBranchLabel(filters.branchId) }
+        ],
+        headers,
+        bodyRows,
+        [
+          { label: window.i18n.t('reports_products_amount'), value: formatMoney(totals.products) },
+          { label: window.i18n.t('delivery_price'), value: formatMoney(totals.delivery) },
+          { label: window.i18n.t('grand_total'), value: formatMoney(totals.total) },
+          { label: window.i18n.t('running_balance'), value: formatMoney(totals.runningBalance) }
         ]
       );
     });
@@ -5529,7 +6053,6 @@ function getItemCardMovementTypeOptions() {
     { value: 'supplierReturn', label: window.i18n.t('supplier_return_voucher') },
     { value: 'production', label: window.i18n.t('production_voucher') },
     { value: 'inventory', label: window.i18n.t('inventory_voucher') },
-    { value: 'purchaseRequest', label: window.i18n.t('purchase_request') },
     { value: 'purchaseReceipt', label: window.i18n.t('receive_purchases') }
   ];
 }
@@ -6300,7 +6823,11 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
   const endTime = end ? end.getTime() : null;
 
   let openingBalance = itemData ? getItemStock(itemData, branchId) : 0;
-  if (startTime !== null) {
+  if (itemType === 'product') {
+    const productMainBranchId = itemData?.mainBranchId || mainBranchId;
+    const isMainBranch = !branchId || branchId === productMainBranchId;
+    openingBalance = isMainBranch ? Number(itemData?.openingQty || 0) : 0;
+  } else if (startTime !== null) {
     moves.forEach((move) => {
       if (move.date >= startTime && move.affectsBalance !== false) {
         openingBalance -= Number(move.qtyChange || 0);
@@ -6321,7 +6848,9 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     qtyChange: null,
     docNumber: '-',
     typeLabel: window.i18n.t('opening_qty'),
-    date: startTime || (chronological[0]?.date || Date.now()),
+    date: itemType === 'product'
+      ? Number(itemData?.createdAt || 0) || (startTime || (chronological[0]?.date || Date.now()))
+      : (startTime || (chronological[0]?.date || Date.now())),
     price: null,
     affectsBalance: false,
     purchaseInvoiceNumber: '-',
@@ -7753,6 +8282,7 @@ function openProductModal(product = null) {
   const barcodeInput = document.getElementById('productBarcode');
   const unitSelect = document.getElementById('productUnit');
   const countrySelect = document.getElementById('productCountryOrigin');
+  const openingQtyInput = document.getElementById('productOpeningQty');
 
   renderSelectOptions(unitSelect, { type: 'select', optionsPath: 'units' });
   renderSelectOptions(countrySelect, { type: 'select', optionsPath: 'countryOrigins' });
@@ -7767,13 +8297,20 @@ function openProductModal(product = null) {
     document.getElementById('productPrice').value = product.price ?? '';
     unitSelect.value = product.unitId || '';
     countrySelect.value = product.countryOriginId || '';
-    document.getElementById('productOpeningQty').value = product.openingQty ?? '';
+    const fallbackOpeningQty = product.mainBranchId
+      ? product.stockByBranch?.[product.mainBranchId]
+      : undefined;
+    if (openingQtyInput) {
+      openingQtyInput.value = product.openingQty ?? fallbackOpeningQty ?? '';
+      openingQtyInput.readOnly = true;
+    }
     document.getElementById('productMinStock').value = product.minStock ?? '';
     document.getElementById('productReorderPoint').value = product.reorderPoint ?? '';
     document.getElementById('productMaxStock').value = product.maxStock ?? '';
   } else {
     codeInput.value = generateProductCode();
     barcodeInput.value = generateBarcodeValue();
+    if (openingQtyInput) openingQtyInput.readOnly = false;
   }
 
   setupUnitDefinitionControls('product', product);
@@ -7805,6 +8342,7 @@ function closeProductModal() {
 function saveProduct() {
   const form = els.productForm;
   const editId = form.dataset.editId;
+  const existingProduct = editId ? state.cache.products?.[editId] || null : null;
   const rawCode = document.getElementById('productCode').value.trim();
   const barcode = document.getElementById('productBarcode').value.trim();
   const nameAr = document.getElementById('productNameAr').value.trim();
@@ -7815,7 +8353,14 @@ function saveProduct() {
   const countryOriginId = document.getElementById('productCountryOrigin')?.value || null;
   const unitDefinitionQtyRaw = document.getElementById('productUnitDefinitionQty')?.value.trim() || '';
   const unitDefinitionUnitId = document.getElementById('productUnitDefinitionUnit')?.value || '';
-  const openingQty = Number(document.getElementById('productOpeningQty').value || 0);
+  const openingQtyInput = Number(document.getElementById('productOpeningQty').value || 0);
+  const existingMainBranchId = existingProduct?.mainBranchId;
+  const existingFallbackOpeningQty = existingMainBranchId
+    ? existingProduct?.stockByBranch?.[existingMainBranchId]
+    : undefined;
+  const openingQty = editId
+    ? Number(existingProduct?.openingQty ?? existingFallbackOpeningQty ?? openingQtyInput)
+    : openingQtyInput;
   const minStock = Number(document.getElementById('productMinStock').value || 0);
   const reorderPoint = Number(document.getElementById('productReorderPoint').value || 0);
   const maxStock = Number(document.getElementById('productMaxStock').value || 0);
@@ -8217,7 +8762,7 @@ function bindCategorySection() {
   document.getElementById('addSubCategoryBtn').addEventListener('click', () => openCategoryModal(state.activeCategoryId));
   document.getElementById('assignProductsBtn').addEventListener('click', () => openCategoryProductsModal());
   document.getElementById('categoryBackBtn').addEventListener('click', () => goCategoryBack());
-  document.getElementById('categorySearch').addEventListener('input', () => renderProductCategoriesSection());
+  bindDebouncedQueryInput(document.getElementById('categorySearch'), () => renderProductCategoriesSection());
 
   els.categoryForm.onsubmit = (e) => {
     e.preventDefault();
@@ -8495,7 +9040,7 @@ function bindMaterialCategorySection() {
   document.getElementById('addMaterialSubCategoryBtn').addEventListener('click', () => openMaterialCategoryModal(state.activeMaterialCategoryId));
   document.getElementById('assignMaterialBtn').addEventListener('click', () => openMaterialCategoryProductsModal());
   document.getElementById('materialCategoryBackBtn').addEventListener('click', () => goMaterialCategoryBack());
-  document.getElementById('materialCategorySearch').addEventListener('input', () => renderMaterialCategoriesSection());
+  bindDebouncedQueryInput(document.getElementById('materialCategorySearch'), () => renderMaterialCategoriesSection());
 
   if (els.materialCategoryForm) {
     els.materialCategoryForm.onsubmit = (e) => {
@@ -8779,7 +9324,7 @@ function bindStorageLocationsSection() {
   document.getElementById('addStorageLocationBtn').addEventListener('click', () => openStorageLocationModal());
   document.getElementById('assignStorageItemsBtn').addEventListener('click', () => openStorageItemsModal());
   document.getElementById('storageLocationBackBtn').addEventListener('click', () => goStorageLocationBack());
-  document.getElementById('storageLocationSearch').addEventListener('input', () => renderStorageLocationsSection());
+  bindDebouncedQueryInput(document.getElementById('storageLocationSearch'), () => renderStorageLocationsSection());
 
   if (els.storageLocationForm) {
     els.storageLocationForm.onsubmit = (e) => {
@@ -16925,7 +17470,7 @@ function renderDiscountDetailsView(section) {
       <div class="grid four" style="margin-top: 12px;">
         <div class="card light"><strong>${window.i18n.t('reports_total_products_amount')}</strong><div class="report-total-value">${formatMoney(totals.products)}</div></div>
         <div class="card light"><strong>${window.i18n.t('reports_total_delivery_amount')}</strong><div class="report-total-value">${formatMoney(totals.delivery)}</div></div>
-        <div class="card light"><strong>${window.i18n.t('grand_total')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
+        <div class="card light"><strong>${window.i18n.t('total_sales')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
         <div class="card light"><strong>${window.i18n.t('reports_total_net_revenue')}</strong><div class="report-total-value">${formatMoney(totals.netRevenue)}</div></div>
       </div>
     </div>
@@ -18327,7 +18872,7 @@ function renderCustomerFavoriteProductDetailsView(section, customerId, productId
       <div class="grid three" style="margin-top: 12px;">
         <div class="card light"><strong>${window.i18n.t('net_total')}</strong><div class="report-total-value">${formatMoney(totals.net)}</div></div>
         <div class="card light"><strong>${window.i18n.t('delivery_fee')}</strong><div class="report-total-value">${formatMoney(totals.delivery)}</div></div>
-        <div class="card light"><strong>${window.i18n.t('grand_total')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
+        <div class="card light"><strong>${window.i18n.t('total_sales')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
       </div>
     </div>
     <div class="card">
@@ -18659,8 +19204,8 @@ function renderCustomersSection() {
 
   const queryInput = document.getElementById('customerSearch');
   if (queryInput) {
-    queryInput.addEventListener('input', () => {
-      state.customerFilters.query = queryInput.value.trim();
+    bindDebouncedQueryInput(queryInput, (value) => {
+      state.customerFilters.query = String(value || '').trim();
       renderCustomersSection();
     });
   }
@@ -19407,7 +19952,7 @@ function renderTableOrdersDetailsView(section, filters) {
       <div class="grid three" style="margin-top: 12px;">
         <div class="card light"><strong>${window.i18n.t('reports_total_products_amount')}</strong><div class="report-total-value">${formatMoney(totals.products)}</div></div>
         <div class="card light"><strong>${window.i18n.t('reports_total_delivery_amount')}</strong><div class="report-total-value">${formatMoney(totals.delivery)}</div></div>
-        <div class="card light"><strong>${window.i18n.t('grand_total')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
+        <div class="card light"><strong>${window.i18n.t('total_sales')}</strong><div class="report-total-value">${formatMoney(totals.total)}</div></div>
       </div>
     </div>
     <div class="card">
@@ -19445,8 +19990,8 @@ function renderTableOrdersDetailsView(section, filters) {
 
   const searchInput = document.getElementById('tableDetailsSearch');
   if (searchInput) {
-    searchInput.addEventListener('input', () => {
-      state.tablesFilters.detailsQuery = searchInput.value || '';
+    bindDebouncedQueryInput(searchInput, (value) => {
+      state.tablesFilters.detailsQuery = String(value || '');
       renderTablesSection();
     });
   }
@@ -19705,8 +20250,8 @@ function renderTablesSection() {
   }
   const numberFilter = document.getElementById('tablesNumberFilter');
   if (numberFilter) {
-    numberFilter.addEventListener('input', () => {
-      state.tablesFilters.tableQuery = numberFilter.value.trim();
+    bindDebouncedQueryInput(numberFilter, (value) => {
+      state.tablesFilters.tableQuery = String(value || '').trim();
       renderTablesSection();
     });
   }
@@ -19944,10 +20489,18 @@ function setupUsersSection() {
     if (!name || !code) return;
 
     const editId = userForm.dataset.editId;
+    const isEditingDefaultManager = editId === DEFAULT_MANAGER_USER_ID;
     if (editId) {
-      db.ref(`users/${editId}`).update({ name, code: String(code), role });
+      db.ref(`users/${editId}`).update({
+        name,
+        code: String(code),
+        role: isEditingDefaultManager ? 'manager' : role,
+        active: true
+      });
       delete userForm.dataset.editId;
       userForm.querySelector('button[type="submit"]').textContent = window.i18n.t('add_user');
+      roleInput.disabled = false;
+      roleInput.value = 'cashier';
     } else {
       db.ref('users').push({ name, code: String(code), role, active: true });
     }
@@ -19974,15 +20527,18 @@ function renderUsers() {
   }
 
   entries.forEach(([id, user]) => {
+    const isDefaultManager = id === DEFAULT_MANAGER_USER_ID;
     const row = document.createElement('tr');
-    const roleKey = user.role === 'manager' ? 'role_manager' : user.role === 'cashier' ? 'role_cashier' : 'role_storekeeper';
+    const roleKey = isDefaultManager
+      ? 'role_manager'
+      : (user.role === 'manager' ? 'role_manager' : user.role === 'cashier' ? 'role_cashier' : 'role_storekeeper');
     row.innerHTML = `
       <td>${user.name || '-'}</td>
       <td>${window.i18n.t(roleKey)}</td>
       <td>${user.code || '-'}</td>
       <td>
         <button class="btn ghost small" data-action="edit">${window.i18n.t('edit')}</button>
-        <button class="btn danger small" data-action="delete">${window.i18n.t('delete')}</button>
+        ${isDefaultManager ? '' : `<button class="btn danger small" data-action="delete">${window.i18n.t('delete')}</button>`}
       </td>
     `;
 
@@ -19991,16 +20547,21 @@ function renderUsers() {
       form.dataset.editId = id;
       document.getElementById('userNameInput').value = user.name || '';
       document.getElementById('userCodeInput').value = user.code || '';
-      document.getElementById('userRoleInput').value = user.role || 'cashier';
+      const roleSelect = document.getElementById('userRoleInput');
+      roleSelect.value = isDefaultManager ? 'manager' : (user.role || 'cashier');
+      roleSelect.disabled = isDefaultManager;
       form.querySelector('button[type="submit"]').textContent = window.i18n.t('update');
     });
 
-    row.querySelector('[data-action="delete"]').addEventListener('click', () => {
-      if (user.role === 'manager' && entries.length === 1) return;
-      if (confirm(window.i18n.t('confirm_delete'))) {
-        db.ref(`users/${id}`).remove();
-      }
-    });
+    const deleteBtn = row.querySelector('[data-action="delete"]');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => {
+        if (id === DEFAULT_MANAGER_USER_ID) return;
+        if (confirm(window.i18n.t('confirm_delete'))) {
+          db.ref(`users/${id}`).remove();
+        }
+      });
+    }
 
     table.appendChild(row);
   });
@@ -20051,38 +20612,62 @@ function watchData() {
   paths.forEach((path) => {
     db.ref(path).on('value', (snap) => {
       state.cache[path] = snap.val() || {};
-      renderListSections();
-      renderReportsSection();
-      renderOrders();
-      renderDevicesCashiers();
-      renderUsers();
-      renderTablesSection();
-      renderPendingStockMoves();
-      renderDiscounts();
-      renderProductsSection();
-      renderProductCategoriesSection();
-      renderItemCardSection();
-      renderCountryOriginsSection();
-      renderStockMaterialsSection();
-      renderMaterialCategoriesSection();
-      renderStorageLocationsSection();
-      renderIssueSection();
-      renderProductionSection();
-      renderProductionFollowUpSection();
-      renderInventorySection();
-      renderReceivingSection();
-      renderTransfersSection();
-      renderCashierTransferRequestsSection();
-      renderStockReturnSection();
-      renderScrapReturnSection();
-      renderSuppliersSection();
-      renderPurchasesSection();
-      renderSupplierReturnSection();
-      renderCustomersSection();
-      renderUnitsSection();
-      updateReorderNotice();
+      if (isEditingDataInput()) {
+        state.pendingDataRefresh = true;
+        return;
+      }
+      refreshAllDataViews();
     });
   });
+}
+
+function isEditingDataInput() {
+  const active = document.activeElement;
+  if (!active) return false;
+  const tag = String(active.tagName || '').toUpperCase();
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return false;
+  if (active.disabled || active.readOnly) return false;
+  return true;
+}
+
+function refreshAllDataViews() {
+  renderListSections();
+  renderReportsSection();
+  renderOrders();
+  renderDevicesCashiers();
+  renderUsers();
+  renderTablesSection();
+  renderPendingStockMoves();
+  renderDiscounts();
+  renderProductsSection();
+  renderProductCategoriesSection();
+  renderItemCardSection();
+  renderCountryOriginsSection();
+  renderStockMaterialsSection();
+  renderMaterialCategoriesSection();
+  renderStorageLocationsSection();
+  renderIssueSection();
+  renderProductionSection();
+  renderProductionFollowUpSection();
+  renderInventorySection();
+  renderReceivingSection();
+  renderTransfersSection();
+  renderCashierTransferRequestsSection();
+  renderStockReturnSection();
+  renderScrapReturnSection();
+  renderSuppliersSection();
+  renderPurchasesSection();
+  renderSupplierReturnSection();
+  renderCustomersSection();
+  renderUnitsSection();
+  updateReorderNotice();
+}
+
+function flushPendingDataRefresh() {
+  if (!state.pendingDataRefresh) return;
+  if (isEditingDataInput()) return;
+  state.pendingDataRefresh = false;
+  refreshAllDataViews();
 }
 
 function renderListSections() {

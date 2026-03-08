@@ -1,12 +1,6 @@
 const firebaseConfig = {
-  apiKey: "AIzaSyBdDFbWuByBWsDqEmC18nSlIKG6QZ5s0wA",
-  authDomain: "fawatirr-75242.firebaseapp.com",
-  databaseURL: "https://fawatirr-75242-default-rtdb.firebaseio.com",
-  projectId: "fawatirr-75242",
-  storageBucket: "fawatirr-75242.firebasestorage.app",
-  messagingSenderId: "1059799456100",
-  appId: "1:1059799456100:web:d624eb6f98aaee78950271",
-  measurementId: "G-7SQXEJQY6Y"
+  supabaseUrl: window.__SUPABASE_CONFIG__?.url || '',
+  supabaseAnonKey: window.__SUPABASE_CONFIG__?.anonKey || ''
 };
 
 const app = firebase.apps.length ? firebase.app() : firebase.initializeApp(firebaseConfig);
@@ -205,6 +199,7 @@ function init() {
   bindUI();
   document.addEventListener('keydown', handleGlobalScan);
   ensureSeedData();
+  initNumericInputEnhancer();
   listenData();
   restoreCashierSession();
   resetInvoice();
@@ -239,8 +234,97 @@ function normalizeDigits(value) {
     .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)));
 }
 
+function normalizeArabicSearchText(value) {
+  return String(value || '')
+    .replace(/[\u0640]/g, '')
+    .replace(/[\u064B-\u0652\u0670]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/ؤ/g, 'و')
+    .replace(/ئ/g, 'ي');
+}
+
 function normalizeSearchValue(value) {
-  return normalizeDigits(value).toLowerCase().trim();
+  return normalizeArabicSearchText(normalizeDigits(value))
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function debounce(fn, wait = 280) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), wait);
+  };
+}
+
+function bindDebouncedInput(input, handler, wait = 280) {
+  if (!input || typeof handler !== 'function') return;
+  const run = debounce(() => handler(input.value || ''), wait);
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    handler(input.value || '');
+  });
+}
+
+function normalizeNumericInputValue(value) {
+  let text = normalizeDigits(value);
+  text = text.replace(/[٫٬،]/g, '.').replace(/,/g, '.').replace(/[−]/g, '-');
+  text = text.replace(/[^0-9.\-]/g, '');
+  text = text.replace(/(?!^)-/g, '');
+  const firstDot = text.indexOf('.');
+  if (firstDot !== -1) {
+    text = text.slice(0, firstDot + 1) + text.slice(firstDot + 1).replace(/\./g, '');
+  }
+  return text;
+}
+
+function normalizeInputDigitsInPlace(input) {
+  if (!input || typeof input.value !== 'string') return;
+  if (input.type === 'number') {
+    const normalized = normalizeNumericInputValue(input.value);
+    if (normalized !== input.value) input.value = normalized;
+    return;
+  }
+  const normalized = normalizeDigits(input.value);
+  if (normalized !== input.value) input.value = normalized;
+}
+
+function prepareNumericInput(input) {
+  if (!input || input.dataset.numericReady === '1') return;
+  input.dataset.numericReady = '1';
+  if (input.type === 'number') {
+    input.step = 'any';
+    input.setAttribute('inputmode', 'decimal');
+  }
+  input.addEventListener('input', () => normalizeInputDigitsInPlace(input));
+  input.addEventListener('change', () => normalizeInputDigitsInPlace(input));
+  normalizeInputDigitsInPlace(input);
+}
+
+function initNumericInputEnhancer() {
+  const applyOnRoot = (root) => {
+    if (!root || !(root instanceof Element || root instanceof Document)) return;
+    root.querySelectorAll?.('input, textarea').forEach((input) => prepareNumericInput(input));
+  };
+
+  applyOnRoot(document);
+  if (!document.body || document.body.dataset.numericObserverReady === '1') return;
+  document.body.dataset.numericObserverReady = '1';
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (!(node instanceof Element)) return;
+        if (node.matches('input, textarea')) prepareNumericInput(node);
+        applyOnRoot(node);
+      });
+    });
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 const scanState = {
@@ -335,15 +419,26 @@ function updateDeviceInfoUI() {
 }
 
 function ensureSeedData() {
+  const defaultManager = {
+    name: 'غير معرف',
+    role: 'manager',
+    code: '123456',
+    active: true
+  };
   const usersRef = db.ref('users');
   usersRef.child('manager').once('value').then((snap) => {
     if (!snap.exists()) {
-      usersRef.child('manager').set({
-        name: 'غير معرف',
-        role: 'manager',
-        code: '123456',
-        active: true
-      });
+      usersRef.child('manager').set({ ...defaultManager });
+      return;
+    }
+    const current = snap.val() || {};
+    const updates = {};
+    if (current.role !== 'manager') updates.role = 'manager';
+    if (current.active !== true) updates.active = true;
+    if (!String(current.name || '').trim()) updates.name = defaultManager.name;
+    if (!String(current.code || '').trim()) updates.code = defaultManager.code;
+    if (Object.keys(updates).length) {
+      usersRef.child('manager').update(updates);
     }
   }).catch(() => {});
 }
@@ -377,8 +472,8 @@ function bindUI() {
     els.newInvoiceBtn.addEventListener('click', () => openInvoiceOverlay());
   }
   if (els.orderSearchInput) {
-    els.orderSearchInput.addEventListener('input', () => {
-      state.ordersSearch = (els.orderSearchInput.value || '').trim();
+    bindDebouncedInput(els.orderSearchInput, (value) => {
+      state.ordersSearch = String(value || '').trim();
       renderOrdersTable();
     });
   }
@@ -408,8 +503,8 @@ function bindUI() {
   }
 
   if (els.invoiceSearchInput) {
-    els.invoiceSearchInput.addEventListener('input', (e) => {
-      state.invoice.search = e.target.value.trim();
+    bindDebouncedInput(els.invoiceSearchInput, (value) => {
+      state.invoice.search = String(value || '').trim();
       renderInvoiceCatalog();
     });
     els.invoiceSearchInput.addEventListener('keydown', (e) => {
@@ -478,8 +573,8 @@ function bindUI() {
   }
 
   if (els.customerSearchInput) {
-    els.customerSearchInput.addEventListener('input', (e) => {
-      state.customerSearch = e.target.value.trim().toLowerCase();
+    bindDebouncedInput(els.customerSearchInput, (value) => {
+      state.customerSearch = normalizeSearchValue(value || '');
       renderCustomerList();
     });
   }
@@ -499,7 +594,7 @@ function bindUI() {
     els.customerNameOnlyToggle.addEventListener('change', () => toggleCustomerAddressFields());
   }
   if (els.customerZonePickerSearch) {
-    els.customerZonePickerSearch.addEventListener('input', () => renderZoneOptions());
+    bindDebouncedInput(els.customerZonePickerSearch, () => renderZoneOptions());
   }
 
   if (els.qtyModalCancel) {
@@ -568,7 +663,7 @@ function bindUI() {
     els.transferRequestCancelBtn.addEventListener('click', () => closeTransferRequestModal());
   }
   if (els.transferRequestSearchInput) {
-    els.transferRequestSearchInput.addEventListener('input', () => renderTransferRequestSearchResults());
+    bindDebouncedInput(els.transferRequestSearchInput, () => renderTransferRequestSearchResults());
     els.transferRequestSearchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();

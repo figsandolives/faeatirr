@@ -243,6 +243,7 @@ const state = {
   importedProducts: [],
   productImportStatusText: '',
   productImportCounterText: '',
+  customerImportStatusText: '',
   importedStockMaterials: [],
   materialImportStatusText: '',
   materialImportCounterText: '',
@@ -8471,6 +8472,18 @@ const cashierImportMap = {
   code: 'code'
 };
 
+const customerImportMap = {
+  'اسم الزبون': 'name',
+  'اسم العميل': 'name',
+  'الاسم': 'name',
+  'رقم الهاتف': 'phone',
+  'الهاتف': 'phone',
+  'العنوان': 'address',
+  name: 'name',
+  phone: 'phone',
+  address: 'address'
+};
+
 function mapImportRow(row, mapping) {
   const mapped = {};
   let usedMapping = false;
@@ -8972,6 +8985,182 @@ function handleBulkImportCashiersFile(file) {
       }
     } catch (_error) {
       if (statusEl) statusEl.textContent = window.i18n.t('error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function downloadCustomerTemplate() {
+  if (typeof XLSX === 'undefined') return;
+  const useArabic = window.i18n.getLanguage() === 'ar';
+  const template = [
+    {
+      [useArabic ? 'اسم الزبون' : 'name']: '',
+      [useArabic ? 'رقم الهاتف' : 'phone']: '',
+      [useArabic ? 'العنوان' : 'address']: ''
+    }
+  ];
+  const worksheet = XLSX.utils.json_to_sheet(template);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Customers');
+  XLSX.writeFile(workbook, 'customers-template.xlsx');
+}
+
+function getCustomerImportPhoneKey(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits || normalizeImportIdentity(value);
+}
+
+function normalizeCustomerImportZoneKey(value) {
+  return normalizeImportIdentity(String(value || '')
+    .replace(/^منطقة\s+/u, '')
+    .replace(/^محافظة\s+/u, '')
+    .replace(/\s+/g, ' '));
+}
+
+function splitCustomerImportAddress(value) {
+  return String(value || '')
+    .replace(/\r?\n+/g, ' ')
+    .split(/\s*[-/\\|،]+\s*/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function findCustomerImportZoneMatch(zoneToken, zones = state.cache.deliveryZones || {}) {
+  const targetKey = normalizeCustomerImportZoneKey(zoneToken);
+  if (!targetKey) return null;
+
+  const entries = Object.entries(zones).map(([id, zone]) => ({
+    id,
+    zone,
+    keys: [zone?.nameAr, zone?.nameEn, zone?.name]
+      .map((name) => normalizeCustomerImportZoneKey(name))
+      .filter(Boolean)
+  }));
+
+  let match = entries.find((entry) => entry.keys.includes(targetKey));
+  if (match) return match;
+
+  match = entries.find((entry) => entry.keys.some((key) => key.includes(targetKey) || targetKey.includes(key)));
+  return match || null;
+}
+
+function parseImportedCustomerAddress(value, zones = state.cache.deliveryZones || {}) {
+  const parts = splitCustomerImportAddress(value);
+  const zoneToken = parts.shift() || '';
+  const zoneMatch = findCustomerImportZoneMatch(zoneToken, zones);
+  return {
+    zoneId: zoneMatch?.id || '',
+    zoneToken,
+    details: parts.join(' - ').trim()
+  };
+}
+
+function prepareImportedCustomers(rows) {
+  const zones = state.cache.deliveryZones || {};
+  const existingPhones = new Set(
+    Object.values(state.cache.customers || {})
+      .map((customer) => getCustomerImportPhoneKey(customer?.phone || ''))
+      .filter(Boolean)
+  );
+  const filePhones = new Set();
+  const accepted = [];
+  let duplicateInFileCount = 0;
+  let existingCount = 0;
+  let invalidCount = 0;
+  let unmatchedZoneCount = 0;
+
+  (rows || []).forEach((row, index) => {
+    const mapped = mapImportRow(row, customerImportMap);
+    const name = String(mapped?.name || '').trim();
+    const phone = String(mapped?.phone || '').trim();
+    const addressText = String(mapped?.address || '').trim();
+    const phoneKey = getCustomerImportPhoneKey(phone);
+    if (!name || !phoneKey || !addressText) {
+      invalidCount += 1;
+      return;
+    }
+    if (filePhones.has(phoneKey)) {
+      duplicateInFileCount += 1;
+      return;
+    }
+    if (existingPhones.has(phoneKey)) {
+      existingCount += 1;
+      return;
+    }
+
+    const parsedAddress = parseImportedCustomerAddress(addressText, zones);
+    if (!parsedAddress.zoneId) {
+      unmatchedZoneCount += 1;
+      return;
+    }
+
+    filePhones.add(phoneKey);
+    accepted.push({
+      nameAr: name,
+      nameEn: name,
+      phone,
+      addresses: [{
+        id: `addr-import-${Date.now()}-${index}`,
+        zoneId: parsedAddress.zoneId,
+        details: parsedAddress.details || null
+      }],
+      zoneId: parsedAddress.zoneId,
+      address: parsedAddress.details || null,
+      createdAt: serverTime
+    });
+  });
+
+  return { rows: accepted, duplicateInFileCount, existingCount, invalidCount, unmatchedZoneCount };
+}
+
+async function importBulkCustomers(rows) {
+  if (!rows?.length) return { imported: 0 };
+  const updates = {};
+  rows.forEach((row) => {
+    const key = db.ref('customers').push().key;
+    updates[`customers/${key}`] = row;
+  });
+  await db.ref().update(updates);
+  return { imported: rows.length };
+}
+
+function setCustomerImportStatus(text) {
+  state.customerImportStatusText = text || '';
+  const statusEl = document.getElementById('customersBulkStatus');
+  if (statusEl) statusEl.textContent = state.customerImportStatusText;
+}
+
+function handleBulkImportCustomersFile(file) {
+  setCustomerImportStatus('');
+  if (!file || typeof XLSX === 'undefined') return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const data = new Uint8Array(e.target.result);
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const sourceRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const prepared = prepareImportedCustomers(sourceRows.filter((row) => !isImportRowEmpty(row)));
+    const parts = [`${window.i18n.t('import_loaded')} ${prepared.rows.length}`];
+    if (prepared.duplicateInFileCount > 0) {
+      parts.push(`${window.i18n.t('duplicates_in_file')}: ${prepared.duplicateInFileCount}`);
+    }
+    if (prepared.existingCount > 0) {
+      parts.push(`${window.i18n.t('existing_customers_skipped')}: ${prepared.existingCount}`);
+    }
+    if (prepared.invalidCount > 0) {
+      parts.push(`${window.i18n.t('invalid_rows_skipped')}: ${prepared.invalidCount}`);
+    }
+    if (prepared.unmatchedZoneCount > 0) {
+      parts.push(`${window.i18n.t('unmatched_delivery_zones_skipped')}: ${prepared.unmatchedZoneCount}`);
+    }
+    setCustomerImportStatus(parts.join(' | '));
+    if (!prepared.rows.length) return;
+    try {
+      const result = await importBulkCustomers(prepared.rows);
+      setCustomerImportStatus(`${parts.join(' | ')} | ${window.i18n.t('success')} (${result.imported})`);
+    } catch (_error) {
+      setCustomerImportStatus(window.i18n.t('error'));
     }
   };
   reader.readAsArrayBuffer(file);
@@ -19879,8 +20068,12 @@ function renderCustomersSection() {
         <div class="row">
           <button id="addCustomerInAccountingBtn" class="btn primary small">${window.i18n.t('add_customer')}</button>
           <button id="customersDownloadBtn" class="btn ghost small">${window.i18n.t('customers_download')}</button>
+          <button id="customersTemplateBtn" class="btn ghost small">${window.i18n.t('download_template')}</button>
+          <button id="customersBulkBtn" class="btn ghost small">${window.i18n.t('bulk_import_customers')}</button>
+          <input id="customersBulkInput" type="file" accept=".xlsx,.xls" class="hidden" />
         </div>
       </div>
+      <p id="customersBulkStatus" class="helper" style="margin-top: 10px;">${state.customerImportStatusText || ''}</p>
       ${state.customerFilters.showAddForm ? `
         <div id="customerCreateFormWrap" class="card light" style="margin-top: 12px;">
           <div class="grid two">
@@ -20230,6 +20423,21 @@ function renderCustomersSection() {
   const downloadBtn = document.getElementById('customersDownloadBtn');
   if (downloadBtn) {
     downloadBtn.addEventListener('click', () => exportCustomers());
+  }
+
+  const customersTemplateBtn = document.getElementById('customersTemplateBtn');
+  const customersBulkBtn = document.getElementById('customersBulkBtn');
+  const customersBulkInput = document.getElementById('customersBulkInput');
+  if (customersTemplateBtn) {
+    customersTemplateBtn.addEventListener('click', () => downloadCustomerTemplate());
+  }
+  if (customersBulkBtn && customersBulkInput) {
+    customersBulkBtn.addEventListener('click', () => customersBulkInput.click());
+    customersBulkInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      handleBulkImportCustomersFile(file);
+      e.target.value = '';
+    });
   }
 
   const addBtn = document.getElementById('addCustomerInAccountingBtn');

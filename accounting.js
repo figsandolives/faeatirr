@@ -1159,6 +1159,20 @@ function applyRoleAccess() {
   }
 }
 
+function syncNavigationGroups() {
+  navGroups.forEach((groupEl) => {
+    const toggle = groupEl.querySelector('.group-toggle');
+    const hasActiveChild = Boolean(groupEl.querySelector('.nav-item.active'));
+    groupEl.classList.toggle('has-active', hasActiveChild);
+    if (hasActiveChild) {
+      groupEl.classList.add('open');
+    }
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', groupEl.classList.contains('open') ? 'true' : 'false');
+    }
+  });
+}
+
 function bindNavigation() {
   navItems.forEach((item) => {
     item.addEventListener('click', () => selectSection(item.dataset.section));
@@ -1168,8 +1182,11 @@ function bindNavigation() {
     const toggle = groupEl.querySelector('.group-toggle');
     toggle.addEventListener('click', () => {
       groupEl.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', groupEl.classList.contains('open') ? 'true' : 'false');
     });
   });
+
+  syncNavigationGroups();
 
   els.detailClose.addEventListener('click', () => {
     els.detailOverlay.classList.add('hidden');
@@ -1336,6 +1353,7 @@ function selectSection(sectionId) {
   if (!state.user) return;
   navItems.forEach((item) => item.classList.remove('active'));
   navItems.find((item) => item.dataset.section === sectionId)?.classList.add('active');
+  syncNavigationGroups();
 
   document.querySelectorAll('.section').forEach((section) => {
     section.classList.remove('active');
@@ -7560,10 +7578,7 @@ function setupProductsSection() {
         </thead>
         <tbody id="productsTable"></tbody>
       </table>
-      <div class="row pagination-bar" style="margin-top: 12px;">
-        <span id="productsPageInfo" class="helper"></span>
-        <div id="productsPagination" class="row pagination-actions"></div>
-      </div>
+      ${buildPaginationBarHtml('productsPageInfo', 'productsPagination')}
     </div>
   `;
 
@@ -7977,10 +7992,7 @@ function setupStockMaterialsSection() {
         </thead>
         <tbody id="stockMaterialsTable"></tbody>
       </table>
-      <div class="row pagination-bar" style="margin-top: 12px;">
-        <span id="materialsPageInfo" class="helper"></span>
-        <div id="materialsPagination" class="row pagination-actions"></div>
-      </div>
+      ${buildPaginationBarHtml('materialsPageInfo', 'materialsPagination')}
     </div>
   `;
 
@@ -8450,6 +8462,15 @@ const deliveryZoneImportMap = {
   'الاسم بالانجليزي': 'nameEn'
 };
 
+const cashierImportMap = {
+  'الاسم': 'name',
+  'اسم الكاشير': 'name',
+  'الكود': 'code',
+  'رمز الكاشير': 'code',
+  name: 'name',
+  code: 'code'
+};
+
 function mapImportRow(row, mapping) {
   const mapped = {};
   let usedMapping = false;
@@ -8856,6 +8877,104 @@ function importBulkDeliveryZones(rows) {
     return db.ref('deliveryZones').push({ nameAr, nameEn });
   });
   return Promise.all(tasks);
+}
+
+function downloadCashierTemplate() {
+  if (typeof XLSX === 'undefined') return;
+  const useArabic = window.i18n.getLanguage() === 'ar';
+  const template = [
+    {
+      [useArabic ? 'الاسم' : 'name']: '',
+      [useArabic ? 'الكود' : 'code']: ''
+    }
+  ];
+  const worksheet = XLSX.utils.json_to_sheet(template);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Cashiers');
+  XLSX.writeFile(workbook, 'cashiers-template.xlsx');
+}
+
+function prepareImportedCashiers(rows) {
+  const existingCodes = new Set(
+    Object.values(state.cache.cashiers || {})
+      .map((cashier) => normalizeImportIdentity(cashier?.code || ''))
+      .filter(Boolean)
+  );
+  const fileCodes = new Set();
+  const accepted = [];
+  let duplicateInFileCount = 0;
+  let existingCount = 0;
+  let invalidCount = 0;
+
+  (rows || []).forEach((row) => {
+    const mapped = mapImportRow(row, cashierImportMap);
+    const name = String(mapped?.name || '').trim();
+    const code = String(mapped?.code || '').trim();
+    const codeKey = normalizeImportIdentity(code);
+    if (!name || !codeKey) {
+      invalidCount += 1;
+      return;
+    }
+    if (fileCodes.has(codeKey)) {
+      duplicateInFileCount += 1;
+      return;
+    }
+    if (existingCodes.has(codeKey)) {
+      existingCount += 1;
+      return;
+    }
+    fileCodes.add(codeKey);
+    accepted.push({ name, code: String(code), active: true });
+  });
+
+  return { rows: accepted, duplicateInFileCount, existingCount, invalidCount };
+}
+
+async function importBulkCashiers(rows) {
+  if (!rows?.length) return { imported: 0 };
+  const tasks = rows.map((row) => db.ref('cashiers').push({
+    name: row.name,
+    code: String(row.code),
+    active: true
+  }));
+  await Promise.all(tasks);
+  return { imported: rows.length };
+}
+
+function handleBulkImportCashiersFile(file) {
+  const statusEl = document.getElementById('cashiersBulkStatus');
+  if (statusEl) statusEl.textContent = '';
+  if (!file || typeof XLSX === 'undefined') return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const data = new Uint8Array(e.target.result);
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const sourceRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const prepared = prepareImportedCashiers(sourceRows.filter((row) => !isImportRowEmpty(row)));
+    const parts = [];
+    parts.push(`${window.i18n.t('import_loaded')} ${prepared.rows.length}`);
+    if (prepared.duplicateInFileCount > 0) {
+      parts.push(`${window.i18n.t('duplicates_in_file')}: ${prepared.duplicateInFileCount}`);
+    }
+    if (prepared.existingCount > 0) {
+      parts.push(`${window.i18n.t('existing_cashiers_skipped')}: ${prepared.existingCount}`);
+    }
+    if (prepared.invalidCount > 0) {
+      parts.push(`${window.i18n.t('invalid_rows_skipped')}: ${prepared.invalidCount}`);
+    }
+    if (statusEl) statusEl.textContent = parts.join(' | ');
+    if (!prepared.rows.length) return;
+    try {
+      const result = await importBulkCashiers(prepared.rows);
+      if (statusEl) {
+        statusEl.textContent = `${parts.join(' | ')} | ${window.i18n.t('success')} (${result.imported})`;
+      }
+    } catch (_error) {
+      if (statusEl) statusEl.textContent = window.i18n.t('error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 function downloadMaterialTemplate() {
@@ -20382,7 +20501,14 @@ function setupDevicesCashiersSection() {
         ${buildPaginationBarHtml('devicesPageInfo', 'devicesPagination')}
       </div>
       <div class="card">
-        <h2>${window.i18n.t('cashiers')}</h2>
+        <div class="row" style="justify-content: space-between;">
+          <h2>${window.i18n.t('cashiers')}</h2>
+          <div class="row">
+            <button id="cashiersTemplateBtn" type="button" class="btn ghost small">${window.i18n.t('download_template')}</button>
+            <button id="cashiersBulkBtn" type="button" class="btn ghost small">${window.i18n.t('bulk_import_cashiers')}</button>
+            <input id="cashiersBulkInput" type="file" accept=".xlsx,.xls" class="hidden" />
+          </div>
+        </div>
         <form id="cashierForm" class="grid two">
           <div>
             <label class="tag" for="cashierName">${window.i18n.t('cashier_name')}</label>
@@ -20399,6 +20525,7 @@ function setupDevicesCashiersSection() {
             <button type="submit" class="btn primary">${window.i18n.t('add_cashier')}</button>
           </div>
         </form>
+        <p id="cashiersBulkStatus" class="helper" style="margin-top: 10px;"></p>
         <div class="row" style="justify-content: flex-end; margin-top: 12px;">
           ${buildPageSizeControlHtml('cashiersPageSize')}
         </div>
@@ -20421,10 +20548,25 @@ function setupDevicesCashiersSection() {
   const cashierName = section.querySelector('#cashierName');
   const cashierCode = section.querySelector('#cashierCode');
   const generateBtn = section.querySelector('#generateCashierCode');
+  const cashiersTemplateBtn = section.querySelector('#cashiersTemplateBtn');
+  const cashiersBulkBtn = section.querySelector('#cashiersBulkBtn');
+  const cashiersBulkInput = section.querySelector('#cashiersBulkInput');
 
   generateBtn.addEventListener('click', () => {
     cashierCode.value = Math.floor(1000 + Math.random() * 9000).toString();
   });
+
+  if (cashiersTemplateBtn) {
+    cashiersTemplateBtn.addEventListener('click', () => downloadCashierTemplate());
+  }
+  if (cashiersBulkBtn && cashiersBulkInput) {
+    cashiersBulkBtn.addEventListener('click', () => cashiersBulkInput.click());
+    cashiersBulkInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      handleBulkImportCashiersFile(file);
+      e.target.value = '';
+    });
+  }
 
   cashierForm.addEventListener('submit', (e) => {
     e.preventDefault();

@@ -103,7 +103,9 @@ const state = {
     orderTypeId: 'all',
     dateFrom: '',
     dateTo: '',
-    query: ''
+    query: '',
+    currentPage: 1,
+    pageSize: 10
   },
   customerFilters: {
     zoneId: 'all',
@@ -116,7 +118,9 @@ const state = {
     ordersSort: 'desc',
     detailsCustomerId: null,
     favoriteProductId: null,
-    showAddForm: false
+    showAddForm: false,
+    currentPage: 1,
+    pageSize: 10
   },
   customerEditDraft: null,
   dismissedNoticeKeys: {},
@@ -129,8 +133,11 @@ const state = {
     sortRevenue: 'desc',
     detailsKey: '',
     detailsCashierId: 'all',
-    detailsQuery: ''
+    detailsQuery: '',
+    currentPage: 1,
+    pageSize: 10
   },
+  tablePagination: {},
   editingTableId: null,
   productFilters: {
     branchId: 'all',
@@ -138,14 +145,18 @@ const state = {
     storageLocationId: 'all',
     countryOriginId: 'all',
     sortBy: 'default',
-    query: ''
+    query: '',
+    currentPage: 1,
+    pageSize: 10
   },
   materialFilters: {
     branchId: 'all',
     categoryId: 'all',
     storageLocationId: 'all',
     countryOriginId: 'all',
-    query: ''
+    query: '',
+    currentPage: 1,
+    pageSize: 10
   },
   selectedProducts: new Set(),
   selectedStockMaterials: new Set(),
@@ -511,6 +522,149 @@ function renderCustomerZoneFilter(select) {
     select.appendChild(option);
   });
   select.value = current;
+}
+
+function ensurePaginationFields(filters, defaults = {}) {
+  if (!filters) return filters;
+  if (!Object.prototype.hasOwnProperty.call(filters, 'currentPage')) {
+    filters.currentPage = Number(defaults.currentPage || 1);
+  }
+  if (!Object.prototype.hasOwnProperty.call(filters, 'pageSize')) {
+    filters.pageSize = Number(defaults.pageSize || 10);
+  }
+  filters.currentPage = Math.max(1, Number(filters.currentPage || defaults.currentPage || 1));
+  filters.pageSize = Math.max(1, Number(filters.pageSize || defaults.pageSize || 10));
+  return filters;
+}
+
+function ensureTablePaginationState(key, defaults = {}) {
+  if (!state.tablePagination || typeof state.tablePagination !== 'object') {
+    state.tablePagination = {};
+  }
+  const current = state.tablePagination[key] || {};
+  state.tablePagination[key] = ensurePaginationFields(current, defaults) || { currentPage: 1, pageSize: 10 };
+  return state.tablePagination[key];
+}
+
+function resetPaginationPage(filters) {
+  if (!filters) return;
+  filters.currentPage = 1;
+}
+
+function buildPageSizeControlHtml(selectId) {
+  return `
+    <div class="row" style="gap: 8px; align-items: center;">
+      <span class="helper">${window.i18n.t('items_per_page')}</span>
+      <select id="${selectId}" class="input" style="max-width: 110px;">
+        <option value="10">10</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </div>
+  `;
+}
+
+function buildPaginationBarHtml(infoId, containerId, marginTop = 12) {
+  return `
+    <div class="row pagination-bar" data-pagination-managed="true" style="margin-top: ${marginTop}px;">
+      <span id="${infoId}" class="helper"></span>
+      <div id="${containerId}" class="row pagination-actions"></div>
+    </div>
+  `;
+}
+
+function syncPageSizeSelect(selectId, filters) {
+  const select = document.getElementById(selectId);
+  if (select) {
+    select.value = String(Math.max(1, Number(filters?.pageSize || 10)));
+  }
+}
+
+function buildAutoPaginationKey(sectionId, table, index) {
+  const tbodyId = table.tBodies?.[0]?.id || '';
+  const tableId = table.id || '';
+  const suffix = tableId || tbodyId || `table-${index + 1}`;
+  return `auto:${sectionId}:${suffix}`;
+}
+
+function getAutoPaginationDomIds(sectionId, table, index) {
+  const raw = buildAutoPaginationKey(sectionId, table, index).replace(/[^a-zA-Z0-9_-]/g, '-');
+  return {
+    wrapperId: `${raw}-wrap`,
+    selectId: `${raw}-size`,
+    infoId: `${raw}-info`,
+    paginationId: `${raw}-pagination`
+  };
+}
+
+function isAutoPaginatedDataRow(row) {
+  return !(row.children.length === 1 && row.children[0]?.hasAttribute('colspan'));
+}
+
+function applyAutomaticSectionTablePagination(sectionId = state.currentSection) {
+  if (!sectionId) return;
+  const section = document.getElementById(`section-${sectionId}`);
+  if (!section) return;
+
+  const tables = Array.from(section.querySelectorAll('table.table'));
+  tables.forEach((table, index) => {
+    const card = table.closest('.card');
+    if (!card || card.querySelector('[data-pagination-managed="true"]:not([data-auto-pagination="true"])')) return;
+    const tbody = table.tBodies?.[0];
+    if (!tbody) return;
+
+    const ids = getAutoPaginationDomIds(sectionId, table, index);
+    let wrapper = document.getElementById(ids.wrapperId);
+    if (!wrapper) {
+      wrapper = document.createElement('div');
+      wrapper.id = ids.wrapperId;
+      wrapper.className = 'row pagination-bar';
+      wrapper.style.marginTop = '12px';
+      wrapper.dataset.paginationManaged = 'true';
+      wrapper.dataset.autoPagination = 'true';
+      wrapper.innerHTML = `
+        ${buildPageSizeControlHtml(ids.selectId)}
+        <span id="${ids.infoId}" class="helper"></span>
+        <div id="${ids.paginationId}" class="row pagination-actions"></div>
+      `;
+      table.insertAdjacentElement('afterend', wrapper);
+      const select = wrapper.querySelector(`#${ids.selectId}`);
+      const paginationState = ensureTablePaginationState(buildAutoPaginationKey(sectionId, table, index));
+      if (select) {
+        select.value = String(paginationState.pageSize || 10);
+        select.addEventListener('change', (e) => {
+          paginationState.pageSize = Number(e.target.value || 10);
+          paginationState.currentPage = 1;
+          applyAutomaticSectionTablePagination(sectionId);
+        });
+      }
+    }
+
+    const rows = Array.from(tbody.querySelectorAll(':scope > tr'));
+    const dataRows = rows.filter(isAutoPaginatedDataRow);
+    const paginationState = ensureTablePaginationState(buildAutoPaginationKey(sectionId, table, index));
+    const pagination = paginateEntries(dataRows, paginationState);
+    syncPageSizeSelect(ids.selectId, paginationState);
+    updatePaginationControls({
+      infoId: ids.infoId,
+      containerId: ids.paginationId,
+      filters: paginationState,
+      totalItems: dataRows.length,
+      onPageChange: (page) => {
+        paginationState.currentPage = page;
+        applyAutomaticSectionTablePagination(sectionId);
+      }
+    });
+
+    const visibleRows = new Set(pagination.items);
+    rows.forEach((row) => {
+      if (!isAutoPaginatedDataRow(row)) {
+        row.style.display = '';
+        return;
+      }
+      row.style.display = visibleRows.has(row) ? '' : 'none';
+    });
+  });
 }
 
 const listConfigs = [
@@ -1159,6 +1313,7 @@ function routeScanValue(value) {
     if (input) {
       input.value = value;
       state.productFilters.query = value.trim();
+      state.productFilters.currentPage = 1;
       renderProductsSection();
       return true;
     }
@@ -1169,6 +1324,7 @@ function routeScanValue(value) {
     if (input) {
       input.value = value;
       state.materialFilters.query = value.trim();
+      state.materialFilters.currentPage = 1;
       renderStockMaterialsSection();
       return true;
     }
@@ -1189,6 +1345,7 @@ function selectSection(sectionId) {
   if (target) {
     target.classList.add('active');
     state.currentSection = sectionId;
+    applyAutomaticSectionTablePagination(sectionId);
   }
 }
 
@@ -1268,6 +1425,7 @@ function initListSections() {
 function buildListSection(config) {
   const section = document.getElementById(`section-${config.sectionId}`);
   if (!section) return;
+  const paginationState = ensureTablePaginationState(config.sectionId);
 
   const fieldHtml = config.fields
     .map((field) => {
@@ -1360,6 +1518,9 @@ function buildListSection(config) {
     </div>
     <div class="card">
       ${filterHtml}
+      <div class="row" style="justify-content: flex-end; margin-bottom: 12px;">
+        ${buildPageSizeControlHtml(`${config.sectionId}PageSize`)}
+      </div>
       <table class="table">
         <thead>
           <tr>
@@ -1369,6 +1530,7 @@ function buildListSection(config) {
         </thead>
         <tbody></tbody>
       </table>
+      ${buildPaginationBarHtml(`${config.sectionId}PageInfo`, `${config.sectionId}Pagination`)}
     </div>
   `;
 
@@ -1414,6 +1576,16 @@ function buildListSection(config) {
 
   if (config.sectionId === 'deliveryPrices') {
     bindDeliveryPricesZonePicker(section);
+  }
+
+  const pageSizeSelect = section.querySelector(`#${config.sectionId}PageSize`);
+  if (pageSizeSelect) {
+    pageSizeSelect.value = String(paginationState.pageSize || 10);
+    pageSizeSelect.addEventListener('change', (e) => {
+      paginationState.pageSize = Number(e.target.value || 10);
+      paginationState.currentPage = 1;
+      renderListSection(config);
+    });
   }
 
   renderListSection(config);
@@ -1514,6 +1686,7 @@ function renderListSection(config) {
   const form = section.querySelector('form');
   const tbody = section.querySelector('tbody');
   const cancelBtn = section.querySelector('[data-action="cancel"]');
+  const paginationState = ensureTablePaginationState(config.sectionId);
 
   if (config.sectionId === 'customers') {
     const filterSelect = section.querySelector('#customerZoneFilter');
@@ -1551,6 +1724,19 @@ function renderListSection(config) {
   if (config.sectionId === 'customers' && state.customerFilters.zoneId !== 'all') {
     entries = entries.filter(([, item]) => item.zoneId === state.customerFilters.zoneId);
   }
+  const pagination = paginateEntries(entries, paginationState);
+  const pagedEntries = pagination.items;
+  updatePaginationControls({
+    infoId: `${config.sectionId}PageInfo`,
+    containerId: `${config.sectionId}Pagination`,
+    filters: paginationState,
+    totalItems: entries.length,
+    onPageChange: (page) => {
+      paginationState.currentPage = page;
+      renderListSection(config);
+    }
+  });
+  syncPageSizeSelect(`${config.sectionId}PageSize`, paginationState);
   if (entries.length === 0) {
     const row = document.createElement('tr');
     row.innerHTML = `<td colspan="${config.columns.length + 1}">${window.i18n.t('no_data')}</td>`;
@@ -1558,7 +1744,7 @@ function renderListSection(config) {
     return;
   }
 
-  entries.forEach(([id, item]) => {
+  pagedEntries.forEach(([id, item]) => {
     const row = document.createElement('tr');
     const cells = config.columns
       .map((col) => {
@@ -5608,6 +5794,7 @@ function printSalesProductDetailsReport(product, rows, totalRevenue) {
 function setupOrdersSection() {
   const section = document.getElementById('section-orders');
   if (!section) return;
+  ensurePaginationFields(state.orderFilters);
   if (!Array.isArray(state.orderFilters.zoneIds)) {
     if (state.orderFilters.zoneId && state.orderFilters.zoneId !== 'all') {
       state.orderFilters.zoneIds = [state.orderFilters.zoneId];
@@ -5644,6 +5831,9 @@ function setupOrdersSection() {
       </div>
     </div>
     <div class="card">
+      <div class="row" style="justify-content: flex-end; margin-bottom: 12px;">
+        ${buildPageSizeControlHtml('ordersPageSize')}
+      </div>
       <table class="table">
         <thead>
           <tr>
@@ -5665,32 +5855,45 @@ function setupOrdersSection() {
         </thead>
         <tbody id="ordersTable"></tbody>
       </table>
+      ${buildPaginationBarHtml('ordersPageInfo', 'ordersPagination')}
     </div>
   `;
 
   section.querySelector('#orderBranchFilter').addEventListener('change', (e) => {
     state.orderFilters.branchId = e.target.value;
+    resetPaginationPage(state.orderFilters);
     renderOrders();
   });
   section.querySelector('#orderCashierFilter').addEventListener('change', (e) => {
     state.orderFilters.cashierId = e.target.value;
+    resetPaginationPage(state.orderFilters);
     renderOrders();
   });
   section.querySelector('#orderTypeFilter').addEventListener('change', (e) => {
     state.orderFilters.orderTypeId = e.target.value;
+    resetPaginationPage(state.orderFilters);
     renderOrders();
   });
   section.querySelector('#orderDateFrom').addEventListener('change', (e) => {
     state.orderFilters.dateFrom = e.target.value;
+    resetPaginationPage(state.orderFilters);
     renderOrders();
   });
   section.querySelector('#orderDateTo').addEventListener('change', (e) => {
     state.orderFilters.dateTo = e.target.value;
+    resetPaginationPage(state.orderFilters);
     renderOrders();
   });
 
   section.querySelector('#orderSearch').addEventListener('input', (e) => {
     state.orderFilters.query = e.target.value.trim().toLowerCase();
+    resetPaginationPage(state.orderFilters);
+    renderOrders();
+  });
+
+  section.querySelector('#ordersPageSize').addEventListener('change', (e) => {
+    state.orderFilters.pageSize = Number(e.target.value || 10);
+    resetPaginationPage(state.orderFilters);
     renderOrders();
   });
 
@@ -5711,6 +5914,7 @@ function setupOrdersSection() {
     zoneSelectAll.addEventListener('click', () => {
       const zones = state.cache.deliveryZones || {};
       state.orderFilters.zoneIds = Object.keys(zones);
+      resetPaginationPage(state.orderFilters);
       renderOrders();
       const details = section.querySelector('#orderZoneFilter');
       if (details) details.open = true;
@@ -5722,6 +5926,7 @@ function setupOrdersSection() {
     zoneClear.addEventListener('click', () => {
       state.orderFilters.zoneIds = [];
       if (zoneSearch) zoneSearch.value = '';
+      resetPaginationPage(state.orderFilters);
       renderOrders();
       const details = section.querySelector('#orderZoneFilter');
       if (details) details.open = true;
@@ -5784,6 +5989,7 @@ function renderOrderZoneFilterOptions() {
         zoneIds.delete(entry.id);
       }
       state.orderFilters.zoneIds = Array.from(zoneIds);
+      resetPaginationPage(state.orderFilters);
       renderOrders();
       const details = document.getElementById('orderZoneFilter');
       if (details) details.open = true;
@@ -5801,6 +6007,7 @@ function setupCustomersSection() {
 function setupUnitsSection() {
   const section = document.getElementById('section-units');
   if (!section) return;
+  const paginationState = ensureTablePaginationState('units');
   section.innerHTML = `
     <div class="card">
       <div class="row" style="justify-content: space-between;">
@@ -5809,6 +6016,9 @@ function setupUnitsSection() {
       </div>
     </div>
     <div class="card">
+      <div class="row" style="justify-content: flex-end; margin-bottom: 12px;">
+        ${buildPageSizeControlHtml('unitsPageSize')}
+      </div>
       <table class="table">
         <thead>
           <tr>
@@ -5820,10 +6030,16 @@ function setupUnitsSection() {
         </thead>
         <tbody id="unitsTable"></tbody>
       </table>
+      ${buildPaginationBarHtml('unitsPageInfo', 'unitsPagination')}
     </div>
   `;
 
   section.querySelector('#newUnitBtn').addEventListener('click', () => openUnitModal());
+  section.querySelector('#unitsPageSize').addEventListener('change', (e) => {
+    paginationState.pageSize = Number(e.target.value || 10);
+    paginationState.currentPage = 1;
+    renderUnitsSection();
+  });
   renderUnitsSection();
 }
 
@@ -7305,6 +7521,14 @@ function setupProductsSection() {
           <option value="salesAsc">${window.i18n.t('sort_sales_asc')}</option>
         </select>
         <input id="productSearch" class="input" style="max-width: 220px;" placeholder="${window.i18n.t('search')}" />
+        <div class="row" style="gap: 8px;">
+          <span class="helper">${window.i18n.t('items_per_page')}</span>
+          <select id="productsPageSize" class="input" style="max-width: 110px;">
+            <option value="10">10</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
       </div>
       <div id="importStatus" class="helper" style="margin-top: 8px;"></div>
       <div class="row" style="margin-top: 8px;">
@@ -7336,6 +7560,10 @@ function setupProductsSection() {
         </thead>
         <tbody id="productsTable"></tbody>
       </table>
+      <div class="row pagination-bar" style="margin-top: 12px;">
+        <span id="productsPageInfo" class="helper"></span>
+        <div id="productsPagination" class="row pagination-actions"></div>
+      </div>
     </div>
   `;
 
@@ -7372,28 +7600,116 @@ function bindProductsSection() {
 
   document.getElementById('productBranchFilter').addEventListener('change', (e) => {
     state.productFilters.branchId = e.target.value;
+    state.productFilters.currentPage = 1;
     renderProductsSection();
   });
   document.getElementById('productCategoryFilter').addEventListener('change', (e) => {
     state.productFilters.categoryId = e.target.value;
+    state.productFilters.currentPage = 1;
     renderProductsSection();
   });
   document.getElementById('productStorageFilter').addEventListener('change', (e) => {
     state.productFilters.storageLocationId = e.target.value;
+    state.productFilters.currentPage = 1;
     renderProductsSection();
   });
   document.getElementById('productCountryFilter').addEventListener('change', (e) => {
     state.productFilters.countryOriginId = e.target.value;
+    state.productFilters.currentPage = 1;
     renderProductsSection();
   });
   document.getElementById('productSort').addEventListener('change', (e) => {
     state.productFilters.sortBy = e.target.value;
+    state.productFilters.currentPage = 1;
     renderProductsSection();
   });
   document.getElementById('productSearch').addEventListener('input', (e) => {
     state.productFilters.query = e.target.value.trim();
+    state.productFilters.currentPage = 1;
     renderProductsSection();
   });
+  document.getElementById('productsPageSize').addEventListener('change', (e) => {
+    state.productFilters.pageSize = Number(e.target.value || 10);
+    state.productFilters.currentPage = 1;
+    renderProductsSection();
+  });
+}
+
+function paginateEntries(entries, filters) {
+  const totalItems = entries.length;
+  const pageSize = Math.max(1, Number(filters.pageSize || 10));
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const currentPage = Math.min(Math.max(1, Number(filters.currentPage || 1)), totalPages);
+  filters.currentPage = currentPage;
+  filters.pageSize = pageSize;
+  const startIndex = (currentPage - 1) * pageSize;
+  return {
+    items: entries.slice(startIndex, startIndex + pageSize),
+    totalItems,
+    totalPages,
+    currentPage,
+    pageSize,
+    startIndex
+  };
+}
+
+function buildVisiblePageNumbers(currentPage, totalPages) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+  const pages = new Set([1, totalPages, currentPage, currentPage - 1, currentPage - 2, currentPage + 1, currentPage + 2]);
+  return Array.from(pages)
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((a, b) => a - b);
+}
+
+function updatePaginationControls({ infoId, containerId, filters, totalItems, onPageChange }) {
+  const infoEl = document.getElementById(infoId);
+  const container = document.getElementById(containerId);
+  if (!infoEl || !container) return;
+
+  const pageSize = Math.max(1, Number(filters.pageSize || 10));
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const currentPage = Math.min(Math.max(1, Number(filters.currentPage || 1)), totalPages);
+  const start = totalItems === 0 ? 0 : ((currentPage - 1) * pageSize) + 1;
+  const end = Math.min(currentPage * pageSize, totalItems);
+  infoEl.textContent = totalItems > 0
+    ? `${window.i18n.t('items_per_page')}: ${pageSize} | ${start}-${end} / ${totalItems} | ${window.i18n.t('page')} ${currentPage} / ${totalPages}`
+    : `${window.i18n.t('items_per_page')}: ${pageSize}`;
+
+  container.innerHTML = '';
+  if (totalItems === 0) return;
+
+  const previousBtn = document.createElement('button');
+  previousBtn.className = 'btn ghost small';
+  previousBtn.textContent = window.i18n.t('previous');
+  previousBtn.disabled = currentPage <= 1;
+  previousBtn.addEventListener('click', () => onPageChange(currentPage - 1));
+  container.appendChild(previousBtn);
+
+  const visiblePages = buildVisiblePageNumbers(currentPage, totalPages);
+  let lastPage = 0;
+  visiblePages.forEach((page) => {
+    if (lastPage && page - lastPage > 1) {
+      const gap = document.createElement('span');
+      gap.className = 'helper';
+      gap.textContent = '...';
+      container.appendChild(gap);
+    }
+    const pageBtn = document.createElement('button');
+    pageBtn.className = `btn ghost small${page === currentPage ? ' active' : ''}`;
+    pageBtn.textContent = String(page);
+    pageBtn.addEventListener('click', () => onPageChange(page));
+    container.appendChild(pageBtn);
+    lastPage = page;
+  });
+
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'btn ghost small';
+  nextBtn.textContent = window.i18n.t('next');
+  nextBtn.disabled = currentPage >= totalPages;
+  nextBtn.addEventListener('click', () => onPageChange(currentPage + 1));
+  container.appendChild(nextBtn);
 }
 
 function renderProductsSection() {
@@ -7435,15 +7751,32 @@ function renderProductsSection() {
     entries.sort((a, b) => (salesMap[a.id] || 0) - (salesMap[b.id] || 0));
   }
 
+  const pagination = paginateEntries(entries, state.productFilters);
+  const pagedEntries = pagination.items;
+  updatePaginationControls({
+    infoId: 'productsPageInfo',
+    containerId: 'productsPagination',
+    filters: state.productFilters,
+    totalItems: entries.length,
+    onPageChange: (page) => {
+      state.productFilters.currentPage = page;
+      renderProductsSection();
+    }
+  });
+  const pageSizeSelect = document.getElementById('productsPageSize');
+  if (pageSizeSelect) pageSizeSelect.value = String(state.productFilters.pageSize || 10);
+
   table.innerHTML = '';
   if (entries.length === 0) {
+    const selectAll = document.getElementById('selectAllProducts');
+    if (selectAll) selectAll.checked = false;
     const row = document.createElement('tr');
     row.innerHTML = `<td colspan="15">${window.i18n.t('no_data')}</td>`;
     table.appendChild(row);
     return;
   }
 
-  entries.forEach((product) => {
+  pagedEntries.forEach((product) => {
     const stock = getProductStock(product, branchId);
     const reorderPoint = Number(product.reorderPoint || 0);
     const warningClass = getReorderClass(stock, reorderPoint);
@@ -7515,8 +7848,8 @@ function renderProductsSection() {
 
   const selectAll = document.getElementById('selectAllProducts');
   if (selectAll) {
-    const allSelected = entries.every((product) => state.selectedProducts.has(product.id));
-    selectAll.checked = allSelected && entries.length > 0;
+    const allSelected = pagedEntries.every((product) => state.selectedProducts.has(product.id));
+    selectAll.checked = allSelected && pagedEntries.length > 0;
   }
 }
 
@@ -7606,6 +7939,14 @@ function setupStockMaterialsSection() {
         <select id="materialStorageFilter" class="input" style="max-width: 200px;"></select>
         <select id="materialCountryFilter" class="input" style="max-width: 200px;"></select>
         <input id="materialSearch" class="input" style="max-width: 220px;" placeholder="${window.i18n.t('search')}" />
+        <div class="row" style="gap: 8px;">
+          <span class="helper">${window.i18n.t('items_per_page')}</span>
+          <select id="materialsPageSize" class="input" style="max-width: 110px;">
+            <option value="10">10</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
       </div>
       <div id="materialImportStatus" class="helper" style="margin-top: 8px;"></div>
       <div class="row" style="margin-top: 8px;">
@@ -7636,6 +7977,10 @@ function setupStockMaterialsSection() {
         </thead>
         <tbody id="stockMaterialsTable"></tbody>
       </table>
+      <div class="row pagination-bar" style="margin-top: 12px;">
+        <span id="materialsPageInfo" class="helper"></span>
+        <div id="materialsPagination" class="row pagination-actions"></div>
+      </div>
     </div>
   `;
 
@@ -7665,22 +8010,32 @@ function bindStockMaterialsSection() {
 
   document.getElementById('materialBranchFilter').addEventListener('change', (e) => {
     state.materialFilters.branchId = e.target.value;
+    state.materialFilters.currentPage = 1;
     renderStockMaterialsSection();
   });
   document.getElementById('materialCategoryFilter').addEventListener('change', (e) => {
     state.materialFilters.categoryId = e.target.value;
+    state.materialFilters.currentPage = 1;
     renderStockMaterialsSection();
   });
   document.getElementById('materialStorageFilter').addEventListener('change', (e) => {
     state.materialFilters.storageLocationId = e.target.value;
+    state.materialFilters.currentPage = 1;
     renderStockMaterialsSection();
   });
   document.getElementById('materialCountryFilter').addEventListener('change', (e) => {
     state.materialFilters.countryOriginId = e.target.value;
+    state.materialFilters.currentPage = 1;
     renderStockMaterialsSection();
   });
   document.getElementById('materialSearch').addEventListener('input', (e) => {
     state.materialFilters.query = e.target.value.trim();
+    state.materialFilters.currentPage = 1;
+    renderStockMaterialsSection();
+  });
+  document.getElementById('materialsPageSize').addEventListener('change', (e) => {
+    state.materialFilters.pageSize = Number(e.target.value || 10);
+    state.materialFilters.currentPage = 1;
     renderStockMaterialsSection();
   });
 }
@@ -7717,15 +8072,32 @@ function renderStockMaterialsSection() {
     });
   }
 
+  const pagination = paginateEntries(entries, state.materialFilters);
+  const pagedEntries = pagination.items;
+  updatePaginationControls({
+    infoId: 'materialsPageInfo',
+    containerId: 'materialsPagination',
+    filters: state.materialFilters,
+    totalItems: entries.length,
+    onPageChange: (page) => {
+      state.materialFilters.currentPage = page;
+      renderStockMaterialsSection();
+    }
+  });
+  const pageSizeSelect = document.getElementById('materialsPageSize');
+  if (pageSizeSelect) pageSizeSelect.value = String(state.materialFilters.pageSize || 10);
+
   table.innerHTML = '';
   if (entries.length === 0) {
+    const selectAll = document.getElementById('selectAllMaterials');
+    if (selectAll) selectAll.checked = false;
     const row = document.createElement('tr');
     row.innerHTML = `<td colspan="14">${window.i18n.t('no_data')}</td>`;
     table.appendChild(row);
     return;
   }
 
-  entries.forEach((material) => {
+  pagedEntries.forEach((material) => {
     const stock = getItemStock(material, branchId);
     const reorderPoint = Number(material.reorderPoint || 0);
     const warningClass = getReorderClass(stock, reorderPoint);
@@ -7796,8 +8168,8 @@ function renderStockMaterialsSection() {
 
   const selectAll = document.getElementById('selectAllMaterials');
   if (selectAll) {
-    const allSelected = entries.every((material) => state.selectedStockMaterials.has(material.id));
-    selectAll.checked = allSelected && entries.length > 0;
+    const allSelected = pagedEntries.every((material) => state.selectedStockMaterials.has(material.id));
+    selectAll.checked = allSelected && pagedEntries.length > 0;
   }
 }
 
@@ -8100,6 +8472,87 @@ const IMPORT_BATCH_SIZE = 25;
 
 function isImportRowEmpty(row) {
   return !Object.values(row || {}).some((value) => String(value ?? '').trim() !== '');
+}
+
+function normalizeImportIdentity(value) {
+  return normalizeSearchValue(String(value ?? '').trim());
+}
+
+function getImportProductIdentity(row) {
+  const nameArKey = normalizeImportIdentity(row?.nameAr || row?.name || '');
+  const nameEnKey = normalizeImportIdentity(row?.nameEn || '');
+  return {
+    codeKey: row?.code ? normalizeImportIdentity(row.code) : '',
+    barcodeKey: row?.barcode ? normalizeImportIdentity(row.barcode) : '',
+    nameArKey,
+    nameEnKey,
+    combinedNameKey: [nameArKey, nameEnKey].filter(Boolean).join('|')
+  };
+}
+
+function createProductIdentitySets() {
+  return {
+    code: new Set(),
+    barcode: new Set(),
+    nameAr: new Set(),
+    nameEn: new Set(),
+    combined: new Set()
+  };
+}
+
+function rememberProductIdentity(sets, identity) {
+  if (!sets || !identity) return;
+  if (identity.codeKey) sets.code.add(identity.codeKey);
+  if (identity.barcodeKey) sets.barcode.add(identity.barcodeKey);
+  if (identity.nameArKey) sets.nameAr.add(identity.nameArKey);
+  if (identity.nameEnKey) sets.nameEn.add(identity.nameEnKey);
+  if (identity.combinedNameKey) sets.combined.add(identity.combinedNameKey);
+}
+
+function matchesProductIdentity(sets, identity) {
+  if (!sets || !identity) return false;
+  if (identity.codeKey && sets.code.has(identity.codeKey)) return true;
+  if (identity.barcodeKey && sets.barcode.has(identity.barcodeKey)) return true;
+  if (identity.combinedNameKey && sets.combined.has(identity.combinedNameKey)) return true;
+  if (identity.nameArKey && sets.nameAr.has(identity.nameArKey)) return true;
+  if (identity.nameEnKey && sets.nameEn.has(identity.nameEnKey)) return true;
+  return false;
+}
+
+function buildExistingProductIdentitySets() {
+  const sets = createProductIdentitySets();
+  Object.values(state.cache.products || {}).forEach((product) => {
+    rememberProductIdentity(sets, getImportProductIdentity(product));
+  });
+  return sets;
+}
+
+function prepareImportedProducts(rows) {
+  const accepted = [];
+  const fileSets = createProductIdentitySets();
+  const existingSets = buildExistingProductIdentitySets();
+  let duplicateInFileCount = 0;
+  let existingCount = 0;
+
+  (rows || []).forEach((row) => {
+    const identity = getImportProductIdentity(row);
+    if (matchesProductIdentity(fileSets, identity)) {
+      duplicateInFileCount += 1;
+      return;
+    }
+    if (matchesProductIdentity(existingSets, identity)) {
+      existingCount += 1;
+      return;
+    }
+    accepted.push(row);
+    rememberProductIdentity(fileSets, identity);
+  });
+
+  return {
+    rows: accepted,
+    duplicateInFileCount,
+    existingCount
+  };
 }
 
 function waitForImportUiFrame() {
@@ -8817,13 +9270,21 @@ function handleBulkImportFile(file) {
     const data = new Uint8Array(e.target.result);
     const workbook = XLSX.read(data, { type: 'array' });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-    state.importedProducts = rows
+    const sourceRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const prepared = prepareImportedProducts(sourceRows
       .filter((row) => !isImportRowEmpty(row))
-      .map((row) => mapImportRow(row, productImportMap));
+      .map((row) => mapImportRow(row, productImportMap)));
+    state.importedProducts = prepared.rows;
+    const statusParts = [`${window.i18n.t('import_loaded')} ${prepared.rows.length}`];
+    if (prepared.duplicateInFileCount > 0) {
+      statusParts.push(`${window.i18n.t('duplicates_in_file')}: ${prepared.duplicateInFileCount}`);
+    }
+    if (prepared.existingCount > 0) {
+      statusParts.push(`${window.i18n.t('existing_products_skipped')}: ${prepared.existingCount}`);
+    }
     setImportUiState('products', {
-      statusText: `${window.i18n.t('import_loaded')} ${state.importedProducts.length}`,
-      counterText: ''
+      statusText: statusParts.join(' | '),
+      counterText: state.importedProducts.length > 0 ? `${window.i18n.t('ready_to_import')}: ${state.importedProducts.length}` : ''
     });
   };
   reader.readAsArrayBuffer(file);
@@ -17938,6 +18399,7 @@ function openDiscountUsage(discountId) {
 function renderOrders() {
   const table = document.getElementById('ordersTable');
   if (!table) return;
+  ensurePaginationFields(state.orderFilters);
   const orders = state.cache.orders || {};
   const branches = state.cache.branches || {};
   const cashiers = state.cache.cashiers || {};
@@ -18011,17 +18473,32 @@ function renderOrders() {
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
   const filtered = entries.filter((order) => orderMatchesFilters(order, customers));
+  const pagination = paginateEntries(filtered, state.orderFilters);
+  const pagedOrders = pagination.items;
+  updatePaginationControls({
+    infoId: 'ordersPageInfo',
+    containerId: 'ordersPagination',
+    filters: state.orderFilters,
+    totalItems: filtered.length,
+    onPageChange: (page) => {
+      state.orderFilters.currentPage = page;
+      renderOrders();
+    }
+  });
+  syncPageSizeSelect('ordersPageSize', state.orderFilters);
 
   table.innerHTML = '';
 
   if (filtered.length === 0) {
+    const selectAll = document.getElementById('selectAllOrders');
+    if (selectAll) selectAll.checked = false;
     const row = document.createElement('tr');
     row.innerHTML = `<td colspan="14">${window.i18n.t('no_data')}</td>`;
     table.appendChild(row);
     return;
   }
 
-  filtered.forEach((order) => {
+  pagedOrders.forEach((order) => {
     const row = document.createElement('tr');
     const customer = customers[order.customerId];
     const customerName = order.customerName || getLocalizedName(customer);
@@ -18059,7 +18536,7 @@ function renderOrders() {
 
   const selectAll = document.getElementById('selectAllOrders');
   if (selectAll) {
-    selectAll.checked = filtered.every((order) => state.selectedOrders.has(order.id));
+    selectAll.checked = pagedOrders.length > 0 && pagedOrders.every((order) => state.selectedOrders.has(order.id));
   }
 }
 
@@ -18113,7 +18590,8 @@ function getSelectedOrders() {
 }
 
 function toggleSelectAllOrders(checked) {
-  const orders = getFilteredOrders();
+  ensurePaginationFields(state.orderFilters);
+  const orders = paginateEntries(getFilteredOrders(), state.orderFilters).items;
   if (checked) {
     orders.forEach((order) => state.selectedOrders.add(order.id));
   } else {
@@ -18502,9 +18980,12 @@ function ensureCustomerFiltersState() {
       ordersSort: 'desc',
       detailsCustomerId: null,
       favoriteProductId: null,
-      showAddForm: false
+      showAddForm: false,
+      currentPage: 1,
+      pageSize: 10
     };
   }
+  ensurePaginationFields(state.customerFilters);
   if (!Array.isArray(state.customerFilters.zoneIds)) {
     if (state.customerFilters.zoneId && state.customerFilters.zoneId !== 'all') {
       state.customerFilters.zoneIds = [state.customerFilters.zoneId];
@@ -18562,6 +19043,7 @@ function renderCustomerZoneFilterOptions() {
       else zoneIds.delete(entry.id);
       state.customerFilters.zoneIds = Array.from(zoneIds);
       state.customerFilters.zoneId = state.customerFilters.zoneIds.length ? state.customerFilters.zoneIds[0] : 'all';
+      resetPaginationPage(state.customerFilters);
       renderCustomersSection();
       const details = document.getElementById('customerZoneFilter');
       if (details) details.open = true;
@@ -19348,6 +19830,9 @@ function renderCustomersSection() {
           <span>${window.i18n.t('blocked_only')}</span>
         </label>
       </div>
+      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+        ${buildPageSizeControlHtml('customersPageSize')}
+      </div>
     </div>
     <div class="card">
       <table class="table">
@@ -19369,6 +19854,7 @@ function renderCustomersSection() {
         </thead>
         <tbody id="customersTable"></tbody>
       </table>
+      ${buildPaginationBarHtml('customersPageInfo', 'customersPagination')}
     </div>
     <div id="customerEditOverlay" class="overlay hidden">
       <div class="modal lg" style="text-align: start; max-height: 90vh; overflow: auto; max-width: 900px; width: 100%;">
@@ -19415,6 +19901,7 @@ function renderCustomersSection() {
       const zonesMap = state.cache.deliveryZones || {};
       state.customerFilters.zoneIds = Object.keys(zonesMap);
       state.customerFilters.zoneId = state.customerFilters.zoneIds[0] || 'all';
+      resetPaginationPage(state.customerFilters);
       renderCustomersSection();
       const details = document.getElementById('customerZoneFilter');
       if (details) details.open = true;
@@ -19426,6 +19913,7 @@ function renderCustomersSection() {
       state.customerFilters.zoneIds = [];
       state.customerFilters.zoneId = 'all';
       if (zoneFilterSearch) zoneFilterSearch.value = '';
+      resetPaginationPage(state.customerFilters);
       renderCustomersSection();
       const details = document.getElementById('customerZoneFilter');
       if (details) details.open = true;
@@ -19438,6 +19926,7 @@ function renderCustomersSection() {
     levelFilter.value = state.customerFilters.level || 'all';
     levelFilter.addEventListener('change', () => {
       state.customerFilters.level = levelFilter.value;
+      resetPaginationPage(state.customerFilters);
       renderCustomersSection();
     });
   }
@@ -19447,6 +19936,7 @@ function renderCustomersSection() {
     ordersSort.value = state.customerFilters.ordersSort || 'desc';
     ordersSort.addEventListener('change', () => {
       state.customerFilters.ordersSort = ordersSort.value || 'desc';
+      resetPaginationPage(state.customerFilters);
       renderCustomersSection();
     });
   }
@@ -19455,6 +19945,7 @@ function renderCustomersSection() {
   if (queryInput) {
     bindDebouncedQueryInput(queryInput, (value) => {
       state.customerFilters.query = String(value || '').trim();
+      resetPaginationPage(state.customerFilters);
       renderCustomersSection();
     });
   }
@@ -19464,12 +19955,14 @@ function renderCustomersSection() {
   if (dateFromInput) {
     dateFromInput.addEventListener('change', () => {
       state.customerFilters.dateFrom = dateFromInput.value || '';
+      resetPaginationPage(state.customerFilters);
       renderCustomersSection();
     });
   }
   if (dateToInput) {
     dateToInput.addEventListener('change', () => {
       state.customerFilters.dateTo = dateToInput.value || '';
+      resetPaginationPage(state.customerFilters);
       renderCustomersSection();
     });
   }
@@ -19478,6 +19971,17 @@ function renderCustomersSection() {
   if (blockedOnly) {
     blockedOnly.addEventListener('change', () => {
       state.customerFilters.blockedOnly = blockedOnly.checked;
+      resetPaginationPage(state.customerFilters);
+      renderCustomersSection();
+    });
+  }
+
+  const pageSizeSelect = document.getElementById('customersPageSize');
+  if (pageSizeSelect) {
+    pageSizeSelect.value = String(state.customerFilters.pageSize || 10);
+    pageSizeSelect.addEventListener('change', () => {
+      state.customerFilters.pageSize = Number(pageSizeSelect.value || 10);
+      resetPaginationPage(state.customerFilters);
       renderCustomersSection();
     });
   }
@@ -19530,6 +20034,18 @@ function renderCustomersSection() {
     if (countDiff !== 0) return countDiff;
     return Number(b.lastOrder || 0) - Number(a.lastOrder || 0);
   });
+  const pagination = paginateEntries(filteredEntries, state.customerFilters);
+  const pagedEntries = pagination.items;
+  updatePaginationControls({
+    infoId: 'customersPageInfo',
+    containerId: 'customersPagination',
+    filters: state.customerFilters,
+    totalItems: filteredEntries.length,
+    onPageChange: (page) => {
+      state.customerFilters.currentPage = page;
+      renderCustomersSection();
+    }
+  });
 
   const table = document.getElementById('customersTable');
   if (table) {
@@ -19537,7 +20053,7 @@ function renderCustomersSection() {
     if (!filteredEntries.length) {
       table.innerHTML = `<tr><td colspan="12">${window.i18n.t('no_data')}</td></tr>`;
     } else {
-      filteredEntries.forEach((entry) => {
+      pagedEntries.forEach((entry) => {
         const row = document.createElement('tr');
         row.innerHTML = `
           <td><input type="checkbox" data-id="${entry.id}" ${state.selectedCustomers.has(entry.id) ? 'checked' : ''} /></td>
@@ -19586,7 +20102,7 @@ function renderCustomersSection() {
 
   const selectAll = document.getElementById('selectAllCustomers');
   if (selectAll) {
-    selectAll.checked = filteredEntries.length > 0 && filteredEntries.every((entry) => state.selectedCustomers.has(entry.id));
+    selectAll.checked = pagedEntries.length > 0 && pagedEntries.every((entry) => state.selectedCustomers.has(entry.id));
     selectAll.addEventListener('change', (e) => {
       toggleSelectAllCustomers(e.target.checked);
     });
@@ -19744,9 +20260,23 @@ function exportCustomers() {
 function renderUnitsSection() {
   const table = document.getElementById('unitsTable');
   if (!table) return;
+  const paginationState = ensureTablePaginationState('units');
   const units = state.cache.units || {};
   const products = state.cache.products || {};
   const entries = Object.entries(units);
+  const pagination = paginateEntries(entries, paginationState);
+  const pagedEntries = pagination.items;
+  updatePaginationControls({
+    infoId: 'unitsPageInfo',
+    containerId: 'unitsPagination',
+    filters: paginationState,
+    totalItems: entries.length,
+    onPageChange: (page) => {
+      paginationState.currentPage = page;
+      renderUnitsSection();
+    }
+  });
+  syncPageSizeSelect('unitsPageSize', paginationState);
   table.innerHTML = '';
   if (entries.length === 0) {
     const row = document.createElement('tr');
@@ -19755,7 +20285,7 @@ function renderUnitsSection() {
     return;
   }
 
-  entries.forEach(([id, unit]) => {
+  pagedEntries.forEach(([id, unit]) => {
     const productCount = Object.values(products).filter((product) => product.unitId === id).length;
     const row = document.createElement('tr');
     row.innerHTML = `
@@ -19827,10 +20357,15 @@ function saveUnit() {
 function setupDevicesCashiersSection() {
   const section = document.getElementById('section-devicesCashiers');
   if (!section) return;
+  const devicesPagination = ensureTablePaginationState('devicesCashiersDevices');
+  const cashiersPagination = ensureTablePaginationState('devicesCashiersCashiers');
   section.innerHTML = `
     <div class="grid two">
       <div class="card">
         <h2>${window.i18n.t('devices_open')}</h2>
+        <div class="row" style="justify-content: flex-end; margin: 12px 0;">
+          ${buildPageSizeControlHtml('devicesPageSize')}
+        </div>
         <table class="table">
           <thead>
             <tr>
@@ -19844,6 +20379,7 @@ function setupDevicesCashiersSection() {
           </thead>
           <tbody id="devicesTable"></tbody>
         </table>
+        ${buildPaginationBarHtml('devicesPageInfo', 'devicesPagination')}
       </div>
       <div class="card">
         <h2>${window.i18n.t('cashiers')}</h2>
@@ -19863,6 +20399,9 @@ function setupDevicesCashiersSection() {
             <button type="submit" class="btn primary">${window.i18n.t('add_cashier')}</button>
           </div>
         </form>
+        <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+          ${buildPageSizeControlHtml('cashiersPageSize')}
+        </div>
         <table class="table" style="margin-top: 12px;">
           <thead>
             <tr>
@@ -19873,6 +20412,7 @@ function setupDevicesCashiersSection() {
           </thead>
           <tbody id="cashiersTable"></tbody>
         </table>
+        ${buildPaginationBarHtml('cashiersPageInfo', 'cashiersPagination')}
       </div>
     </div>
   `;
@@ -19903,6 +20443,17 @@ function setupDevicesCashiersSection() {
     cashierCode.value = '';
   });
 
+  section.querySelector('#devicesPageSize').addEventListener('change', (e) => {
+    devicesPagination.pageSize = Number(e.target.value || 10);
+    devicesPagination.currentPage = 1;
+    renderDevicesCashiers();
+  });
+  section.querySelector('#cashiersPageSize').addEventListener('change', (e) => {
+    cashiersPagination.pageSize = Number(e.target.value || 10);
+    cashiersPagination.currentPage = 1;
+    renderDevicesCashiers();
+  });
+
   renderDevicesCashiers();
 }
 
@@ -19910,6 +20461,8 @@ function renderDevicesCashiers() {
   const devicesTable = document.getElementById('devicesTable');
   const cashiersTable = document.getElementById('cashiersTable');
   if (!devicesTable || !cashiersTable) return;
+  const devicesPagination = ensureTablePaginationState('devicesCashiersDevices');
+  const cashiersPagination = ensureTablePaginationState('devicesCashiersCashiers');
 
   const devices = state.cache.devices || {};
   const statuses = state.cache.status || {};
@@ -19922,12 +20475,24 @@ function renderDevicesCashiers() {
     if (!isOnline && !device?.branchId) return false;
     return true;
   });
+  const pagedDeviceEntries = paginateEntries(deviceEntries, devicesPagination).items;
+  updatePaginationControls({
+    infoId: 'devicesPageInfo',
+    containerId: 'devicesPagination',
+    filters: devicesPagination,
+    totalItems: deviceEntries.length,
+    onPageChange: (page) => {
+      devicesPagination.currentPage = page;
+      renderDevicesCashiers();
+    }
+  });
+  syncPageSizeSelect('devicesPageSize', devicesPagination);
   if (deviceEntries.length === 0) {
     const row = document.createElement('tr');
     row.innerHTML = `<td colspan="6">${window.i18n.t('no_data')}</td>`;
     devicesTable.appendChild(row);
   }
-  deviceEntries.forEach(([id, device]) => {
+  pagedDeviceEntries.forEach(([id, device]) => {
     const status = statuses[id];
     const isOnline = status?.online;
     const row = document.createElement('tr');
@@ -19996,6 +20561,18 @@ function renderDevicesCashiers() {
   cashiersTable.innerHTML = '';
   const cashiers = state.cache.cashiers || {};
   const entries = Object.entries(cashiers);
+  const pagedCashiers = paginateEntries(entries, cashiersPagination).items;
+  updatePaginationControls({
+    infoId: 'cashiersPageInfo',
+    containerId: 'cashiersPagination',
+    filters: cashiersPagination,
+    totalItems: entries.length,
+    onPageChange: (page) => {
+      cashiersPagination.currentPage = page;
+      renderDevicesCashiers();
+    }
+  });
+  syncPageSizeSelect('cashiersPageSize', cashiersPagination);
   if (entries.length === 0) {
     const row = document.createElement('tr');
     row.innerHTML = `<td colspan="3">${window.i18n.t('no_data')}</td>`;
@@ -20003,7 +20580,7 @@ function renderDevicesCashiers() {
     return;
   }
 
-  entries.forEach(([id, cashier]) => {
+  pagedCashiers.forEach(([id, cashier]) => {
     const row = document.createElement('tr');
     row.innerHTML = `
       <td>${cashier.name || '-'}</td>
@@ -20045,10 +20622,13 @@ function ensureTablesFiltersState() {
       sortRevenue: 'desc',
       detailsKey: '',
       detailsCashierId: 'all',
-      detailsQuery: ''
+      detailsQuery: '',
+      currentPage: 1,
+      pageSize: 10
     };
     return;
   }
+  ensurePaginationFields(state.tablesFilters);
   if (!Object.prototype.hasOwnProperty.call(state.tablesFilters, 'detailsKey')) {
     state.tablesFilters.detailsKey = '';
   }
@@ -20439,6 +21019,9 @@ function renderTablesSection() {
           <option value="asc">${window.i18n.t('sort_revenue_asc')}</option>
         </select>
       </div>
+      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+        ${buildPageSizeControlHtml('tablesPageSize')}
+      </div>
       <div class="grid two" style="margin-top: 12px;">
         <div class="card light"><strong>${window.i18n.t('total_orders_label')}</strong><div class="report-total-value">${totals.orders}</div></div>
         <div class="card light"><strong>${window.i18n.t('table_revenue')}</strong><div class="report-total-value">${formatMoney(totals.revenue)}</div></div>
@@ -20471,6 +21054,7 @@ function renderTablesSection() {
         </thead>
         <tbody id="tablesTableBody"></tbody>
       </table>
+      ${buildPaginationBarHtml('tablesPageInfo', 'tablesPagination')}
     </div>
   `;
 
@@ -20479,6 +21063,7 @@ function renderTablesSection() {
     fillReportBranchSelect(branchFilter, filters.branchId || 'all');
     branchFilter.addEventListener('change', () => {
       state.tablesFilters.branchId = branchFilter.value || 'all';
+      resetPaginationPage(state.tablesFilters);
       renderTablesSection();
     });
   }
@@ -20487,6 +21072,7 @@ function renderTablesSection() {
   if (dateFromInput) {
     dateFromInput.addEventListener('change', () => {
       state.tablesFilters.fromDate = dateFromInput.value || '';
+      resetPaginationPage(state.tablesFilters);
       renderTablesSection();
     });
   }
@@ -20494,6 +21080,7 @@ function renderTablesSection() {
   if (dateToInput) {
     dateToInput.addEventListener('change', () => {
       state.tablesFilters.toDate = dateToInput.value || '';
+      resetPaginationPage(state.tablesFilters);
       renderTablesSection();
     });
   }
@@ -20501,6 +21088,7 @@ function renderTablesSection() {
   if (numberFilter) {
     bindDebouncedQueryInput(numberFilter, (value) => {
       state.tablesFilters.tableQuery = String(value || '').trim();
+      resetPaginationPage(state.tablesFilters);
       renderTablesSection();
     });
   }
@@ -20509,6 +21097,7 @@ function renderTablesSection() {
     sortOrders.value = filters.sortOrders || 'desc';
     sortOrders.addEventListener('change', () => {
       state.tablesFilters.sortOrders = sortOrders.value || 'desc';
+      resetPaginationPage(state.tablesFilters);
       renderTablesSection();
     });
   }
@@ -20517,6 +21106,16 @@ function renderTablesSection() {
     sortRevenue.value = filters.sortRevenue || 'desc';
     sortRevenue.addEventListener('change', () => {
       state.tablesFilters.sortRevenue = sortRevenue.value || 'desc';
+      resetPaginationPage(state.tablesFilters);
+      renderTablesSection();
+    });
+  }
+  const pageSizeSelect = document.getElementById('tablesPageSize');
+  if (pageSizeSelect) {
+    pageSizeSelect.value = String(filters.pageSize || 10);
+    pageSizeSelect.addEventListener('change', () => {
+      state.tablesFilters.pageSize = Number(pageSizeSelect.value || 10);
+      resetPaginationPage(state.tablesFilters);
       renderTablesSection();
     });
   }
@@ -20584,11 +21183,23 @@ function renderTablesSection() {
   }
 
   const tbody = document.getElementById('tablesTableBody');
+  const pagination = paginateEntries(rows, filters);
+  const pagedRows = pagination.items;
+  updatePaginationControls({
+    infoId: 'tablesPageInfo',
+    containerId: 'tablesPagination',
+    filters,
+    totalItems: rows.length,
+    onPageChange: (page) => {
+      state.tablesFilters.currentPage = page;
+      renderTablesSection();
+    }
+  });
   if (tbody) {
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="6">${window.i18n.t('no_data')}</td></tr>`;
     } else {
-      tbody.innerHTML = rows.map((row) => `
+      tbody.innerHTML = pagedRows.map((row) => `
         <tr>
           <td>${row.tableNumber || '-'}</td>
           <td>${row.branchName || '-'}</td>
@@ -20685,6 +21296,7 @@ function renderTablesSection() {
 function setupUsersSection() {
   const section = document.getElementById('section-users');
   if (!section) return;
+  const paginationState = ensureTablePaginationState('users');
   section.innerHTML = `
     <div class="card">
       <h2>${window.i18n.t('users')}</h2>
@@ -20711,6 +21323,9 @@ function setupUsersSection() {
       </form>
     </div>
     <div class="card">
+      <div class="row" style="justify-content: flex-end; margin-bottom: 12px;">
+        ${buildPageSizeControlHtml('usersPageSize')}
+      </div>
       <table class="table">
         <thead>
           <tr>
@@ -20722,6 +21337,7 @@ function setupUsersSection() {
         </thead>
         <tbody id="usersTable"></tbody>
       </table>
+      ${buildPaginationBarHtml('usersPageInfo', 'usersPagination')}
     </div>
   `;
 
@@ -20758,16 +21374,35 @@ function setupUsersSection() {
     codeInput.value = '';
   });
 
+  section.querySelector('#usersPageSize').addEventListener('change', (e) => {
+    paginationState.pageSize = Number(e.target.value || 10);
+    paginationState.currentPage = 1;
+    renderUsers();
+  });
+
   renderUsers();
 }
 
 function renderUsers() {
   const table = document.getElementById('usersTable');
   if (!table) return;
+  const paginationState = ensureTablePaginationState('users');
   table.innerHTML = '';
 
   const users = state.cache.users || {};
   const entries = Object.entries(users);
+  const pagedEntries = paginateEntries(entries, paginationState).items;
+  updatePaginationControls({
+    infoId: 'usersPageInfo',
+    containerId: 'usersPagination',
+    filters: paginationState,
+    totalItems: entries.length,
+    onPageChange: (page) => {
+      paginationState.currentPage = page;
+      renderUsers();
+    }
+  });
+  syncPageSizeSelect('usersPageSize', paginationState);
   if (entries.length === 0) {
     const row = document.createElement('tr');
     row.innerHTML = `<td colspan="4">${window.i18n.t('no_data')}</td>`;
@@ -20775,7 +21410,7 @@ function renderUsers() {
     return;
   }
 
-  entries.forEach(([id, user]) => {
+  pagedEntries.forEach(([id, user]) => {
     const isDefaultManager = id === DEFAULT_MANAGER_USER_ID;
     const row = document.createElement('tr');
     const roleKey = isDefaultManager
@@ -20910,6 +21545,7 @@ function refreshAllDataViews() {
   renderCustomersSection();
   renderUnitsSection();
   updateReorderNotice();
+  applyAutomaticSectionTablePagination(state.currentSection);
 }
 
 function flushPendingDataRefresh() {

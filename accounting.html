@@ -158,6 +158,23 @@
     </div>
   </div>
 
+  <div id="importProgressOverlay" class="overlay hidden">
+    <div class="modal card import-progress-modal">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <h3 id="importProgressTitle" data-i18n="importing"></h3>
+        <span id="importProgressPercent" class="tag">0%</span>
+      </div>
+      <p id="importProgressSubtitle" class="helper" data-i18n="importing_to_system"></p>
+      <div class="import-progress-track" aria-hidden="true">
+        <div id="importProgressFill" class="import-progress-fill"></div>
+      </div>
+      <div class="row import-progress-meta">
+        <span id="importProgressCount" class="helper">0 / 0</span>
+        <span id="importProgressErrors" class="helper import-progress-errors"></span>
+      </div>
+    </div>
+  </div>
+
   <div id="productModal" class="overlay hidden">
     <div class="modal card" style="max-width: 720px; text-align: start;">
       <h3 data-i18n="products"></h3>

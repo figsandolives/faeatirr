@@ -19,6 +19,7 @@ const state = {
   role: null,
   cache: {},
   pendingDataRefresh: false,
+  importInProgress: false,
   currentSection: 'reports',
   reports: {
     view: 'dashboard',
@@ -229,7 +230,11 @@ const state = {
     onConfirm: null
   },
   importedProducts: [],
+  productImportStatusText: '',
+  productImportCounterText: '',
   importedStockMaterials: [],
+  materialImportStatusText: '',
+  materialImportCounterText: '',
   discountReport: {
     view: 'list',
     discountId: null,
@@ -715,6 +720,13 @@ const els = {
   issueDetailOverlay: document.getElementById('issueDetailOverlay'),
   issueDetailBody: document.getElementById('issueDetailBody'),
   issueDetailClose: document.getElementById('issueDetailClose'),
+  importProgressOverlay: document.getElementById('importProgressOverlay'),
+  importProgressTitle: document.getElementById('importProgressTitle'),
+  importProgressSubtitle: document.getElementById('importProgressSubtitle'),
+  importProgressFill: document.getElementById('importProgressFill'),
+  importProgressCount: document.getElementById('importProgressCount'),
+  importProgressPercent: document.getElementById('importProgressPercent'),
+  importProgressErrors: document.getElementById('importProgressErrors'),
   reorderNotice: document.getElementById('reorderNotice'),
   orderEditOverlay: document.getElementById('orderEditOverlay'),
   orderEditForm: document.getElementById('orderEditForm'),
@@ -7356,6 +7368,7 @@ function bindProductsSection() {
   downloadBarcodesBtn.addEventListener('click', () => downloadBarcodesZip());
 
   selectAll.addEventListener('change', (e) => toggleSelectAllProducts(e.target.checked));
+  syncImportUi('products');
 
   document.getElementById('productBranchFilter').addEventListener('change', (e) => {
     state.productFilters.branchId = e.target.value;
@@ -7648,6 +7661,7 @@ function bindStockMaterialsSection() {
   importConfirmBtn.addEventListener('click', () => importBulkStockMaterials());
   downloadBarcodesBtn.addEventListener('click', () => downloadMaterialBarcodesZip());
   selectAll.addEventListener('change', (e) => toggleSelectAllStockMaterials(e.target.checked));
+  syncImportUi('stockMaterials');
 
   document.getElementById('materialBranchFilter').addEventListener('change', (e) => {
     state.materialFilters.branchId = e.target.value;
@@ -8082,6 +8096,269 @@ function mapImportRow(row, mapping) {
   return mapped;
 }
 
+const IMPORT_BATCH_SIZE = 25;
+
+function isImportRowEmpty(row) {
+  return !Object.values(row || {}).some((value) => String(value ?? '').trim() !== '');
+}
+
+function waitForImportUiFrame() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      setTimeout(resolve, 0);
+    });
+  });
+}
+
+function waitForImportDelay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getImportUiConfig(type) {
+  if (type === 'stockMaterials') {
+    return {
+      rowsKey: 'importedStockMaterials',
+      statusKey: 'materialImportStatusText',
+      counterKey: 'materialImportCounterText',
+      statusId: 'materialImportStatus',
+      counterId: 'materialImportCounter',
+      confirmId: 'materialImportConfirmBtn',
+      inputId: 'materialBulkInput'
+    };
+  }
+  return {
+    rowsKey: 'importedProducts',
+    statusKey: 'productImportStatusText',
+    counterKey: 'productImportCounterText',
+    statusId: 'importStatus',
+    counterId: 'importCounter',
+    confirmId: 'importConfirmBtn',
+    inputId: 'bulkImportInput'
+  };
+}
+
+function syncImportUi(type) {
+  const config = getImportUiConfig(type);
+  const statusEl = document.getElementById(config.statusId);
+  const counterEl = document.getElementById(config.counterId);
+  const confirmBtn = document.getElementById(config.confirmId);
+  if (statusEl) statusEl.textContent = state[config.statusKey] || '';
+  if (counterEl) counterEl.textContent = state[config.counterKey] || '';
+  if (confirmBtn) {
+    const hasRows = Array.isArray(state[config.rowsKey]) && state[config.rowsKey].length > 0;
+    confirmBtn.classList.toggle('hidden', !hasRows);
+    confirmBtn.disabled = state.importInProgress;
+  }
+}
+
+function setImportUiState(type, { statusText, counterText } = {}) {
+  const config = getImportUiConfig(type);
+  if (statusText !== undefined) state[config.statusKey] = statusText;
+  if (counterText !== undefined) state[config.counterKey] = counterText;
+  syncImportUi(type);
+}
+
+function setImportMode(active) {
+  state.importInProgress = Boolean(active);
+  syncImportUi('products');
+  syncImportUi('stockMaterials');
+  if (!state.importInProgress) {
+    flushPendingDataRefresh();
+  }
+}
+
+function updateImportProgressOverlay({ visible = true, title = '', subtitle = '', processed = 0, total = 0, failed = 0 } = {}) {
+  if (!els.importProgressOverlay) return;
+  if (!visible) {
+    els.importProgressOverlay.classList.add('hidden');
+    return;
+  }
+  const safeProcessed = Math.max(0, Number(processed || 0));
+  const safeTotal = Math.max(0, Number(total || 0));
+  const percent = safeTotal > 0 ? Math.min(100, Math.round((safeProcessed / safeTotal) * 100)) : 0;
+  els.importProgressOverlay.classList.remove('hidden');
+  if (els.importProgressTitle) els.importProgressTitle.textContent = title || window.i18n.t('importing');
+  if (els.importProgressSubtitle) els.importProgressSubtitle.textContent = subtitle || window.i18n.t('importing_to_system');
+  if (els.importProgressFill) els.importProgressFill.style.width = `${percent}%`;
+  if (els.importProgressPercent) els.importProgressPercent.textContent = `${percent}%`;
+  if (els.importProgressCount) {
+    els.importProgressCount.textContent = `${window.i18n.t('processed_items')} ${safeProcessed} / ${safeTotal}`;
+  }
+  if (els.importProgressErrors) {
+    els.importProgressErrors.textContent = failed > 0 ? `${window.i18n.t('failed_items')}: ${failed}` : '';
+  }
+}
+
+function buildImportedProductPayload(row, mainBranchId) {
+  return {
+    code: normalizeCode(row.code, 'FG'),
+    barcode: row.barcode || generateBarcodeValue(),
+    nameAr: row.nameAr || '',
+    nameEn: row.nameEn || '',
+    cost: Number(row.cost || 0),
+    price: Number(row.price || 0),
+    unitId: row.unitId || '',
+    openingQty: Number(row.openingQty || 0),
+    minStock: Number(row.minStock || 0),
+    reorderPoint: Number(row.reorderPoint || 0),
+    maxStock: Number(row.maxStock || 0),
+    countryOriginId: row.countryOriginId || null,
+    mainBranchId,
+    stockByBranch: mainBranchId ? { [mainBranchId]: Number(row.openingQty || 0) } : {}
+  };
+}
+
+function buildImportedStockMaterialPayload(row, mainBranchId) {
+  return {
+    code: normalizeCode(row.code, 'SK'),
+    barcode: row.barcode || generateBarcodeValue(),
+    nameAr: row.nameAr || '',
+    nameEn: row.nameEn || '',
+    cost: Number(row.cost || 0),
+    unitId: row.unitId || '',
+    openingQty: Number(row.openingQty || 0),
+    minStock: Number(row.minStock || 0),
+    reorderPoint: Number(row.reorderPoint || 0),
+    maxStock: Number(row.maxStock || 0),
+    categoryId: row.categoryId || null,
+    countryOriginId: row.countryOriginId || null,
+    mainBranchId,
+    stockByBranch: mainBranchId ? { [mainBranchId]: Number(row.openingQty || 0) } : {}
+  };
+}
+
+async function importRowsWithProgress({ type, path, rows, buildPayload, title }) {
+  if (!rows || rows.length === 0) return;
+  const config = getImportUiConfig(type);
+  const total = rows.length;
+  let imported = 0;
+  let failed = 0;
+  const failedRows = [];
+
+  setImportMode(true);
+  setImportUiState(type, {
+    statusText: `${window.i18n.t('loading')}...`,
+    counterText: `0 / ${total}`
+  });
+  updateImportProgressOverlay({
+    visible: true,
+    title,
+    subtitle: window.i18n.t('importing_to_system'),
+    processed: 0,
+    total,
+    failed: 0
+  });
+
+  await waitForImportUiFrame();
+
+  try {
+    for (let start = 0; start < total; start += IMPORT_BATCH_SIZE) {
+      const chunk = rows.slice(start, start + IMPORT_BATCH_SIZE);
+      const entries = chunk.map((row) => {
+        const key = db.ref(path).push().key;
+        return {
+          key,
+          row,
+          payload: buildPayload(row)
+        };
+      });
+      const updates = {};
+      entries.forEach((entry) => {
+        updates[`${path}/${entry.key}`] = entry.payload;
+      });
+
+      try {
+        await db.ref().update(updates);
+        imported += entries.length;
+        const processed = imported + failed;
+        setImportUiState(type, { counterText: `${processed} / ${total}` });
+        updateImportProgressOverlay({
+          visible: true,
+          title,
+          subtitle: window.i18n.t('importing_to_system'),
+          processed,
+          total,
+          failed
+        });
+        await waitForImportUiFrame();
+      } catch (_chunkError) {
+        for (const entry of entries) {
+          try {
+            await db.ref(`${path}/${entry.key}`).set(entry.payload);
+            imported += 1;
+          } catch (_rowError) {
+            failed += 1;
+            failedRows.push(entry.row);
+          }
+          const processed = imported + failed;
+          setImportUiState(type, { counterText: `${processed} / ${total}` });
+          updateImportProgressOverlay({
+            visible: true,
+            title,
+            subtitle: window.i18n.t('importing_to_system'),
+            processed,
+            total,
+            failed
+          });
+          if (processed % 5 === 0 || processed === total) {
+            await waitForImportUiFrame();
+          }
+        }
+      }
+    }
+
+    state[config.rowsKey] = failedRows;
+    if (failedRows.length > 0) {
+      setImportUiState(type, {
+        statusText: `${window.i18n.t('completed_with_errors')} (${window.i18n.t('failed_items')}: ${failedRows.length})`,
+        counterText: `${imported} / ${total}`
+      });
+      updateImportProgressOverlay({
+        visible: true,
+        title,
+        subtitle: `${window.i18n.t('completed_with_errors')} (${failedRows.length})`,
+        processed: total,
+        total,
+        failed
+      });
+    } else {
+      state[config.rowsKey] = [];
+      setImportUiState(type, {
+        statusText: `${window.i18n.t('success')} (${imported}/${total})`,
+        counterText: ''
+      });
+      const fileInput = document.getElementById(config.inputId);
+      if (fileInput) fileInput.value = '';
+      updateImportProgressOverlay({
+        visible: true,
+        title,
+        subtitle: `${window.i18n.t('success')} (${imported}/${total})`,
+        processed: total,
+        total,
+        failed: 0
+      });
+    }
+    await waitForImportDelay(500);
+  } catch (_error) {
+    setImportUiState(type, {
+      statusText: window.i18n.t('error'),
+      counterText: `${imported + failed} / ${total}`
+    });
+    updateImportProgressOverlay({
+      visible: true,
+      title,
+      subtitle: window.i18n.t('error'),
+      processed: imported + failed,
+      total,
+      failed
+    });
+    await waitForImportDelay(700);
+  } finally {
+    updateImportProgressOverlay({ visible: false });
+    setImportMode(false);
+  }
+}
+
 function downloadDeliveryZoneTemplate() {
   if (typeof XLSX === 'undefined') return;
   const useArabic = window.i18n.getLanguage() === 'ar';
@@ -8160,10 +8437,13 @@ function handleBulkImportMaterialsFile(file) {
     const workbook = XLSX.read(data, { type: 'array' });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-    state.importedStockMaterials = rows.map((row) => mapImportRow(row, materialImportMap));
-    document.getElementById('materialImportStatus').textContent = `${window.i18n.t('import_loaded')} ${rows.length}`;
-    document.getElementById('materialImportConfirmBtn').classList.remove('hidden');
-    document.getElementById('materialImportCounter').textContent = '';
+    state.importedStockMaterials = rows
+      .filter((row) => !isImportRowEmpty(row))
+      .map((row) => mapImportRow(row, materialImportMap));
+    setImportUiState('stockMaterials', {
+      statusText: `${window.i18n.t('import_loaded')} ${state.importedStockMaterials.length}`,
+      counterText: ''
+    });
   };
   reader.readAsArrayBuffer(file);
 }
@@ -8172,32 +8452,12 @@ function importBulkStockMaterials() {
   const rows = state.importedStockMaterials;
   if (!rows || rows.length === 0) return;
   const mainBranchId = getMainBranchId();
-  let imported = 0;
-  rows.forEach((row) => {
-    const payload = {
-      code: normalizeCode(row.code, 'SK'),
-      barcode: row.barcode || generateBarcodeValue(),
-      nameAr: row.nameAr || '',
-      nameEn: row.nameEn || '',
-      cost: Number(row.cost || 0),
-      unitId: row.unitId || '',
-      openingQty: Number(row.openingQty || 0),
-      minStock: Number(row.minStock || 0),
-      reorderPoint: Number(row.reorderPoint || 0),
-      maxStock: Number(row.maxStock || 0),
-      categoryId: row.categoryId || null,
-      countryOriginId: row.countryOriginId || null,
-      mainBranchId,
-      stockByBranch: mainBranchId ? { [mainBranchId]: Number(row.openingQty || 0) } : {}
-    };
-    db.ref('stockMaterials').push(payload).then(() => {
-      imported += 1;
-      document.getElementById('materialImportCounter').textContent = `${imported} / ${rows.length}`;
-      if (imported === rows.length) {
-        document.getElementById('materialImportStatus').textContent = `${window.i18n.t('success')}`;
-        document.getElementById('materialImportConfirmBtn').classList.add('hidden');
-      }
-    });
+  importRowsWithProgress({
+    type: 'stockMaterials',
+    path: 'stockMaterials',
+    rows,
+    buildPayload: (row) => buildImportedStockMaterialPayload(row, mainBranchId),
+    title: `${window.i18n.t('importing')} ${window.i18n.t('stock_materials')}`
   });
 }
 
@@ -8558,10 +8818,13 @@ function handleBulkImportFile(file) {
     const workbook = XLSX.read(data, { type: 'array' });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-    state.importedProducts = rows.map((row) => mapImportRow(row, productImportMap));
-    document.getElementById('importStatus').textContent = `${window.i18n.t('import_loaded')} ${rows.length}`;
-    document.getElementById('importConfirmBtn').classList.remove('hidden');
-    document.getElementById('importCounter').textContent = '';
+    state.importedProducts = rows
+      .filter((row) => !isImportRowEmpty(row))
+      .map((row) => mapImportRow(row, productImportMap));
+    setImportUiState('products', {
+      statusText: `${window.i18n.t('import_loaded')} ${state.importedProducts.length}`,
+      counterText: ''
+    });
   };
   reader.readAsArrayBuffer(file);
 }
@@ -8570,32 +8833,12 @@ function importBulkProducts() {
   const rows = state.importedProducts;
   if (!rows || rows.length === 0) return;
   const mainBranchId = getMainBranchId();
-  let imported = 0;
-  rows.forEach((row) => {
-    const payload = {
-      code: normalizeCode(row.code, 'FG'),
-      barcode: row.barcode || generateBarcodeValue(),
-      nameAr: row.nameAr || '',
-      nameEn: row.nameEn || '',
-      cost: Number(row.cost || 0),
-      price: Number(row.price || 0),
-      unitId: row.unitId || '',
-      openingQty: Number(row.openingQty || 0),
-      minStock: Number(row.minStock || 0),
-      reorderPoint: Number(row.reorderPoint || 0),
-      maxStock: Number(row.maxStock || 0),
-      countryOriginId: row.countryOriginId || null,
-      mainBranchId,
-      stockByBranch: mainBranchId ? { [mainBranchId]: Number(row.openingQty || 0) } : {}
-    };
-    db.ref('products').push(payload).then(() => {
-      imported += 1;
-      document.getElementById('importCounter').textContent = `${imported} / ${rows.length}`;
-      if (imported === rows.length) {
-        document.getElementById('importStatus').textContent = `${window.i18n.t('success')}`;
-        document.getElementById('importConfirmBtn').classList.add('hidden');
-      }
-    });
+  importRowsWithProgress({
+    type: 'products',
+    path: 'products',
+    rows,
+    buildPayload: (row) => buildImportedProductPayload(row, mainBranchId),
+    title: `${window.i18n.t('importing')} ${window.i18n.t('products')}`
   });
 }
 
@@ -20618,7 +20861,7 @@ function watchData() {
   paths.forEach((path) => {
     db.ref(path).on('value', (snap) => {
       state.cache[path] = snap.val() || {};
-      if (isEditingDataInput()) {
+      if (state.importInProgress || isEditingDataInput()) {
         state.pendingDataRefresh = true;
         return;
       }

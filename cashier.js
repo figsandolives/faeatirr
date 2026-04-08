@@ -138,6 +138,7 @@ const els = {
   customerModalError: document.getElementById('customerModalError'),
   qtyModal: document.getElementById('qtyModal'),
   qtyModalTitle: document.getElementById('qtyModalTitle'),
+  qtyModalUnit: document.getElementById('qtyModalUnit'),
   qtyModalStock: document.getElementById('qtyModalStock'),
   qtyModalDisplay: document.getElementById('qtyModalDisplay'),
   qtyModalCancel: document.getElementById('qtyModalCancel'),
@@ -252,6 +253,20 @@ function getResolvedItemUnitId(item) {
   return itemType === 'product'
     ? state.products?.[itemId]?.unitId || null
     : state.stockMaterials?.[itemId]?.unitId || null;
+}
+
+function getResolvedItemUnitName(item) {
+  if (!item) return '';
+  const directName = String(item.unitName || item.unitLabel || item.unit || '').trim();
+  if (directName) return directName;
+  return getUnitName(getResolvedItemUnitId(item));
+}
+
+function getQtyModalUnitMeta(item) {
+  return {
+    unitId: getResolvedItemUnitId(item),
+    unitName: getResolvedItemUnitName(item)
+  };
 }
 
 function normalizeDigits(value) {
@@ -1375,7 +1390,7 @@ function openInvoiceQtyFlow(entry, options = {}) {
     openQtyModal({
       title: getLocalizedName(resolvedEntry.item),
       available: getMainBranchStock(resolvedEntry.item),
-      unitId: getResolvedItemUnitId(resolvedEntry.item),
+      ...getQtyModalUnitMeta(resolvedEntry.item),
       onConfirm: (qty) => addInvoiceItem(resolvedEntry, qty)
     });
   });
@@ -1417,6 +1432,8 @@ function addInvoiceItem(entry, qty) {
       nameEn,
       price,
       qty,
+      unitId: entry.item.unitId || null,
+      unitName: getResolvedItemUnitName(entry.item),
       note: '',
       productionId,
       productionDate,
@@ -1593,7 +1610,7 @@ function renderInvoiceCart() {
     qtyBtn.addEventListener('click', () => openQtyModal({
       title: item.name,
       available: null,
-      unitId: getResolvedItemUnitId(item),
+      ...getQtyModalUnitMeta(item),
       onConfirm: (qty) => {
         state.invoice.cart[index].qty = qty;
         renderInvoiceCart();
@@ -2090,9 +2107,15 @@ function openQtyModal({ title, available, onConfirm, unitId = null, unitName = '
   qtyModalState.unitName = String(unitName || getUnitName(unitId) || '').trim();
   qtyModalState.onConfirm = onConfirm;
   if (els.qtyModalTitle) els.qtyModalTitle.textContent = title || '';
+  if (els.qtyModalUnit) {
+    els.qtyModalUnit.textContent = qtyModalState.unitName
+      ? `${window.i18n.t('item_unit')}: ${qtyModalState.unitName}`
+      : '';
+    els.qtyModalUnit.style.display = qtyModalState.unitName ? 'block' : 'none';
+    els.qtyModalUnit.style.textAlign = 'center';
+  }
   if (els.qtyModalStock) {
     const helperLines = [];
-    if (qtyModalState.unitName) helperLines.push(`${window.i18n.t('item_unit')}: ${qtyModalState.unitName}`);
     if (available !== null && available !== undefined) {
       helperLines.push(`${window.i18n.t('available_stock')}: ${formatNumber(available)}`);
     }
@@ -2643,7 +2666,7 @@ function openTransferRequestQtyModal(entry) {
   openQtyModal({
     title: getLocalizedName(entry.item),
     available,
-    unitId: getResolvedItemUnitId(entry.item),
+    ...getQtyModalUnitMeta(entry.item),
     onConfirm: (qty) => addTransferRequestItem(entry, qty)
   });
 }
@@ -2666,6 +2689,7 @@ function addTransferRequestItem(entry, qty) {
       nameEn,
       qty,
       unitId: entry.item.unitId || null,
+      unitName: getResolvedItemUnitName(entry.item),
       groupKey: ''
     });
   }
@@ -2795,7 +2819,7 @@ function editTransferRequestItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(product),
     available,
-    unitId: getResolvedItemUnitId(item),
+    ...getQtyModalUnitMeta(item),
     onConfirm: (qty) => {
       state.transferRequestDraft.items[index].qty = qty;
       renderTransferRequestItems();
@@ -3184,6 +3208,7 @@ function openTransferReceiveModal(transfer) {
         nameAr: item.nameAr || item.name || '-',
         nameEn: item.nameEn || '',
         unitId: item.unitId || null,
+        unitName: item.unitName || getResolvedItemUnitName(item),
         groupKey: normalizeTransferGroupKey(item.groupKey) || '',
         requestedQty,
         transferredQty,
@@ -3239,7 +3264,7 @@ function editTransferReceiveItemQty(index) {
   openQtyModal({
     title: item.name,
     available: item.transferredQty,
-    unitId: getResolvedItemUnitId(item),
+    ...getQtyModalUnitMeta(item),
     onConfirm: (qty) => {
       state.transferReceiveDraft.items[index].receivedQty = qty;
       renderTransferReceiveItems();

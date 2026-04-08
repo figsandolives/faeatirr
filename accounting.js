@@ -279,6 +279,20 @@ function getUnitName(unitId) {
   return name && name !== '-' ? name : '';
 }
 
+function getResolvedItemUnitName(item) {
+  if (!item) return '';
+  const directName = String(item.unitName || item.unitLabel || item.unit || '').trim();
+  if (directName) return directName;
+  return getUnitName(getResolvedItemUnitId(item));
+}
+
+function getQtyModalUnitMeta(item) {
+  return {
+    unitId: getResolvedItemUnitId(item),
+    unitName: getResolvedItemUnitName(item)
+  };
+}
+
 function formatUnitWithDefinition(unitId, definitionQty, definitionUnitId) {
   const baseName = getUnitName(unitId);
   if (!baseName) return '-';
@@ -288,17 +302,21 @@ function formatUnitWithDefinition(unitId, definitionQty, definitionUnitId) {
   return `${baseName} (${qty} ${defUnitName})`;
 }
 
-function formatItemNameWithUnit(name, unitId) {
+function formatItemNameWithUnit(name, unitId, unitName = '') {
   const baseName = name || '-';
-  const unitName = getUnitName(unitId);
-  return unitName ? `${baseName} (${unitName})` : baseName;
+  const resolvedUnitName = unitId && typeof unitId === 'object'
+    ? getResolvedItemUnitName(unitId)
+    : String(unitName || getUnitName(unitId) || '').trim();
+  return resolvedUnitName ? `${baseName} (${resolvedUnitName})` : baseName;
 }
 
-function formatQuantityWithUnit(qty, unitId) {
+function formatQuantityWithUnit(qty, unitId, unitName = '') {
   const qtyText = formatNumber(qty);
   if (qtyText === '-') return qtyText;
-  const unitName = getUnitName(unitId);
-  return unitName ? `${qtyText} ${unitName}` : qtyText;
+  const resolvedUnitName = unitId && typeof unitId === 'object'
+    ? getResolvedItemUnitName(unitId)
+    : String(unitName || getUnitName(unitId) || '').trim();
+  return resolvedUnitName ? `${qtyText} ${resolvedUnitName}` : qtyText;
 }
 
 function getResolvedItemUnitId(item) {
@@ -962,6 +980,7 @@ const els = {
   storageItemsList: document.getElementById('storageItemsList'),
   qtyModal: document.getElementById('qtyModal'),
   qtyModalTitle: document.getElementById('qtyModalTitle'),
+  qtyModalUnit: document.getElementById('qtyModalUnit'),
   qtyModalStock: document.getElementById('qtyModalStock'),
   qtyModalDisplay: document.getElementById('qtyModalDisplay'),
   qtyModalConfirm: document.getElementById('qtyModalConfirm'),
@@ -6237,7 +6256,7 @@ function setupItemCardSection() {
           <h3>${window.i18n.t('select_category')}</h3>
           <button id="itemCardClassificationClose" class="btn ghost small">×</button>
         </div>
-        <div class="grid two" style="margin-top: 12px;">
+        <div class="grid three" style="margin-top: 12px;">
           <div>
             <label class="tag">${window.i18n.t('type')}</label>
             <select id="itemCardClassificationType" class="input"></select>
@@ -6411,6 +6430,10 @@ function shouldShowItemCardProductionColumns() {
   return selected.length === 1 && selected[0] === 'production';
 }
 
+function shouldShowItemCardFinancialColumns() {
+  return !shouldShowItemCardProductionColumns();
+}
+
 function formatItemCardMovementQty(move) {
   if (!move || move.qtyChange === null || move.qtyChange === undefined || move.qtyChange === '') return '-';
   const unitName = String(move.unitName || getUnitName(move.unitId) || '').trim();
@@ -6425,10 +6448,14 @@ function getItemCardMovementColumns() {
     { key: 'itemName', label: window.i18n.t('name') },
     { key: 'typeLabel', label: window.i18n.t('movement_type') },
     { key: 'docNumber', label: window.i18n.t('document_number') },
-    { key: 'purchaseInvoiceNumber', label: window.i18n.t('purchase_invoice_number') },
-    { key: 'invoiceValue', label: window.i18n.t('invoice_value') },
     { key: 'qtyChange', label: window.i18n.t('movement_qty') }
   ];
+  if (shouldShowItemCardFinancialColumns()) {
+    columns.push(
+      { key: 'purchaseInvoiceNumber', label: window.i18n.t('purchase_invoice_number') },
+      { key: 'invoiceValue', label: window.i18n.t('invoice_value') }
+    );
+  }
   if (shouldShowItemCardProductionColumns()) {
     columns.push(
       { key: 'storekeeperName', label: window.i18n.t('storekeeper_name') },
@@ -7280,10 +7307,13 @@ function renderItemCardMovements() {
   const movements = getFilteredItemCardMovements();
   const invoiceTotal = movements.reduce((sum, move) => sum + Number(move.invoiceValue || 0), 0);
   if (summaryEl) {
-    summaryEl.textContent = `${window.i18n.t('invoice_value')}: ${formatMoney(invoiceTotal)}`;
+    summaryEl.textContent = shouldShowItemCardFinancialColumns()
+      ? `${window.i18n.t('invoice_value')}: ${formatMoney(invoiceTotal)}`
+      : '';
   }
   const columns = getItemCardMovementColumns();
   const showProductionColumns = shouldShowItemCardProductionColumns();
+  const showFinancialColumns = shouldShowItemCardFinancialColumns();
   table.innerHTML = '';
   if (!movements.length) {
     const row = document.createElement('tr');
@@ -7302,9 +7332,8 @@ function renderItemCardMovements() {
       <td>${move.itemName || '-'}</td>
       <td>${move.typeLabel || '-'}</td>
       <td>${docButton}</td>
-      <td>${move.purchaseInvoiceNumber || '-'}</td>
-      <td>${formatMoney(move.invoiceValue)}</td>
       <td>${formatItemCardMovementQty(move)}</td>
+      ${showFinancialColumns ? `<td>${move.purchaseInvoiceNumber || '-'}</td><td>${formatMoney(move.invoiceValue)}</td>` : ''}
       ${showProductionColumns ? `<td>${move.storekeeperName || '-'}</td><td>${move.productionStaffName || '-'}</td>` : ''}
       <td>${formatMoney(move.price)}</td>
       <td>${formatNumber(move.balance)}</td>
@@ -7366,10 +7395,12 @@ function exportItemCardMovements() {
       [window.i18n.t('name')]: move.itemName || '-',
       [window.i18n.t('movement_type')]: move.typeLabel || '-',
       [window.i18n.t('document_number')]: move.docNumber || '-',
-      [window.i18n.t('purchase_invoice_number')]: move.purchaseInvoiceNumber || '-',
-      [window.i18n.t('invoice_value')]: formatMoney(move.invoiceValue),
       [window.i18n.t('movement_qty')]: formatItemCardMovementQty(move)
     };
+    if (shouldShowItemCardFinancialColumns()) {
+      row[window.i18n.t('purchase_invoice_number')] = move.purchaseInvoiceNumber || '-';
+      row[window.i18n.t('invoice_value')] = formatMoney(move.invoiceValue);
+    }
     if (shouldShowItemCardProductionColumns()) {
       row[window.i18n.t('storekeeper_name')] = move.storekeeperName || '-';
       row[window.i18n.t('production_staff_single')] = move.productionStaffName || '-';
@@ -7412,6 +7443,7 @@ function printItemCardMovements() {
   const lang = window.i18n.getLanguage();
   const dir = lang === 'ar' ? 'rtl' : 'ltr';
   const showProductionColumns = shouldShowItemCardProductionColumns();
+  const showFinancialColumns = shouldShowItemCardFinancialColumns();
   const headersHtml = getItemCardMovementColumns().map((column) => `<th>${column.label}</th>`).join('');
   const rowsHtml = movements.map((move) => `
     <tr>
@@ -7420,9 +7452,8 @@ function printItemCardMovements() {
       <td>${move.itemName || '-'}</td>
       <td>${move.typeLabel || '-'}</td>
       <td>${move.docNumber || '-'}</td>
-      <td>${move.purchaseInvoiceNumber || '-'}</td>
-      <td>${formatMoney(move.invoiceValue)}</td>
       <td>${formatItemCardMovementQty(move)}</td>
+      ${showFinancialColumns ? `<td>${move.purchaseInvoiceNumber || '-'}</td><td>${formatMoney(move.invoiceValue)}</td>` : ''}
       ${showProductionColumns ? `<td>${move.storekeeperName || '-'}</td><td>${move.productionStaffName || '-'}</td>` : ''}
       <td>${formatMoney(move.price)}</td>
       <td>${formatNumber(move.balance)}</td>
@@ -11252,8 +11283,14 @@ function openQtyModal({ title, available, onConfirm, mode = 'add', confirmLabel,
   state.qtyModal.onConfirm = onConfirm;
   els.qtyModalTitle.textContent = title || '';
   const resolvedUnitName = String(unitName || getUnitName(unitId) || '').trim();
+  if (els.qtyModalUnit) {
+    els.qtyModalUnit.textContent = resolvedUnitName
+      ? `${window.i18n.t('item_unit')}: ${resolvedUnitName}`
+      : '';
+    els.qtyModalUnit.style.display = resolvedUnitName ? 'block' : 'none';
+    els.qtyModalUnit.style.textAlign = 'center';
+  }
   const helperLines = [];
-  if (resolvedUnitName) helperLines.push(`${window.i18n.t('item_unit')}: ${resolvedUnitName}`);
   if (available !== null && available !== undefined) {
     helperLines.push(`${window.i18n.t('available_stock')}: ${formatNumber(available)}`);
   }
@@ -11701,7 +11738,7 @@ function setupIssueSection() {
           <h3>${window.i18n.t('new_issue')}</h3>
           <button id="issueModalCloseBtn" class="btn ghost small">×</button>
         </div>
-        <div class="grid two" style="margin-top: 12px;">
+        <div class="grid three" style="margin-top: 12px;">
           <div>
             <label class="tag">${window.i18n.t('storekeeper_name')}</label>
             <input id="issueStorekeeper" class="input" readonly />
@@ -12002,7 +12039,7 @@ function openIssueQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
-      unitId: getResolvedItemUnitId(selectedEntry.item),
+      ...getQtyModalUnitMeta(selectedEntry.item),
       mode: 'deduct',
       onConfirm: (qty) => {
         addIssueItem(selectedEntry, qty);
@@ -12027,6 +12064,7 @@ function addIssueItem(entry, qty) {
       name: getLocalizedName(entry.item),
       qty,
       unitId: entry.item.unitId || null,
+      unitName: getResolvedItemUnitName(entry.item),
       productionId,
       productionDate: entry.productionRecord?.productionDate || null,
       productionNumber: entry.productionRecord?.productionNumber || null
@@ -12051,7 +12089,7 @@ function renderIssueDraftItems() {
       <div class="row" style="justify-content: space-between;">
         <div>
           <strong>${item.name}</strong>
-          <div class="helper">${typeLabel} - ${window.i18n.t('quantity')}: ${formatNumber(item.qty)}</div>
+          <div class="helper">${typeLabel} - ${window.i18n.t('quantity')}: ${formatQuantityWithUnit(item.qty, item, item.unitName)}</div>
           ${item.productionDate ? `<div class="helper">${window.i18n.t('production_date')}: ${item.productionDate}</div>` : ''}
         </div>
         <div class="row" style="gap: 6px;">
@@ -12079,7 +12117,7 @@ function editIssueItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(itemData),
     available,
-    unitId: getResolvedItemUnitId(item),
+    ...getQtyModalUnitMeta(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.issueDraft.items[index].qty = qty;
@@ -12663,7 +12701,7 @@ function openProductionItem(entry) {
     openQtyModal({
       title: getLocalizedName(entry.item),
       available: null,
-      unitId: getResolvedItemUnitId(entry.item),
+      ...getQtyModalUnitMeta(entry.item),
       mode: 'add',
       onConfirm: (qty) => {
         state.productionDraft.qty = qty;
@@ -12711,7 +12749,7 @@ function renderProductionDraft() {
   container.innerHTML = `
     <div class="notice">
       <div><strong>${getLocalizedName(item.item)}</strong></div>
-      <div class="helper">${window.i18n.t('quantity')}: ${state.productionDraft.qty ?? '-'}</div>
+      <div class="helper">${window.i18n.t('quantity')}: ${state.productionDraft.qty === null || state.productionDraft.qty === undefined ? '-' : formatQuantityWithUnit(state.productionDraft.qty, item.item)}</div>
       <button id="productionEditQty" class="btn ghost small" style="margin-top: 6px;">${window.i18n.t('edit')}</button>
       <div class="helper">${window.i18n.t('production_date')}: ${state.productionDraft.productionDate || '-'}</div>
       <div class="helper">${window.i18n.t('expiry_date')}: ${state.productionDraft.expiryDate || '-'}</div>
@@ -12736,7 +12774,7 @@ function renderProductionDraft() {
       openQtyModal({
         title: getLocalizedName(item.item),
         available: null,
-        unitId: getResolvedItemUnitId(item.item),
+        ...getQtyModalUnitMeta(item.item),
         mode: 'add',
         onConfirm: (qty) => {
           state.productionDraft.qty = qty;
@@ -12815,6 +12853,7 @@ function submitProductionVoucher() {
       itemNameAr: itemData.nameAr || itemData.name || original.itemNameAr || null,
       itemNameEn: itemData.nameEn || itemData.name || original.itemNameEn || null,
       unitId: itemData.unitId || original.unitId || null,
+      unitName: getResolvedItemUnitName(itemData) || original.unitName || null,
       qty: state.productionDraft.qty,
       productionDate: state.productionDraft.productionDate,
       expiryDate: state.productionDraft.expiryDate,
@@ -12865,6 +12904,7 @@ function submitProductionVoucher() {
       itemNameAr: itemData.nameAr || itemData.name || null,
       itemNameEn: itemData.nameEn || itemData.name || null,
       unitId: itemData.unitId || null,
+      unitName: getResolvedItemUnitName(itemData) || null,
       qty: state.productionDraft.qty,
       productionDate: state.productionDraft.productionDate,
       expiryDate: state.productionDraft.expiryDate,
@@ -12896,7 +12936,7 @@ function renderProductionTable() {
   entries.forEach((rec) => {
     const row = document.createElement('tr');
     const staffLabel = rec.productionStaffName || getStaffLabel(state.cache.productionStaff?.[rec.productionStaffId], '-') || '-';
-    const qtyText = formatQuantityWithUnit(rec.qty, getResolvedItemUnitId(rec));
+    const qtyText = formatQuantityWithUnit(rec.qty, rec, getResolvedItemUnitName(rec));
     row.innerHTML = `
       <td>${rec.productionNumber || '-'}</td>
       <td>${rec.itemName || '-'}</td>
@@ -12956,7 +12996,7 @@ function exportProductionReport() {
     [window.i18n.t('row_number')]: index + 1,
     [window.i18n.t('production_voucher')]: rec.productionNumber || '-',
     [window.i18n.t('product_single')]: rec.itemName || '-',
-    [window.i18n.t('quantity')]: formatQuantityWithUnit(rec.qty, getResolvedItemUnitId(rec)),
+    [window.i18n.t('quantity')]: formatQuantityWithUnit(rec.qty, rec, getResolvedItemUnitName(rec)),
     [window.i18n.t('date_time')]: formatDate(rec.createdAt),
     [window.i18n.t('production_date')]: rec.productionDate || '-',
     [window.i18n.t('expiry_date')]: rec.expiryDate || '-',
@@ -12989,7 +13029,7 @@ function printProductionTableReport() {
     index + 1,
     rec.productionNumber || '-',
     rec.itemName || '-',
-    formatQuantityWithUnit(rec.qty, getResolvedItemUnitId(rec)),
+    formatQuantityWithUnit(rec.qty, rec, getResolvedItemUnitName(rec)),
     formatDate(rec.createdAt),
     rec.productionDate || '-',
     rec.expiryDate || '-',
@@ -13292,7 +13332,7 @@ function renderProductionFollowUpDetailsView(section, filters) {
       <tr>
         <td>${rec.productionNumber || '-'}</td>
         <td>${rec.itemName || '-'}</td>
-        <td>${formatQuantityWithUnit(rec.qty, getResolvedItemUnitId(rec))}</td>
+        <td>${formatQuantityWithUnit(rec.qty, rec, getResolvedItemUnitName(rec))}</td>
         <td>${formatDate(rec.createdAt)}</td>
         <td>${rec.productionDate || '-'}</td>
         <td>${rec.expiryDate || '-'}</td>
@@ -13752,7 +13792,7 @@ function openInventoryQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
-      unitId: getResolvedItemUnitId(selectedEntry.item),
+      ...getQtyModalUnitMeta(selectedEntry.item),
       mode: 'set',
       onConfirm: (qty) => {
         addInventoryItem(selectedEntry, qty);
@@ -13777,6 +13817,7 @@ function addInventoryItem(entry, qty) {
       name: getLocalizedName(entry.item),
       qty,
       unitId: entry.item.unitId || null,
+      unitName: getResolvedItemUnitName(entry.item),
       productionId,
       productionDate: entry.productionRecord?.productionDate || null,
       productionNumber: entry.productionRecord?.productionNumber || null
@@ -13801,7 +13842,7 @@ function renderInventoryItems() {
       <div class="row" style="justify-content: space-between;">
         <div>
           <strong>${item.name}</strong>
-          <div class="helper">${typeLabel} - ${window.i18n.t('quantity')}: ${formatNumber(item.qty)}</div>
+          <div class="helper">${typeLabel} - ${window.i18n.t('quantity')}: ${formatQuantityWithUnit(item.qty, item, item.unitName)}</div>
           ${item.productionDate ? `<div class="helper">${window.i18n.t('production_date')}: ${item.productionDate}</div>` : ''}
         </div>
         <div class="row" style="gap: 6px;">
@@ -13825,7 +13866,7 @@ function editInventoryItemQty(index) {
   openQtyModal({
     title: item.name,
     available: null,
-    unitId: getResolvedItemUnitId(item),
+    ...getQtyModalUnitMeta(item),
     mode: 'set',
     onConfirm: (qty) => {
       state.inventoryDraft.items[index].qty = qty;
@@ -14996,7 +15037,7 @@ function openPurchaseQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
-      unitId: getResolvedItemUnitId(selectedEntry.item),
+      ...getQtyModalUnitMeta(selectedEntry.item),
       mode: 'add',
       onConfirm: (qty) => addPurchaseItem(selectedEntry, qty)
     });
@@ -15023,6 +15064,7 @@ function addPurchaseItem(entry, qty) {
       name: getLocalizedName(entry.item),
       qty,
       unitId: entry.item.unitId || null,
+      unitName: getResolvedItemUnitName(entry.item),
       unitPrice,
       productionId,
       productionDate: entry.productionRecord?.productionDate || null,
@@ -15064,7 +15106,7 @@ function renderPurchaseItems() {
       <div class="row" style="justify-content: space-between;">
         <div>
           <strong>${item.name}</strong>
-          <div class="helper">${window.i18n.t('quantity')}: ${formatNumber(item.qty)}</div>
+          <div class="helper">${window.i18n.t('quantity')}: ${formatQuantityWithUnit(item.qty, item, item.unitName)}</div>
           ${item.productionDate ? `<div class="helper">${window.i18n.t('production_date')}: ${item.productionDate}</div>` : ''}
           <div class="helper">${window.i18n.t('previous_cost')}: ${latestPrice === null ? '-' : `${formatMoney(latestPrice)} ${unitName}`}</div>
           <div class="row" style="margin-top: 6px; gap: 8px;">
@@ -15103,7 +15145,7 @@ function editPurchaseItemQty(index) {
   openQtyModal({
     title: item.name,
     available: null,
-    unitId: getResolvedItemUnitId(item),
+    ...getQtyModalUnitMeta(item),
     mode: 'add',
     onConfirm: (qty) => {
       state.purchaseDraft.items[index].qty = qty;
@@ -15754,7 +15796,7 @@ function openSupplierReturnQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
-      unitId: getResolvedItemUnitId(selectedEntry.item),
+      ...getQtyModalUnitMeta(selectedEntry.item),
       mode: 'deduct',
       onConfirm: (qty) => addSupplierReturnItem(selectedEntry, qty)
     });
@@ -15777,6 +15819,7 @@ function addSupplierReturnItem(entry, qty) {
       name: getLocalizedName(entry.item),
       qty,
       unitId: entry.item.unitId || null,
+      unitName: getResolvedItemUnitName(entry.item),
       productionId,
       productionDate: entry.productionRecord?.productionDate || null,
       productionNumber: entry.productionRecord?.productionNumber || null
@@ -15800,7 +15843,7 @@ function renderSupplierReturnItems() {
       <div class="row" style="justify-content: space-between;">
         <div>
           <strong>${item.name}</strong>
-          <div class="helper">${window.i18n.t('quantity')}: ${formatNumber(item.qty)}</div>
+          <div class="helper">${window.i18n.t('quantity')}: ${formatQuantityWithUnit(item.qty, item, item.unitName)}</div>
           ${item.productionDate ? `<div class="helper">${window.i18n.t('production_date')}: ${item.productionDate}</div>` : ''}
         </div>
         <div class="row" style="gap: 6px;">
@@ -15824,7 +15867,7 @@ function editSupplierReturnItemQty(index) {
   openQtyModal({
     title: item.name,
     available: null,
-    unitId: getResolvedItemUnitId(item),
+    ...getQtyModalUnitMeta(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.supplierReturnDraft.items[index].qty = qty;
@@ -15964,10 +16007,14 @@ function setupTransfersSection() {
           <h3>${window.i18n.t('transfer_voucher')}</h3>
           <button id="transferModalCloseBtn" class="btn ghost small">×</button>
         </div>
-        <div class="grid two" style="margin-top: 12px;">
+        <div class="grid three" style="margin-top: 12px;">
           <div>
             <label class="tag">${window.i18n.t('storekeeper_name')}</label>
             <input id="transferStorekeeper" class="input" readonly />
+          </div>
+          <div>
+            <label class="tag">${window.i18n.t('from_branch')}</label>
+            <select id="transferFromBranchSelect" class="input"></select>
           </div>
           <div>
             <label class="tag">${window.i18n.t('to_branch')}</label>
@@ -16000,11 +16047,13 @@ function setupTransfersSection() {
 
 function resetTransferDraft() {
   state.transferDraft = {
+    fromBranchId: '',
     toBranchId: '',
     searchTypes: [],
     items: [],
     editingId: null,
     originalItems: [],
+    originalFromBranchId: null,
     originalToBranchId: null
   };
 }
@@ -16013,6 +16062,7 @@ function bindTransfersSection() {
   const openBtn = document.getElementById('openTransferModalBtn');
   const closeBtn = document.getElementById('transferModalCloseBtn');
   const cancelBtn = document.getElementById('transferCancelBtn');
+  const fromBranchSelect = document.getElementById('transferFromBranchSelect');
   const branchSelect = document.getElementById('transferBranchSelect');
   const searchInput = document.getElementById('transferSearchInput');
   const searchBtn = document.getElementById('transferSearchBtn');
@@ -16021,6 +16071,18 @@ function bindTransfersSection() {
   if (openBtn) openBtn.addEventListener('click', () => openTransferModal());
   if (closeBtn) closeBtn.addEventListener('click', () => closeTransferModal());
   if (cancelBtn) cancelBtn.addEventListener('click', () => closeTransferModal());
+
+  if (fromBranchSelect) {
+    fromBranchSelect.addEventListener('change', () => {
+      state.transferDraft.fromBranchId = fromBranchSelect.value;
+      if (state.transferDraft.toBranchId && state.transferDraft.toBranchId === state.transferDraft.fromBranchId) {
+        state.transferDraft.toBranchId = '';
+        if (branchSelect) branchSelect.value = '';
+      }
+      const errorEl = document.getElementById('transferError');
+      if (errorEl) errorEl.textContent = '';
+    });
+  }
 
   if (branchSelect) {
     branchSelect.addEventListener('change', () => {
@@ -16058,6 +16120,7 @@ function openTransferModal() {
   const overlay = document.getElementById('transferVoucherModal');
   if (!overlay) return;
   resetTransferDraft();
+  state.transferDraft.fromBranchId = getMainBranchId() || '';
   renderTransfersSection();
   const errorEl = document.getElementById('transferError');
   if (errorEl) errorEl.textContent = '';
@@ -16070,8 +16133,11 @@ function openTransferModal() {
 function openTransferEditModal(record) {
   const overlay = document.getElementById('transferVoucherModal');
   if (!overlay || !record) return;
+  const fallbackFromBranchId = record.fromBranchId || getMainBranchId() || '';
   resetTransferDraft();
+  state.transferDraft.fromBranchId = fallbackFromBranchId;
   state.transferDraft.editingId = record.id || null;
+  state.transferDraft.originalFromBranchId = fallbackFromBranchId;
   state.transferDraft.toBranchId = record.toBranchId || '';
   state.transferDraft.originalToBranchId = record.toBranchId || '';
   state.transferDraft.items = normalizeItems(record.items).map((item) => ({ ...item }));
@@ -16090,10 +16156,18 @@ function closeTransferModal() {
 function renderTransfersSection() {
   if (!state.transferDraft) resetTransferDraft();
   const storekeeperInput = document.getElementById('transferStorekeeper');
+  const fromBranchSelect = document.getElementById('transferFromBranchSelect');
   const branchSelect = document.getElementById('transferBranchSelect');
   if (storekeeperInput) storekeeperInput.value = state.user?.name || '-';
+  if (!state.transferDraft.fromBranchId) {
+    state.transferDraft.fromBranchId = getMainBranchId() || '';
+  }
+  if (fromBranchSelect) {
+    renderBranchOptions(fromBranchSelect);
+    fromBranchSelect.value = state.transferDraft.fromBranchId || '';
+  }
   if (branchSelect) {
-    renderBranchOptions(branchSelect, { excludeMain: true });
+    renderBranchOptions(branchSelect);
     branchSelect.value = state.transferDraft.toBranchId || '';
   }
   renderEntrySearchTypeFilter('transfer', state.transferDraft.searchTypes);
@@ -16143,12 +16217,13 @@ function renderTransferSearchResults() {
 function openTransferQtyModal(entry) {
   resolveEntryWithProductionSelection(entry).then((selectedEntry) => {
     if (!selectedEntry) return;
-    const mainBranchId = getMainBranchId();
-    const available = getItemStock(selectedEntry.item, mainBranchId);
+    const sourceBranchId = state.transferDraft?.fromBranchId || getMainBranchId();
+    const available = getItemStock(selectedEntry.item, sourceBranchId);
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
       unitId: getResolvedItemUnitId(selectedEntry.item),
+      unitName: getResolvedItemUnitName(selectedEntry.item),
       mode: 'deduct',
       onConfirm: (qty) => addTransferItem(selectedEntry, qty)
     });
@@ -16171,6 +16246,7 @@ function addTransferItem(entry, qty) {
       name: getLocalizedName(entry.item),
       qty,
       unitId: entry.item.unitId || null,
+      unitName: getResolvedItemUnitName(entry.item),
       productionId,
       productionDate: entry.productionRecord?.productionDate || null,
       productionNumber: entry.productionRecord?.productionNumber || null
@@ -16194,7 +16270,7 @@ function renderTransferItems() {
       <div class="row" style="justify-content: space-between;">
         <div>
           <strong>${item.name}</strong>
-          <div class="helper">${window.i18n.t('quantity')}: ${formatNumber(item.qty)}</div>
+          <div class="helper">${window.i18n.t('quantity')}: ${formatQuantityWithUnit(item.qty, item, item.unitName)}</div>
           ${item.productionDate ? `<div class="helper">${window.i18n.t('production_date')}: ${item.productionDate}</div>` : ''}
         </div>
         <div class="row" style="gap: 6px;">
@@ -16215,7 +16291,7 @@ function renderTransferItems() {
 function editTransferItemQty(index) {
   const item = state.transferDraft.items[index];
   if (!item) return;
-  const branchId = getMainBranchId();
+  const branchId = state.transferDraft.fromBranchId || getMainBranchId();
   const itemData = getItemDataByType(item.itemType, item.itemId);
   const availableBase = itemData ? getItemStock(itemData, branchId) : 0;
   const available = Number(availableBase || 0) + Number(item.qty || 0);
@@ -16223,6 +16299,7 @@ function editTransferItemQty(index) {
     title: item.name || getLocalizedName(itemData),
     available,
     unitId: getResolvedItemUnitId(item),
+    unitName: getResolvedItemUnitName(item) || getResolvedItemUnitName(itemData),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.transferDraft.items[index].qty = qty;
@@ -16234,39 +16311,41 @@ function editTransferItemQty(index) {
 function submitTransferVoucher() {
   const errorEl = document.getElementById('transferError');
   if (errorEl) errorEl.textContent = '';
-  if (!state.transferDraft.items.length || !state.transferDraft.toBranchId) {
+  if (!state.transferDraft.items.length || !state.transferDraft.fromBranchId || !state.transferDraft.toBranchId) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
-  const mainBranchId = getMainBranchId();
-  if (!mainBranchId || state.transferDraft.toBranchId === mainBranchId) {
+  if (state.transferDraft.toBranchId === state.transferDraft.fromBranchId) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
 
   if (state.transferDraft.editingId) {
     const editingId = state.transferDraft.editingId;
+    const newFromBranchId = state.transferDraft.fromBranchId;
     const newToBranchId = state.transferDraft.toBranchId;
+    const oldFromBranchId = state.transferDraft.originalFromBranchId || getMainBranchId() || newFromBranchId;
     const oldToBranchId = state.transferDraft.originalToBranchId || newToBranchId;
     const payload = {
+      fromBranchId: newFromBranchId,
       toBranchId: newToBranchId,
       items: state.transferDraft.items
     };
     db.ref(`transfers/${editingId}`).update(payload).then(() => {
       const updates = [];
-      if (oldToBranchId !== newToBranchId) {
+      if (oldFromBranchId !== newFromBranchId || oldToBranchId !== newToBranchId) {
         state.transferDraft.originalItems.forEach((item) => {
-          updates.push(updateItemStock(item.itemType, item.itemId, mainBranchId, Number(item.qty || 0)));
+          updates.push(updateItemStock(item.itemType, item.itemId, oldFromBranchId, Number(item.qty || 0)));
           updates.push(updateItemStock(item.itemType, item.itemId, oldToBranchId, -Number(item.qty || 0)));
         });
         state.transferDraft.items.forEach((item) => {
-          updates.push(updateItemStock(item.itemType, item.itemId, mainBranchId, -Number(item.qty || 0)));
+          updates.push(updateItemStock(item.itemType, item.itemId, newFromBranchId, -Number(item.qty || 0)));
           updates.push(updateItemStock(item.itemType, item.itemId, newToBranchId, Number(item.qty || 0)));
         });
       } else {
         const diffs = diffItems(state.transferDraft.originalItems, state.transferDraft.items);
         diffs.forEach((diff) => {
-          updates.push(updateItemStock(diff.itemType, diff.itemId, mainBranchId, -Number(diff.qtyDiff || 0)));
+          updates.push(updateItemStock(diff.itemType, diff.itemId, newFromBranchId, -Number(diff.qtyDiff || 0)));
           updates.push(updateItemStock(diff.itemType, diff.itemId, newToBranchId, Number(diff.qtyDiff || 0)));
         });
       }
@@ -16285,14 +16364,14 @@ function submitTransferVoucher() {
       createdAt: serverTime,
       storekeeperId: state.user?.id || null,
       storekeeperName: state.user?.name || null,
-      fromBranchId: mainBranchId,
+      fromBranchId: state.transferDraft.fromBranchId,
       toBranchId: state.transferDraft.toBranchId,
       items: state.transferDraft.items
     };
     db.ref('transfers').push(payload).then(() => {
       const updates = [];
       state.transferDraft.items.forEach((item) => {
-        updates.push(updateItemStock(item.itemType, item.itemId, mainBranchId, -Number(item.qty || 0)));
+        updates.push(updateItemStock(item.itemType, item.itemId, state.transferDraft.fromBranchId, -Number(item.qty || 0)));
         updates.push(updateItemStock(item.itemType, item.itemId, state.transferDraft.toBranchId, Number(item.qty || 0)));
       });
       Promise.all(updates).then(() => {
@@ -16791,7 +16870,7 @@ function editCashierTransferItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(itemData),
     available,
-    unitId: getResolvedItemUnitId(item),
+    ...getQtyModalUnitMeta(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.cashierTransferDraft.items[index].qty = qty;
@@ -17095,7 +17174,7 @@ function openStockReturnQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
-      unitId: getResolvedItemUnitId(selectedEntry.item),
+      ...getQtyModalUnitMeta(selectedEntry.item),
       mode: 'deduct',
       onConfirm: (qty) => addStockReturnItem(selectedEntry, qty)
     });
@@ -17118,6 +17197,7 @@ function addStockReturnItem(entry, qty) {
       name: getLocalizedName(entry.item),
       qty,
       unitId: entry.item.unitId || null,
+      unitName: getResolvedItemUnitName(entry.item),
       productionId,
       productionDate: entry.productionRecord?.productionDate || null,
       productionNumber: entry.productionRecord?.productionNumber || null
@@ -17141,7 +17221,7 @@ function renderStockReturnItems() {
       <div class="row" style="justify-content: space-between;">
         <div>
           <strong>${item.name}</strong>
-          <div class="helper">${window.i18n.t('quantity')}: ${formatNumber(item.qty)}</div>
+          <div class="helper">${window.i18n.t('quantity')}: ${formatQuantityWithUnit(item.qty, item, item.unitName)}</div>
           ${item.productionDate ? `<div class="helper">${window.i18n.t('production_date')}: ${item.productionDate}</div>` : ''}
         </div>
         <div class="row" style="gap: 6px;">
@@ -17170,7 +17250,7 @@ function editStockReturnItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(itemData),
     available,
-    unitId: getResolvedItemUnitId(item),
+    ...getQtyModalUnitMeta(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.stockReturnDraft.items[index].qty = qty;
@@ -17525,7 +17605,7 @@ function openScrapReturnQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
-      unitId: getResolvedItemUnitId(selectedEntry.item),
+      ...getQtyModalUnitMeta(selectedEntry.item),
       mode: 'deduct',
       onConfirm: (qty) => addScrapReturnItem(selectedEntry, qty)
     });
@@ -17548,6 +17628,7 @@ function addScrapReturnItem(entry, qty) {
       name: getLocalizedName(entry.item),
       qty,
       unitId: entry.item.unitId || null,
+      unitName: getResolvedItemUnitName(entry.item),
       productionId,
       productionDate: entry.productionRecord?.productionDate || null,
       productionNumber: entry.productionRecord?.productionNumber || null
@@ -17571,7 +17652,7 @@ function renderScrapReturnItems() {
       <div class="row" style="justify-content: space-between;">
         <div>
           <strong>${item.name}</strong>
-          <div class="helper">${window.i18n.t('quantity')}: ${formatNumber(item.qty)}</div>
+          <div class="helper">${window.i18n.t('quantity')}: ${formatQuantityWithUnit(item.qty, item, item.unitName)}</div>
           ${item.productionDate ? `<div class="helper">${window.i18n.t('production_date')}: ${item.productionDate}</div>` : ''}
         </div>
         <div class="row" style="gap: 6px;">
@@ -17600,7 +17681,7 @@ function editScrapReturnItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(itemData),
     available,
-    unitId: getResolvedItemUnitId(item),
+    ...getQtyModalUnitMeta(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.scrapReturnDraft.items[index].qty = qty;
@@ -17897,8 +17978,8 @@ function printTransferReport(record) {
     window.i18n.t('quantity')
   ];
   const rows = items.map((item) => [
-    formatItemNameWithUnit(item.name || '-', item.unitId),
-    formatQuantityWithUnit(item.qty, getResolvedItemUnitId(item))
+    formatItemNameWithUnit(item.name || '-', item, item.unitName),
+    formatQuantityWithUnit(item.qty, item, item.unitName)
   ]);
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const html = buildReportHtml({
@@ -17929,8 +18010,8 @@ function printStockReturnReport(record) {
     window.i18n.t('quantity')
   ];
   const rows = items.map((item) => [
-    formatItemNameWithUnit(item.name || '-', item.unitId),
-    formatQuantityWithUnit(item.qty, getResolvedItemUnitId(item))
+    formatItemNameWithUnit(item.name || '-', item, item.unitName),
+    formatQuantityWithUnit(item.qty, item, item.unitName)
   ]);
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const html = buildReportHtml({
@@ -17960,8 +18041,8 @@ function printScrapReturnReport(record) {
     window.i18n.t('quantity')
   ];
   const rows = items.map((item) => [
-    formatItemNameWithUnit(item.name || '-', item.unitId),
-    formatQuantityWithUnit(item.qty, getResolvedItemUnitId(item))
+    formatItemNameWithUnit(item.name || '-', item, item.unitName),
+    formatQuantityWithUnit(item.qty, item, item.unitName)
   ]);
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const html = buildReportHtml({
@@ -18126,8 +18207,8 @@ function printIssueReport(issue) {
     window.i18n.t('quantity')
   ];
   const rows = items.map((item) => {
-    const nameWithUnit = formatItemNameWithUnit(item.name, item.unitId);
-    return [nameWithUnit, formatQuantityWithUnit(item.qty, getResolvedItemUnitId(item))];
+    const nameWithUnit = formatItemNameWithUnit(item.name, item, item.unitName);
+    return [nameWithUnit, formatQuantityWithUnit(item.qty, item, item.unitName)];
   });
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const html = buildReportHtml({
@@ -18163,15 +18244,15 @@ function printProductionReport(record) {
   const itemData = record.itemType === 'product'
     ? state.cache.products?.[record.itemId]
     : state.cache.stockMaterials?.[record.itemId];
-  const nameWithUnit = formatItemNameWithUnit(record.itemName || '-', itemData?.unitId || null);
-  const rows = [[nameWithUnit, formatQuantityWithUnit(record.qty, record.unitId || itemData?.unitId || null), record.productionDate || '-', record.expiryDate || '-']];
+  const nameWithUnit = formatItemNameWithUnit(record.itemName || '-', record, getResolvedItemUnitName(record) || getResolvedItemUnitName(itemData));
+  const rows = [[nameWithUnit, formatQuantityWithUnit(record.qty, record, getResolvedItemUnitName(record) || getResolvedItemUnitName(itemData)), record.productionDate || '-', record.expiryDate || '-']];
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const issue = state.cache.stockIssue?.[record.issueId];
   const issueItems = normalizeItems(issue?.items);
   const usedRows = issueItems.length
     ? issueItems.map((item) => [
-      formatItemNameWithUnit(item.name || item.itemId || '-', item.unitId),
-      formatQuantityWithUnit(item.qty, getResolvedItemUnitId(item))
+      formatItemNameWithUnit(item.name || item.itemId || '-', item, item.unitName),
+      formatQuantityWithUnit(item.qty, item, item.unitName)
     ])
     : [[window.i18n.t('no_data'), '-']];
   const html = buildReportHtml({

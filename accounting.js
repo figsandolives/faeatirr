@@ -294,6 +294,83 @@ function formatItemNameWithUnit(name, unitId) {
   return unitName ? `${baseName} (${unitName})` : baseName;
 }
 
+function formatQuantityWithUnit(qty, unitId) {
+  const qtyText = formatNumber(qty);
+  if (qtyText === '-') return qtyText;
+  const unitName = getUnitName(unitId);
+  return unitName ? `${qtyText} ${unitName}` : qtyText;
+}
+
+function getResolvedItemUnitId(item) {
+  if (!item) return null;
+  if (item.unitId) return item.unitId;
+  const itemType = normalizeItemType(item);
+  const itemId = item.itemId || item.id;
+  return getItemDataByType(itemType, itemId)?.unitId || null;
+}
+
+function normalizeEntrySearchTypes(types) {
+  const allowed = ['product', 'material'];
+  if (!Array.isArray(types)) return [];
+  return Array.from(new Set(types.filter((type) => allowed.includes(type))));
+}
+
+function filterEntriesBySearchTypes(entries, selectedTypes) {
+  const normalized = normalizeEntrySearchTypes(selectedTypes);
+  if (!normalized.length) return entries;
+  const selectedSet = new Set(normalized);
+  return entries.filter((entry) => selectedSet.has(entry.type));
+}
+
+function buildEntrySearchTypeFilterHtml(prefix) {
+  return `
+    <div style="margin-top: 12px;">
+      <label class="tag">${window.i18n.t('searching_for')}</label>
+      <div class="row" style="gap: 14px; margin-top: 6px; flex-wrap: wrap;">
+        <label class="row" style="gap: 6px;">
+          <input id="${prefix}SearchTypeProduct" type="checkbox" />
+          <span>${window.i18n.t('products')}</span>
+        </label>
+        <label class="row" style="gap: 6px;">
+          <input id="${prefix}SearchTypeMaterial" type="checkbox" />
+          <span>${window.i18n.t('stock_materials')}</span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+function renderEntrySearchTypeFilter(prefix, selectedTypes) {
+  const selected = new Set(normalizeEntrySearchTypes(selectedTypes));
+  const productCheckbox = document.getElementById(`${prefix}SearchTypeProduct`);
+  const materialCheckbox = document.getElementById(`${prefix}SearchTypeMaterial`);
+  if (productCheckbox) productCheckbox.checked = selected.has('product');
+  if (materialCheckbox) materialCheckbox.checked = selected.has('material');
+}
+
+function bindEntrySearchTypeFilter(prefix, onChange) {
+  const productCheckbox = document.getElementById(`${prefix}SearchTypeProduct`);
+  const materialCheckbox = document.getElementById(`${prefix}SearchTypeMaterial`);
+  [productCheckbox, materialCheckbox].forEach((checkbox) => {
+    if (!checkbox) return;
+    checkbox.addEventListener('change', () => {
+      const selectedTypes = [];
+      if (productCheckbox?.checked) selectedTypes.push('product');
+      if (materialCheckbox?.checked) selectedTypes.push('material');
+      onChange(normalizeEntrySearchTypes(selectedTypes));
+    });
+  });
+}
+
+function getBranchRouteLabel(fromBranchId, toBranchId) {
+  const fromLabel = getBranchLabel(fromBranchId);
+  const toLabel = getBranchLabel(toBranchId);
+  if (window.i18n.getLanguage() === 'ar') {
+    return `من فرع ${fromLabel} إلى فرع ${toLabel}`;
+  }
+  return `From branch ${fromLabel} to branch ${toLabel}`;
+}
+
 function getItemDataByType(itemType, itemId) {
   if (!itemId) return null;
   return itemType === 'product'
@@ -303,6 +380,34 @@ function getItemDataByType(itemType, itemId) {
 
 function normalizeItemType(item) {
   return item?.itemType || item?.type || 'product';
+}
+
+function getItemSupplierIds(item) {
+  if (!item) return [];
+  const rawIds = [];
+  if (item.supplierId) rawIds.push(item.supplierId);
+  if (Array.isArray(item.supplierIds)) {
+    rawIds.push(...item.supplierIds);
+  } else if (item.supplierIds && typeof item.supplierIds === 'object') {
+    rawIds.push(...Object.values(item.supplierIds));
+  } else if (typeof item.supplierIds === 'string') {
+    rawIds.push(item.supplierIds);
+  }
+  return Array.from(new Set(rawIds.map((id) => String(id || '').trim()).filter(Boolean)));
+}
+
+function itemHasSupplier(item, supplierId) {
+  const targetId = String(supplierId || '').trim();
+  if (!targetId) return false;
+  return getItemSupplierIds(item).includes(targetId);
+}
+
+function buildItemSupplierUpdates(basePath, item, supplierIds) {
+  const nextSupplierIds = Array.from(new Set((supplierIds || []).map((id) => String(id || '').trim()).filter(Boolean)));
+  return {
+    [`${basePath}/supplierId`]: nextSupplierIds[0] || null,
+    [`${basePath}/supplierIds`]: nextSupplierIds.length ? nextSupplierIds : null
+  };
 }
 
 function getItemKey(item) {
@@ -1056,15 +1161,6 @@ function findUserByCode(code) {
         const userId = Object.keys(snap.val())[0];
         return { id: userId, ...snap.val()[userId] };
       }
-    }
-    if (codeStr === DEFAULT_MANAGER_USER.code) {
-      return db.ref(`users/${DEFAULT_MANAGER_USER_ID}`).once('value').then((snap) => {
-        if (snap.exists()) {
-          return { id: DEFAULT_MANAGER_USER_ID, ...snap.val() };
-        }
-        const managerData = { ...DEFAULT_MANAGER_USER };
-        return db.ref(`users/${DEFAULT_MANAGER_USER_ID}`).set(managerData).then(() => ({ id: DEFAULT_MANAGER_USER_ID, ...managerData }));
-      });
     }
     return null;
   });
@@ -6118,20 +6214,7 @@ function setupItemCardSection() {
     </div>
     <div class="card">
       <table class="table">
-        <thead>
-          <tr>
-            <th>${window.i18n.t('date_time')}</th>
-            <th>${window.i18n.t('product_code')}</th>
-            <th>${window.i18n.t('name')}</th>
-            <th>${window.i18n.t('movement_type')}</th>
-            <th>${window.i18n.t('document_number')}</th>
-            <th>${window.i18n.t('purchase_invoice_number')}</th>
-            <th>${window.i18n.t('invoice_value')}</th>
-            <th>${window.i18n.t('movement_qty')}</th>
-            <th>${window.i18n.t('price_unit')}</th>
-            <th>${window.i18n.t('stock_balance')}</th>
-          </tr>
-        </thead>
+        <thead id="itemCardMovementsHead"></thead>
         <tbody id="itemCardMovementsTable"></tbody>
       </table>
     </div>
@@ -6323,6 +6406,52 @@ function getFilteredItemCardMovements() {
   return movements.filter((move) => move.isOpening || selectedSet.has(move.docType));
 }
 
+function shouldShowItemCardProductionColumns() {
+  const selected = getItemCardSelectedMovementTypes();
+  return selected.length === 1 && selected[0] === 'production';
+}
+
+function formatItemCardMovementQty(move) {
+  if (!move || move.qtyChange === null || move.qtyChange === undefined || move.qtyChange === '') return '-';
+  const unitName = String(move.unitName || getUnitName(move.unitId) || '').trim();
+  const qtyText = formatNumber(move.qtyChange);
+  return unitName ? `${qtyText} ${unitName}` : qtyText;
+}
+
+function getItemCardMovementColumns() {
+  const columns = [
+    { key: 'date', label: window.i18n.t('date_time') },
+    { key: 'itemCode', label: window.i18n.t('product_code') },
+    { key: 'itemName', label: window.i18n.t('name') },
+    { key: 'typeLabel', label: window.i18n.t('movement_type') },
+    { key: 'docNumber', label: window.i18n.t('document_number') },
+    { key: 'purchaseInvoiceNumber', label: window.i18n.t('purchase_invoice_number') },
+    { key: 'invoiceValue', label: window.i18n.t('invoice_value') },
+    { key: 'qtyChange', label: window.i18n.t('movement_qty') }
+  ];
+  if (shouldShowItemCardProductionColumns()) {
+    columns.push(
+      { key: 'storekeeperName', label: window.i18n.t('storekeeper_name') },
+      { key: 'productionStaffName', label: window.i18n.t('production_staff_single') }
+    );
+  }
+  columns.push(
+    { key: 'price', label: window.i18n.t('price_unit') },
+    { key: 'balance', label: window.i18n.t('stock_balance') }
+  );
+  return columns;
+}
+
+function renderItemCardMovementsHead() {
+  const head = document.getElementById('itemCardMovementsHead');
+  if (!head) return;
+  head.innerHTML = `
+    <tr>
+      ${getItemCardMovementColumns().map((column) => `<th>${column.label}</th>`).join('')}
+    </tr>
+  `;
+}
+
 function renderItemCardMovementFilterOptions() {
   const summary = document.getElementById('itemCardMovementSummary');
   const optionsWrap = document.getElementById('itemCardMovementOptions');
@@ -6456,6 +6585,7 @@ function renderItemCardSection() {
   if (toInput) toInput.value = state.itemCard.toDate || '';
 
   renderItemCardMovementFilterOptions();
+  renderItemCardMovementsHead();
   renderItemCardMovements();
   renderItemCardClassificationPicker();
 }
@@ -6845,9 +6975,11 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
   });
 
   const addMove = (record, docType, qtyChange, docNumber, typeLabel, date, price, affectsBalance = true, extra = {}) => {
+    const unitId = extra.unitId === undefined ? (itemData?.unitId || null) : extra.unitId;
     moves.push({
       record,
       docType,
+      itemType,
       itemName,
       itemCode,
       qtyChange: Number(qtyChange || 0),
@@ -6856,10 +6988,14 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
       date: Number(date || 0),
       price: price ?? defaultPrice,
       affectsBalance,
+      unitId,
+      unitName: getUnitName(unitId) || '',
       purchaseInvoiceNumber: extra.purchaseInvoiceNumber || '-',
       invoiceValue: extra.invoiceValue === undefined || extra.invoiceValue === null || extra.invoiceValue === ''
         ? null
         : Number(extra.invoiceValue),
+      storekeeperName: extra.storekeeperName || '-',
+      productionStaffName: extra.productionStaffName || '-',
       balance: null
     });
   };
@@ -6988,7 +7124,24 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     if (prod.branchId !== branchId) return;
     if (prod.itemId !== itemId || normalizeItemType(prod) !== itemType) return;
     const record = { id, ...prod };
-    addMove(record, 'production', Number(prod.qty || 0), prod.productionNumber, window.i18n.t('production_voucher'), prod.createdAt);
+    const productionStaffName = prod.productionStaffName
+      || getStaffLabel(state.cache.productionStaff?.[prod.productionStaffId], '-')
+      || '-';
+    addMove(
+      record,
+      'production',
+      Number(prod.qty || 0),
+      prod.productionNumber,
+      window.i18n.t('production_voucher'),
+      prod.createdAt,
+      null,
+      true,
+      {
+        unitId: prod.unitId || itemData?.unitId || null,
+        storekeeperName: prod.storekeeperName || '-',
+        productionStaffName
+      }
+    );
   });
 
   const inventories = state.cache.inventoryCount || {};
@@ -7096,6 +7249,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
   const openingMove = {
     record: null,
     docType: 'opening',
+    itemType,
     itemName,
     itemCode,
     qtyChange: null,
@@ -7106,8 +7260,12 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
       : (startTime || (chronological[0]?.date || Date.now())),
     price: null,
     affectsBalance: false,
+    unitId: itemData?.unitId || null,
+    unitName: getUnitName(itemData?.unitId || null) || '',
     purchaseInvoiceNumber: '-',
     invoiceValue: null,
+    storekeeperName: '-',
+    productionStaffName: '-',
     balance: openingBalance,
     isOpening: true
   };
@@ -7118,15 +7276,18 @@ function renderItemCardMovements() {
   const table = document.getElementById('itemCardMovementsTable');
   const summaryEl = document.getElementById('itemCardSummary');
   if (!table) return;
+  renderItemCardMovementsHead();
   const movements = getFilteredItemCardMovements();
   const invoiceTotal = movements.reduce((sum, move) => sum + Number(move.invoiceValue || 0), 0);
   if (summaryEl) {
     summaryEl.textContent = `${window.i18n.t('invoice_value')}: ${formatMoney(invoiceTotal)}`;
   }
+  const columns = getItemCardMovementColumns();
+  const showProductionColumns = shouldShowItemCardProductionColumns();
   table.innerHTML = '';
   if (!movements.length) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td colspan="10">${window.i18n.t('no_data')}</td>`;
+    row.innerHTML = `<td colspan="${columns.length}">${window.i18n.t('no_data')}</td>`;
     table.appendChild(row);
     return;
   }
@@ -7143,7 +7304,8 @@ function renderItemCardMovements() {
       <td>${docButton}</td>
       <td>${move.purchaseInvoiceNumber || '-'}</td>
       <td>${formatMoney(move.invoiceValue)}</td>
-      <td>${formatNumber(move.qtyChange)}</td>
+      <td>${formatItemCardMovementQty(move)}</td>
+      ${showProductionColumns ? `<td>${move.storekeeperName || '-'}</td><td>${move.productionStaffName || '-'}</td>` : ''}
       <td>${formatMoney(move.price)}</td>
       <td>${formatNumber(move.balance)}</td>
     `;
@@ -7197,19 +7359,25 @@ function exportItemCardMovements() {
     if (errorEl) errorEl.textContent = window.i18n.t('no_data');
     return;
   }
-
-  const rows = movements.map((move) => ({
-    [window.i18n.t('date_time')]: formatDate(move.date),
-    [window.i18n.t('product_code')]: move.itemCode || '-',
-    [window.i18n.t('name')]: move.itemName || '-',
-    [window.i18n.t('movement_type')]: move.typeLabel || '-',
-    [window.i18n.t('document_number')]: move.docNumber || '-',
-    [window.i18n.t('purchase_invoice_number')]: move.purchaseInvoiceNumber || '-',
-    [window.i18n.t('invoice_value')]: formatMoney(move.invoiceValue),
-    [window.i18n.t('movement_qty')]: formatNumber(move.qtyChange),
-    [window.i18n.t('price_unit')]: formatMoney(move.price),
-    [window.i18n.t('stock_balance')]: formatNumber(move.balance)
-  }));
+  const rows = movements.map((move) => {
+    const row = {
+      [window.i18n.t('date_time')]: formatDate(move.date),
+      [window.i18n.t('product_code')]: move.itemCode || '-',
+      [window.i18n.t('name')]: move.itemName || '-',
+      [window.i18n.t('movement_type')]: move.typeLabel || '-',
+      [window.i18n.t('document_number')]: move.docNumber || '-',
+      [window.i18n.t('purchase_invoice_number')]: move.purchaseInvoiceNumber || '-',
+      [window.i18n.t('invoice_value')]: formatMoney(move.invoiceValue),
+      [window.i18n.t('movement_qty')]: formatItemCardMovementQty(move)
+    };
+    if (shouldShowItemCardProductionColumns()) {
+      row[window.i18n.t('storekeeper_name')] = move.storekeeperName || '-';
+      row[window.i18n.t('production_staff_single')] = move.productionStaffName || '-';
+    }
+    row[window.i18n.t('price_unit')] = formatMoney(move.price);
+    row[window.i18n.t('stock_balance')] = formatNumber(move.balance);
+    return row;
+  });
   exportToExcel(rows, 'item-card-report.xlsx');
 }
 
@@ -7243,6 +7411,8 @@ function printItemCardMovements() {
     : '-';
   const lang = window.i18n.getLanguage();
   const dir = lang === 'ar' ? 'rtl' : 'ltr';
+  const showProductionColumns = shouldShowItemCardProductionColumns();
+  const headersHtml = getItemCardMovementColumns().map((column) => `<th>${column.label}</th>`).join('');
   const rowsHtml = movements.map((move) => `
     <tr>
       <td>${formatDate(move.date)}</td>
@@ -7252,7 +7422,8 @@ function printItemCardMovements() {
       <td>${move.docNumber || '-'}</td>
       <td>${move.purchaseInvoiceNumber || '-'}</td>
       <td>${formatMoney(move.invoiceValue)}</td>
-      <td>${formatNumber(move.qtyChange)}</td>
+      <td>${formatItemCardMovementQty(move)}</td>
+      ${showProductionColumns ? `<td>${move.storekeeperName || '-'}</td><td>${move.productionStaffName || '-'}</td>` : ''}
       <td>${formatMoney(move.price)}</td>
       <td>${formatNumber(move.balance)}</td>
     </tr>
@@ -7284,21 +7455,10 @@ function printItemCardMovements() {
         </div>
         <table>
           <thead>
-            <tr>
-              <th>${window.i18n.t('date_time')}</th>
-              <th>${window.i18n.t('product_code')}</th>
-              <th>${window.i18n.t('name')}</th>
-              <th>${window.i18n.t('movement_type')}</th>
-              <th>${window.i18n.t('document_number')}</th>
-              <th>${window.i18n.t('purchase_invoice_number')}</th>
-              <th>${window.i18n.t('invoice_value')}</th>
-              <th>${window.i18n.t('movement_qty')}</th>
-              <th>${window.i18n.t('price_unit')}</th>
-              <th>${window.i18n.t('stock_balance')}</th>
-            </tr>
+            <tr>${headersHtml}</tr>
           </thead>
           <tbody>
-            ${rowsHtml || `<tr><td colspan="10">${window.i18n.t('no_data')}</td></tr>`}
+            ${rowsHtml || `<tr><td colspan="${getItemCardMovementColumns().length}">${window.i18n.t('no_data')}</td></tr>`}
           </tbody>
         </table>
       </body>
@@ -11084,18 +11244,21 @@ function updateQtyDisplay() {
   els.qtyModalDisplay.textContent = state.qtyModal.value || '0';
 }
 
-function openQtyModal({ title, available, onConfirm, mode = 'add', confirmLabel }) {
+function openQtyModal({ title, available, onConfirm, mode = 'add', confirmLabel, unitId = null, unitName = '' }) {
   if (!els.qtyModal) return;
   state.qtyModal.value = '';
   state.qtyModal.mode = mode;
   state.qtyModal.available = available;
   state.qtyModal.onConfirm = onConfirm;
   els.qtyModalTitle.textContent = title || '';
+  const resolvedUnitName = String(unitName || getUnitName(unitId) || '').trim();
+  const helperLines = [];
+  if (resolvedUnitName) helperLines.push(`${window.i18n.t('item_unit')}: ${resolvedUnitName}`);
   if (available !== null && available !== undefined) {
-    els.qtyModalStock.textContent = `${window.i18n.t('available_stock')}: ${formatNumber(available)}`;
-  } else {
-    els.qtyModalStock.textContent = '';
+    helperLines.push(`${window.i18n.t('available_stock')}: ${formatNumber(available)}`);
   }
+  els.qtyModalStock.textContent = helperLines.join('\n');
+  els.qtyModalStock.style.whiteSpace = 'pre-line';
   if (confirmLabel && els.qtyModalConfirm) {
     els.qtyModalConfirm.textContent = confirmLabel;
   } else if (els.qtyModalConfirm) {
@@ -11273,10 +11436,10 @@ function getSupplierItems(supplierId) {
   const materials = state.cache.stockMaterials || {};
   const entries = [];
   Object.entries(products).forEach(([id, item]) => {
-    if (item.supplierId === supplierId) entries.push({ id, type: 'product', item });
+    if (itemHasSupplier(item, supplierId)) entries.push({ id, type: 'product', item });
   });
   Object.entries(materials).forEach(([id, item]) => {
-    if (item.supplierId === supplierId) entries.push({ id, type: 'material', item });
+    if (itemHasSupplier(item, supplierId)) entries.push({ id, type: 'material', item });
   });
   return entries;
 }
@@ -11311,15 +11474,15 @@ function getDefaultPurchaseUnitPrice(itemType, itemId) {
   return Number(itemData?.cost || 0);
 }
 
-function getUnassignedSupplierItems() {
+function getUnassignedSupplierItems(currentSupplierId = '') {
   const products = state.cache.products || {};
   const materials = state.cache.stockMaterials || {};
   const entries = [];
   Object.entries(products).forEach(([id, item]) => {
-    if (!item.supplierId) entries.push({ id, type: 'product', item });
+    if (!itemHasSupplier(item, currentSupplierId)) entries.push({ id, type: 'product', item });
   });
   Object.entries(materials).forEach(([id, item]) => {
-    if (!item.supplierId) entries.push({ id, type: 'material', item });
+    if (!itemHasSupplier(item, currentSupplierId)) entries.push({ id, type: 'material', item });
   });
   return entries;
 }
@@ -11567,6 +11730,7 @@ function setupIssueSection() {
             <select id="issueProductionStaff" class="input"></select>
           </div>
         </div>
+        ${buildEntrySearchTypeFilterHtml('issue')}
         <div class="row" style="margin-top: 12px;">
           <input id="issueSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_items')}" />
           <button id="issueSearchBtn" class="btn ghost small">${window.i18n.t('search')}</button>
@@ -11596,6 +11760,7 @@ function resetIssueDraft() {
     cashierId: '',
     invoiceNumber: '',
     productionStaffId: '',
+    searchTypes: [],
     items: [],
     editingId: null,
     originalItems: []
@@ -11669,6 +11834,11 @@ function bindIssueSection() {
     searchBtn.addEventListener('click', () => renderIssueSearchResults());
   }
 
+  bindEntrySearchTypeFilter('issue', (selectedTypes) => {
+    state.issueDraft.searchTypes = selectedTypes;
+    renderIssueSearchResults();
+  });
+
   if (submitBtn) {
     submitBtn.addEventListener('click', () => submitIssueVoucher());
   }
@@ -11738,6 +11908,7 @@ function renderIssueSection() {
     orderFields.classList.toggle('hidden', state.issueDraft.type !== 'order');
     productionFields.classList.toggle('hidden', state.issueDraft.type !== 'production');
   }
+  renderEntrySearchTypeFilter('issue', state.issueDraft.searchTypes);
   renderIssueSelects();
   renderIssueSearchResults();
   renderIssueDraftItems();
@@ -11786,7 +11957,7 @@ function renderIssueSelects() {
 }
 
 function getIssueSearchEntries() {
-  return getAllItems();
+  return filterEntriesBySearchTypes(getAllItems(), state.issueDraft?.searchTypes);
 }
 
 function handleIssueBarcodeScan() {
@@ -11831,6 +12002,7 @@ function openIssueQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
+      unitId: getResolvedItemUnitId(selectedEntry.item),
       mode: 'deduct',
       onConfirm: (qty) => {
         addIssueItem(selectedEntry, qty);
@@ -11907,6 +12079,7 @@ function editIssueItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(itemData),
     available,
+    unitId: getResolvedItemUnitId(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.issueDraft.items[index].qty = qty;
@@ -12161,6 +12334,7 @@ function setupProductionSection() {
             <select id="productionBranchSelect" class="input"></select>
           </div>
         </div>
+        ${buildEntrySearchTypeFilterHtml('production')}
         <div class="row" style="margin-top: 12px;">
           <input id="productionSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_items')}" />
           <button id="productionSearchBtn" class="btn ghost small">${window.i18n.t('search')}</button>
@@ -12186,6 +12360,7 @@ function resetProductionDraft() {
   state.productionDraft = {
     item: null,
     itemType: null,
+    searchTypes: [],
     qty: null,
     productionDate: '',
     expiryDate: '',
@@ -12258,6 +12433,11 @@ function bindProductionSection() {
   if (searchBtn) {
     searchBtn.addEventListener('click', () => renderProductionSearchResults());
   }
+
+  bindEntrySearchTypeFilter('production', (selectedTypes) => {
+    state.productionDraft.searchTypes = selectedTypes;
+    renderProductionSearchResults();
+  });
 
   if (linkBtn) {
     linkBtn.addEventListener('click', () => openProductionLinkModal());
@@ -12361,6 +12541,7 @@ function renderProductionSection() {
   if (storekeeperInput) {
     storekeeperInput.value = state.user?.name || '-';
   }
+  renderEntrySearchTypeFilter('production', state.productionDraft.searchTypes);
   renderProductionStaffSelect();
   renderProductionSearchResults();
   renderProductionDraft();
@@ -12422,7 +12603,7 @@ function renderProductionStaffSelect() {
 }
 
 function getProductionSearchEntries() {
-  return getAllItems();
+  return filterEntriesBySearchTypes(getAllItems(), state.productionDraft?.searchTypes);
 }
 
 function handleProductionBarcodeScan() {
@@ -12482,6 +12663,7 @@ function openProductionItem(entry) {
     openQtyModal({
       title: getLocalizedName(entry.item),
       available: null,
+      unitId: getResolvedItemUnitId(entry.item),
       mode: 'add',
       onConfirm: (qty) => {
         state.productionDraft.qty = qty;
@@ -12554,6 +12736,7 @@ function renderProductionDraft() {
       openQtyModal({
         title: getLocalizedName(item.item),
         available: null,
+        unitId: getResolvedItemUnitId(item.item),
         mode: 'add',
         onConfirm: (qty) => {
           state.productionDraft.qty = qty;
@@ -12631,6 +12814,7 @@ function submitProductionVoucher() {
       itemName: getLocalizedName(itemData) || original.itemName || '-',
       itemNameAr: itemData.nameAr || itemData.name || original.itemNameAr || null,
       itemNameEn: itemData.nameEn || itemData.name || original.itemNameEn || null,
+      unitId: itemData.unitId || original.unitId || null,
       qty: state.productionDraft.qty,
       productionDate: state.productionDraft.productionDate,
       expiryDate: state.productionDraft.expiryDate,
@@ -12680,6 +12864,7 @@ function submitProductionVoucher() {
       itemName: getLocalizedName(itemData),
       itemNameAr: itemData.nameAr || itemData.name || null,
       itemNameEn: itemData.nameEn || itemData.name || null,
+      unitId: itemData.unitId || null,
       qty: state.productionDraft.qty,
       productionDate: state.productionDraft.productionDate,
       expiryDate: state.productionDraft.expiryDate,
@@ -12711,10 +12896,11 @@ function renderProductionTable() {
   entries.forEach((rec) => {
     const row = document.createElement('tr');
     const staffLabel = rec.productionStaffName || getStaffLabel(state.cache.productionStaff?.[rec.productionStaffId], '-') || '-';
+    const qtyText = formatQuantityWithUnit(rec.qty, getResolvedItemUnitId(rec));
     row.innerHTML = `
       <td>${rec.productionNumber || '-'}</td>
       <td>${rec.itemName || '-'}</td>
-      <td>${formatNumber(rec.qty)}</td>
+      <td>${qtyText}</td>
       <td>${formatDate(rec.createdAt)}</td>
       <td>${rec.productionDate || '-'}</td>
       <td>${rec.expiryDate || '-'}</td>
@@ -12770,7 +12956,7 @@ function exportProductionReport() {
     [window.i18n.t('row_number')]: index + 1,
     [window.i18n.t('production_voucher')]: rec.productionNumber || '-',
     [window.i18n.t('product_single')]: rec.itemName || '-',
-    [window.i18n.t('quantity')]: formatNumber(rec.qty),
+    [window.i18n.t('quantity')]: formatQuantityWithUnit(rec.qty, getResolvedItemUnitId(rec)),
     [window.i18n.t('date_time')]: formatDate(rec.createdAt),
     [window.i18n.t('production_date')]: rec.productionDate || '-',
     [window.i18n.t('expiry_date')]: rec.expiryDate || '-',
@@ -12803,7 +12989,7 @@ function printProductionTableReport() {
     index + 1,
     rec.productionNumber || '-',
     rec.itemName || '-',
-    formatNumber(rec.qty),
+    formatQuantityWithUnit(rec.qty, getResolvedItemUnitId(rec)),
     formatDate(rec.createdAt),
     rec.productionDate || '-',
     rec.expiryDate || '-',
@@ -12853,21 +13039,49 @@ function isNearExpiryDate(dateText, days = 7) {
   return diffDays >= 0 && diffDays <= days;
 }
 
+function getProductionFollowUpItemKey(itemOrType, itemId) {
+  if (typeof itemOrType === 'object' && itemOrType) {
+    return `${normalizeItemType(itemOrType)}:${itemOrType.itemId || itemOrType.id || ''}`;
+  }
+  return `${itemOrType || 'product'}:${itemId || ''}`;
+}
+
+function parseProductionFollowUpItemKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return { itemType: '', itemId: '' };
+  if (!raw.includes(':')) {
+    return { itemType: 'product', itemId: raw };
+  }
+  const [itemType, ...rest] = raw.split(':');
+  return {
+    itemType: itemType || 'product',
+    itemId: rest.join(':') || ''
+  };
+}
+
+function getProductionFollowUpItemData(itemType, itemId) {
+  return getItemDataByType(itemType || 'product', itemId || '');
+}
+
 function getFilteredProductionRecords(filters = state.productionFollowUpFilters || {}) {
   const queryRaw = String(filters.query || '').trim().toLowerCase();
   const queryNorm = normalizeSearchValue(filters.query || '');
+  const selectedItem = parseProductionFollowUpItemKey(filters.productId);
   return Object.entries(state.cache.production || {})
     .map(([id, rec]) => ({ id, ...rec }))
     .filter((rec) => {
-      if (filters.productId && (rec.itemId || '') !== filters.productId) return false;
+      if (selectedItem.itemId) {
+        const recordItemType = normalizeItemType(rec);
+        if ((rec.itemId || '') !== selectedItem.itemId || recordItemType !== selectedItem.itemType) return false;
+      }
       if (filters.branchId && filters.branchId !== 'all' && (rec.branchId || '') !== filters.branchId) return false;
       if (filters.staffId && filters.staffId !== 'all' && (rec.productionStaffId || '') !== filters.staffId) return false;
       if ((filters.fromDate || filters.toDate) && !isTimestampInDateRange(rec.createdAt, filters.fromDate, filters.toDate)) return false;
       if (!queryRaw && !queryNorm) return true;
       const text = `${rec.itemName || ''} ${rec.itemNameAr || ''} ${rec.itemNameEn || ''} ${rec.productionNumber || ''}`.toLowerCase();
       const code = normalizeSearchValue(`${rec.productionNumber || ''}`);
-      const productCode = normalizeSearchValue(state.cache.products?.[rec.itemId]?.code || '');
-      return text.includes(queryRaw) || code.includes(queryNorm) || productCode.includes(queryNorm);
+      const itemCode = normalizeSearchValue(getProductionFollowUpItemData(normalizeItemType(rec), rec.itemId)?.code || '');
+      return text.includes(queryRaw) || code.includes(queryNorm) || itemCode.includes(queryNorm);
     })
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
@@ -12934,25 +13148,29 @@ function renderProductionFollowUpFilters(container, filters, { includeSearch = f
 }
 
 function renderProductionFollowUpListView(section, filters) {
-  const records = getFilteredProductionRecords(filters).filter((rec) => (rec.itemType || 'product') === 'product');
+  const records = getFilteredProductionRecords(filters);
   const map = {};
   records.forEach((rec) => {
-    const productId = rec.itemId || '';
-    if (!productId) return;
-    if (!map[productId]) {
-      const product = state.cache.products?.[productId] || {};
-      map[productId] = {
-        productId,
-        code: product.code || '-',
-        nameAr: product.nameAr || rec.itemNameAr || rec.itemName || '-',
-        nameEn: product.nameEn || rec.itemNameEn || rec.itemName || '-',
+    const itemType = normalizeItemType(rec);
+    const itemId = rec.itemId || '';
+    const itemKey = getProductionFollowUpItemKey(itemType, itemId);
+    if (!itemId) return;
+    if (!map[itemKey]) {
+      const itemData = getProductionFollowUpItemData(itemType, itemId) || {};
+      map[itemKey] = {
+        productId: itemKey,
+        itemType,
+        itemId,
+        code: itemData.code || '-',
+        nameAr: itemData.nameAr || itemData.name || rec.itemNameAr || rec.itemName || '-',
+        nameEn: itemData.nameEn || itemData.name || rec.itemNameEn || rec.itemName || '-',
         vouchersCount: 0,
         nearExpiry: 0
       };
     }
-    map[productId].vouchersCount += 1;
+    map[itemKey].vouchersCount += 1;
     if (isNearExpiryDate(rec.expiryDate, 7)) {
-      map[productId].nearExpiry += 1;
+      map[itemKey].nearExpiry += 1;
     }
   });
   const rows = Object.values(map).sort((a, b) => b.vouchersCount - a.vouchersCount);
@@ -13010,19 +13228,23 @@ function renderProductionFollowUpListView(section, filters) {
 }
 
 function renderProductionFollowUpDetailsView(section, filters) {
-  const product = state.cache.products?.[filters.productId];
-  if (!product) {
+  const selectedItem = parseProductionFollowUpItemKey(filters.productId);
+  const item = getProductionFollowUpItemData(selectedItem.itemType, selectedItem.itemId);
+  const rows = getFilteredProductionRecords(filters).filter((rec) => (
+    getProductionFollowUpItemKey(rec) === getProductionFollowUpItemKey(selectedItem.itemType, selectedItem.itemId)
+  ));
+  if (!selectedItem.itemId || !rows.length) {
     state.productionFollowUpFilters.productId = null;
     renderProductionFollowUpSection();
     return;
   }
-  const rows = getFilteredProductionRecords(filters).filter((rec) => (rec.itemId || '') === filters.productId);
+  const title = getLocalizedName(item) !== '-' ? getLocalizedName(item) : (rows[0]?.itemName || '-');
   section.innerHTML = `
     <div class="card">
       <div class="row" style="justify-content: space-between;">
         <div class="row">
           <button id="productionFollowUpBackBtn" class="btn ghost">${window.i18n.t('back')}</button>
-          <h2>${getLocalizedName(product)}</h2>
+          <h2>${title}</h2>
         </div>
       </div>
       <div id="productionFollowUpFilters" class="row" style="margin-top: 12px; flex-wrap: wrap;"></div>
@@ -13070,7 +13292,7 @@ function renderProductionFollowUpDetailsView(section, filters) {
       <tr>
         <td>${rec.productionNumber || '-'}</td>
         <td>${rec.itemName || '-'}</td>
-        <td>${formatNumber(rec.qty)}</td>
+        <td>${formatQuantityWithUnit(rec.qty, getResolvedItemUnitId(rec))}</td>
         <td>${formatDate(rec.createdAt)}</td>
         <td>${rec.productionDate || '-'}</td>
         <td>${rec.expiryDate || '-'}</td>
@@ -13530,6 +13752,7 @@ function openInventoryQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
+      unitId: getResolvedItemUnitId(selectedEntry.item),
       mode: 'set',
       onConfirm: (qty) => {
         addInventoryItem(selectedEntry, qty);
@@ -13602,6 +13825,7 @@ function editInventoryItemQty(index) {
   openQtyModal({
     title: item.name,
     available: null,
+    unitId: getResolvedItemUnitId(item),
     mode: 'set',
     onConfirm: (qty) => {
       state.inventoryDraft.items[index].qty = qty;
@@ -14262,10 +14486,14 @@ function renderSuppliersTable() {
   const materials = state.cache.stockMaterials || {};
   const counts = {};
   Object.values(products).forEach((item) => {
-    if (item.supplierId) counts[item.supplierId] = (counts[item.supplierId] || 0) + 1;
+    getItemSupplierIds(item).forEach((supplierId) => {
+      counts[supplierId] = (counts[supplierId] || 0) + 1;
+    });
   });
   Object.values(materials).forEach((item) => {
-    if (item.supplierId) counts[item.supplierId] = (counts[item.supplierId] || 0) + 1;
+    getItemSupplierIds(item).forEach((supplierId) => {
+      counts[supplierId] = (counts[supplierId] || 0) + 1;
+    });
   });
   const entries = Object.entries(suppliers).map(([id, supplier]) => ({ id, ...supplier }));
   table.innerHTML = '';
@@ -14363,7 +14591,7 @@ function renderSupplierPickerList() {
     container.innerHTML = `<p class="helper">${window.i18n.t('search_to_show')}</p>`;
     return;
   }
-  let entries = getUnassignedSupplierItems().filter((entry) => {
+  let entries = getUnassignedSupplierItems(state.supplierDetailId).filter((entry) => {
     const name = `${entry.item.nameAr || ''} ${entry.item.nameEn || ''} ${entry.item.name || ''}`.toLowerCase();
     const code = String(entry.item.code || '').toLowerCase();
     const barcode = String(entry.item.barcode || '').toLowerCase();
@@ -14404,8 +14632,10 @@ function applySupplierPickerSelection() {
   const updates = {};
   state.supplierPickSelection.forEach((key) => {
     const [type, id] = key.split(':');
-    const path = type === 'product' ? `products/${id}/supplierId` : `stockMaterials/${id}/supplierId`;
-    updates[path] = state.supplierDetailId;
+    const item = type === 'product' ? state.cache.products?.[id] : state.cache.stockMaterials?.[id];
+    const path = type === 'product' ? `products/${id}` : `stockMaterials/${id}`;
+    const nextSupplierIds = [...getItemSupplierIds(item), state.supplierDetailId];
+    Object.assign(updates, buildItemSupplierUpdates(path, item, nextSupplierIds));
   });
   if (!Object.keys(updates).length) {
     closeSupplierPicker();
@@ -14418,8 +14648,9 @@ function applySupplierPickerSelection() {
 }
 
 function unassignSupplierItem(entry) {
-  const path = entry.type === 'product' ? `products/${entry.id}/supplierId` : `stockMaterials/${entry.id}/supplierId`;
-  db.ref(path).set(null).then(() => {
+  const path = entry.type === 'product' ? `products/${entry.id}` : `stockMaterials/${entry.id}`;
+  const nextSupplierIds = getItemSupplierIds(entry.item).filter((supplierId) => supplierId !== state.supplierDetailId);
+  db.ref().update(buildItemSupplierUpdates(path, entry.item, nextSupplierIds)).then(() => {
     renderSupplierDetail();
   });
 }
@@ -14431,10 +14662,14 @@ function deleteSupplier(supplierId) {
   const products = state.cache.products || {};
   const materials = state.cache.stockMaterials || {};
   Object.entries(products).forEach(([id, item]) => {
-    if (item.supplierId === supplierId) updates[`products/${id}/supplierId`] = null;
+    if (!itemHasSupplier(item, supplierId)) return;
+    const nextSupplierIds = getItemSupplierIds(item).filter((currentId) => currentId !== supplierId);
+    Object.assign(updates, buildItemSupplierUpdates(`products/${id}`, item, nextSupplierIds));
   });
   Object.entries(materials).forEach(([id, item]) => {
-    if (item.supplierId === supplierId) updates[`stockMaterials/${id}/supplierId`] = null;
+    if (!itemHasSupplier(item, supplierId)) return;
+    const nextSupplierIds = getItemSupplierIds(item).filter((currentId) => currentId !== supplierId);
+    Object.assign(updates, buildItemSupplierUpdates(`stockMaterials/${id}`, item, nextSupplierIds));
   });
   db.ref().update(updates).then(() => {
     db.ref(`suppliers/${supplierId}`).remove();
@@ -14761,6 +14996,7 @@ function openPurchaseQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
+      unitId: getResolvedItemUnitId(selectedEntry.item),
       mode: 'add',
       onConfirm: (qty) => addPurchaseItem(selectedEntry, qty)
     });
@@ -14867,6 +15103,7 @@ function editPurchaseItemQty(index) {
   openQtyModal({
     title: item.name,
     available: null,
+    unitId: getResolvedItemUnitId(item),
     mode: 'add',
     onConfirm: (qty) => {
       state.purchaseDraft.items[index].qty = qty;
@@ -15517,6 +15754,7 @@ function openSupplierReturnQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
+      unitId: getResolvedItemUnitId(selectedEntry.item),
       mode: 'deduct',
       onConfirm: (qty) => addSupplierReturnItem(selectedEntry, qty)
     });
@@ -15586,6 +15824,7 @@ function editSupplierReturnItemQty(index) {
   openQtyModal({
     title: item.name,
     available: null,
+    unitId: getResolvedItemUnitId(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.supplierReturnDraft.items[index].qty = qty;
@@ -15735,8 +15974,9 @@ function setupTransfersSection() {
             <select id="transferBranchSelect" class="input"></select>
           </div>
         </div>
+        ${buildEntrySearchTypeFilterHtml('transfer')}
         <div class="row" style="margin-top: 12px;">
-          <input id="transferSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_products')}" />
+          <input id="transferSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_items')}" />
           <button id="transferSearchBtn" class="btn ghost small">${window.i18n.t('search')}</button>
         </div>
         <div id="transferSearchResults" class="grid two" style="margin-top: 12px;"></div>
@@ -15761,6 +16001,7 @@ function setupTransfersSection() {
 function resetTransferDraft() {
   state.transferDraft = {
     toBranchId: '',
+    searchTypes: [],
     items: [],
     editingId: null,
     originalItems: [],
@@ -15802,6 +16043,11 @@ function bindTransfersSection() {
   if (searchBtn) {
     searchBtn.addEventListener('click', () => renderTransferSearchResults());
   }
+
+  bindEntrySearchTypeFilter('transfer', (selectedTypes) => {
+    state.transferDraft.searchTypes = selectedTypes;
+    renderTransferSearchResults();
+  });
 
   if (submitBtn) {
     submitBtn.addEventListener('click', () => submitTransferVoucher());
@@ -15850,13 +16096,14 @@ function renderTransfersSection() {
     renderBranchOptions(branchSelect, { excludeMain: true });
     branchSelect.value = state.transferDraft.toBranchId || '';
   }
+  renderEntrySearchTypeFilter('transfer', state.transferDraft.searchTypes);
   renderTransferSearchResults();
   renderTransferItems();
   renderTransfersTable();
 }
 
 function getTransferSearchEntries() {
-  return getProductEntries();
+  return filterEntriesBySearchTypes(getAllItems(), state.transferDraft?.searchTypes);
 }
 
 function handleTransferBarcodeScan() {
@@ -15901,6 +16148,7 @@ function openTransferQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
+      unitId: getResolvedItemUnitId(selectedEntry.item),
       mode: 'deduct',
       onConfirm: (qty) => addTransferItem(selectedEntry, qty)
     });
@@ -15911,6 +16159,7 @@ function addTransferItem(entry, qty) {
   const productionId = entry.productionRecord?.id || null;
   const existing = state.transferDraft.items.find((item) => (
     item.itemId === entry.id
+    && item.itemType === entry.type
     && (entry.type !== 'product' || String(item.productionId || '') === String(productionId || ''))
   ));
   if (existing) {
@@ -15973,6 +16222,7 @@ function editTransferItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(itemData),
     available,
+    unitId: getResolvedItemUnitId(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.transferDraft.items[index].qty = qty;
@@ -16072,7 +16322,10 @@ function renderTransfersTable() {
     const items = normalizeItems(rec.items);
     const row = document.createElement('tr');
     row.innerHTML = `
-      <td>${rec.transferNumber || '-'}</td>
+      <td>
+        <div>${rec.transferNumber || '-'}</div>
+        <div class="helper">${getBranchRouteLabel(rec.fromBranchId, rec.toBranchId)}</div>
+      </td>
       <td>${getBranchLabel(rec.fromBranchId)}</td>
       <td>${getBranchLabel(rec.toBranchId)}</td>
       <td>${rec.storekeeperName || '-'}</td>
@@ -16538,6 +16791,7 @@ function editCashierTransferItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(itemData),
     available,
+    unitId: getResolvedItemUnitId(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.cashierTransferDraft.items[index].qty = qty;
@@ -16651,8 +16905,9 @@ function setupStockReturnSection() {
           <label class="tag">${window.i18n.t('return_reason')}</label>
           <input id="stockReturnReason" class="input" placeholder="${window.i18n.t('return_reason_placeholder')}" />
         </div>
+        ${buildEntrySearchTypeFilterHtml('stockReturn')}
         <div class="row" style="margin-top: 12px;">
-          <input id="stockReturnSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_products')}" />
+          <input id="stockReturnSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_items')}" />
           <button id="stockReturnSearchBtn" class="btn ghost small">${window.i18n.t('search')}</button>
         </div>
         <div id="stockReturnSearchResults" class="grid two" style="margin-top: 12px;"></div>
@@ -16678,6 +16933,7 @@ function resetStockReturnDraft() {
   state.stockReturnDraft = {
     branchId: '',
     reason: '',
+    searchTypes: [],
     items: [],
     editingId: null,
     originalItems: [],
@@ -16728,6 +16984,11 @@ function bindStockReturnSection() {
 
   if (searchBtn) searchBtn.addEventListener('click', () => renderStockReturnSearchResults());
   if (submitBtn) submitBtn.addEventListener('click', () => submitStockReturnVoucher());
+
+  bindEntrySearchTypeFilter('stockReturn', (selectedTypes) => {
+    state.stockReturnDraft.searchTypes = selectedTypes;
+    renderStockReturnSearchResults();
+  });
 }
 
 function openStockReturnModal() {
@@ -16776,13 +17037,14 @@ function renderStockReturnSection() {
     branchSelect.value = state.stockReturnDraft.branchId || '';
   }
   if (reasonInput) reasonInput.value = state.stockReturnDraft.reason || '';
+  renderEntrySearchTypeFilter('stockReturn', state.stockReturnDraft.searchTypes);
   renderStockReturnSearchResults();
   renderStockReturnItems();
   renderStockReturnTable();
 }
 
 function getStockReturnSearchEntries() {
-  return getAllItems();
+  return filterEntriesBySearchTypes(getAllItems(), state.stockReturnDraft?.searchTypes);
 }
 
 function handleStockReturnBarcodeScan() {
@@ -16833,6 +17095,7 @@ function openStockReturnQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
+      unitId: getResolvedItemUnitId(selectedEntry.item),
       mode: 'deduct',
       onConfirm: (qty) => addStockReturnItem(selectedEntry, qty)
     });
@@ -16843,6 +17106,7 @@ function addStockReturnItem(entry, qty) {
   const productionId = entry.productionRecord?.id || null;
   const existing = state.stockReturnDraft.items.find((item) => (
     item.itemId === entry.id
+    && item.itemType === entry.type
     && (entry.type !== 'product' || String(item.productionId || '') === String(productionId || ''))
   ));
   if (existing) {
@@ -16906,6 +17170,7 @@ function editStockReturnItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(itemData),
     available,
+    unitId: getResolvedItemUnitId(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.stockReturnDraft.items[index].qty = qty;
@@ -17085,8 +17350,9 @@ function setupScrapReturnSection() {
             <select id="scrapReturnBranchSelect" class="input"></select>
           </div>
         </div>
+        ${buildEntrySearchTypeFilterHtml('scrapReturn')}
         <div class="row" style="margin-top: 12px;">
-          <input id="scrapReturnSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_products')}" />
+          <input id="scrapReturnSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_items')}" />
           <button id="scrapReturnSearchBtn" class="btn ghost small">${window.i18n.t('search')}</button>
         </div>
         <div id="scrapReturnSearchResults" class="grid two" style="margin-top: 12px;"></div>
@@ -17111,6 +17377,7 @@ function setupScrapReturnSection() {
 function resetScrapReturnDraft() {
   state.scrapReturnDraft = {
     branchId: '',
+    searchTypes: [],
     items: [],
     editingId: null,
     originalItems: [],
@@ -17151,6 +17418,11 @@ function bindScrapReturnSection() {
 
   if (searchBtn) searchBtn.addEventListener('click', () => renderScrapReturnSearchResults());
   if (submitBtn) submitBtn.addEventListener('click', () => submitScrapReturnVoucher());
+
+  bindEntrySearchTypeFilter('scrapReturn', (selectedTypes) => {
+    state.scrapReturnDraft.searchTypes = selectedTypes;
+    renderScrapReturnSearchResults();
+  });
 }
 
 function openScrapReturnModal() {
@@ -17195,13 +17467,14 @@ function renderScrapReturnSection() {
     renderBranchOptions(branchSelect, { excludeMain: true });
     branchSelect.value = state.scrapReturnDraft.branchId || '';
   }
+  renderEntrySearchTypeFilter('scrapReturn', state.scrapReturnDraft.searchTypes);
   renderScrapReturnSearchResults();
   renderScrapReturnItems();
   renderScrapReturnTable();
 }
 
 function getScrapReturnSearchEntries() {
-  return getAllItems();
+  return filterEntriesBySearchTypes(getAllItems(), state.scrapReturnDraft?.searchTypes);
 }
 
 function handleScrapReturnBarcodeScan() {
@@ -17252,6 +17525,7 @@ function openScrapReturnQtyModal(entry) {
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
+      unitId: getResolvedItemUnitId(selectedEntry.item),
       mode: 'deduct',
       onConfirm: (qty) => addScrapReturnItem(selectedEntry, qty)
     });
@@ -17262,6 +17536,7 @@ function addScrapReturnItem(entry, qty) {
   const productionId = entry.productionRecord?.id || null;
   const existing = state.scrapReturnDraft.items.find((item) => (
     item.itemId === entry.id
+    && item.itemType === entry.type
     && (entry.type !== 'product' || String(item.productionId || '') === String(productionId || ''))
   ));
   if (existing) {
@@ -17325,6 +17600,7 @@ function editScrapReturnItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(itemData),
     available,
+    unitId: getResolvedItemUnitId(item),
     mode: 'deduct',
     onConfirm: (qty) => {
       state.scrapReturnDraft.items[index].qty = qty;
@@ -17611,9 +17887,7 @@ function printTransferReport(record) {
   if (!record) return;
   const items = normalizeItems(record.items);
   const meta = [
-    { label: window.i18n.t('from_branch'), value: getBranchLabel(record.fromBranchId) },
-    { label: window.i18n.t('to_branch'), value: getBranchLabel(record.toBranchId) },
-    { label: window.i18n.t('return_reason'), value: record.reason || '-' },
+    { label: window.i18n.t('branch'), value: getBranchRouteLabel(record.fromBranchId, record.toBranchId) },
     { label: window.i18n.t('date_time'), value: formatDate(record.createdAt) },
     { label: window.i18n.t('storekeeper_name'), value: record.storekeeperName || '-' },
     { label: window.i18n.t('items'), value: items.length }
@@ -17624,7 +17898,7 @@ function printTransferReport(record) {
   ];
   const rows = items.map((item) => [
     formatItemNameWithUnit(item.name || '-', item.unitId),
-    formatNumber(item.qty)
+    formatQuantityWithUnit(item.qty, getResolvedItemUnitId(item))
   ]);
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const html = buildReportHtml({
@@ -17656,7 +17930,7 @@ function printStockReturnReport(record) {
   ];
   const rows = items.map((item) => [
     formatItemNameWithUnit(item.name || '-', item.unitId),
-    formatNumber(item.qty)
+    formatQuantityWithUnit(item.qty, getResolvedItemUnitId(item))
   ]);
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const html = buildReportHtml({
@@ -17687,7 +17961,7 @@ function printScrapReturnReport(record) {
   ];
   const rows = items.map((item) => [
     formatItemNameWithUnit(item.name || '-', item.unitId),
-    formatNumber(item.qty)
+    formatQuantityWithUnit(item.qty, getResolvedItemUnitId(item))
   ]);
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const html = buildReportHtml({
@@ -17853,7 +18127,7 @@ function printIssueReport(issue) {
   ];
   const rows = items.map((item) => {
     const nameWithUnit = formatItemNameWithUnit(item.name, item.unitId);
-    return [nameWithUnit, formatNumber(item.qty)];
+    return [nameWithUnit, formatQuantityWithUnit(item.qty, getResolvedItemUnitId(item))];
   });
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const html = buildReportHtml({
@@ -17890,14 +18164,14 @@ function printProductionReport(record) {
     ? state.cache.products?.[record.itemId]
     : state.cache.stockMaterials?.[record.itemId];
   const nameWithUnit = formatItemNameWithUnit(record.itemName || '-', itemData?.unitId || null);
-  const rows = [[nameWithUnit, formatNumber(record.qty), record.productionDate || '-', record.expiryDate || '-']];
+  const rows = [[nameWithUnit, formatQuantityWithUnit(record.qty, record.unitId || itemData?.unitId || null), record.productionDate || '-', record.expiryDate || '-']];
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const issue = state.cache.stockIssue?.[record.issueId];
   const issueItems = normalizeItems(issue?.items);
   const usedRows = issueItems.length
     ? issueItems.map((item) => [
       formatItemNameWithUnit(item.name || item.itemId || '-', item.unitId),
-      formatNumber(item.qty)
+      formatQuantityWithUnit(item.qty, getResolvedItemUnitId(item))
     ])
     : [[window.i18n.t('no_data'), '-']];
   const html = buildReportHtml({

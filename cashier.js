@@ -21,6 +21,7 @@ const state = {
   cashierName: null,
   products: {},
   stockMaterials: {},
+  units: {},
   categories: {},
   production: {},
   branches: {},
@@ -184,6 +185,7 @@ const els = {
 const qtyModalState = {
   value: '',
   available: null,
+  unitName: '',
   onConfirm: null
 };
 
@@ -232,6 +234,24 @@ function getLocalizedName(item) {
     return item.nameEn || item.name || item.nameAr || '-';
   }
   return item.nameAr || item.name || item.nameEn || '-';
+}
+
+function getUnitName(unitId) {
+  if (!unitId) return '';
+  const unit = state.units?.[unitId];
+  const name = getLocalizedName(unit);
+  return name && name !== '-' ? name : '';
+}
+
+function getResolvedItemUnitId(item) {
+  if (!item) return null;
+  if (item.unitId) return item.unitId;
+  const itemType = item.itemType || item.type || 'product';
+  const itemId = item.itemId || item.id;
+  if (!itemId) return null;
+  return itemType === 'product'
+    ? state.products?.[itemId]?.unitId || null
+    : state.stockMaterials?.[itemId]?.unitId || null;
 }
 
 function normalizeDigits(value) {
@@ -723,6 +743,10 @@ function listenData() {
   db.ref('stockMaterials').on('value', (snap) => {
     state.stockMaterials = snap.val() || {};
     renderTransferRequestSearchResults();
+  });
+
+  db.ref('units').on('value', (snap) => {
+    state.units = snap.val() || {};
   });
 
   db.ref('production').on('value', (snap) => {
@@ -1351,6 +1375,7 @@ function openInvoiceQtyFlow(entry, options = {}) {
     openQtyModal({
       title: getLocalizedName(resolvedEntry.item),
       available: getMainBranchStock(resolvedEntry.item),
+      unitId: getResolvedItemUnitId(resolvedEntry.item),
       onConfirm: (qty) => addInvoiceItem(resolvedEntry, qty)
     });
   });
@@ -1568,6 +1593,7 @@ function renderInvoiceCart() {
     qtyBtn.addEventListener('click', () => openQtyModal({
       title: item.name,
       available: null,
+      unitId: getResolvedItemUnitId(item),
       onConfirm: (qty) => {
         state.invoice.cart[index].qty = qty;
         renderInvoiceCart();
@@ -2058,15 +2084,20 @@ function deleteCustomerAddress(addressId) {
   });
 }
 
-function openQtyModal({ title, available, onConfirm }) {
+function openQtyModal({ title, available, onConfirm, unitId = null, unitName = '' }) {
   qtyModalState.value = '';
   qtyModalState.available = available;
+  qtyModalState.unitName = String(unitName || getUnitName(unitId) || '').trim();
   qtyModalState.onConfirm = onConfirm;
   if (els.qtyModalTitle) els.qtyModalTitle.textContent = title || '';
   if (els.qtyModalStock) {
-    els.qtyModalStock.textContent = available !== null && available !== undefined
-      ? `${window.i18n.t('available_stock')}: ${formatNumber(available)}`
-      : '';
+    const helperLines = [];
+    if (qtyModalState.unitName) helperLines.push(`${window.i18n.t('item_unit')}: ${qtyModalState.unitName}`);
+    if (available !== null && available !== undefined) {
+      helperLines.push(`${window.i18n.t('available_stock')}: ${formatNumber(available)}`);
+    }
+    els.qtyModalStock.textContent = helperLines.join('\n');
+    els.qtyModalStock.style.whiteSpace = 'pre-line';
   }
   if (els.qtyModalError) els.qtyModalError.textContent = '';
   updateQtyDisplay();
@@ -2612,6 +2643,7 @@ function openTransferRequestQtyModal(entry) {
   openQtyModal({
     title: getLocalizedName(entry.item),
     available,
+    unitId: getResolvedItemUnitId(entry.item),
     onConfirm: (qty) => addTransferRequestItem(entry, qty)
   });
 }
@@ -2763,6 +2795,7 @@ function editTransferRequestItemQty(index) {
   openQtyModal({
     title: item.name || getLocalizedName(product),
     available,
+    unitId: getResolvedItemUnitId(item),
     onConfirm: (qty) => {
       state.transferRequestDraft.items[index].qty = qty;
       renderTransferRequestItems();
@@ -3206,6 +3239,7 @@ function editTransferReceiveItemQty(index) {
   openQtyModal({
     title: item.name,
     available: item.transferredQty,
+    unitId: getResolvedItemUnitId(item),
     onConfirm: (qty) => {
       state.transferReceiveDraft.items[index].receivedQty = qty;
       renderTransferReceiveItems();

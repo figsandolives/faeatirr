@@ -7729,6 +7729,7 @@ function setupProductsSection() {
           <option value="default">${window.i18n.t('sort_default')}</option>
           <option value="salesDesc">${window.i18n.t('sort_sales_desc')}</option>
           <option value="salesAsc">${window.i18n.t('sort_sales_asc')}</option>
+          <option value="incompleteInfo">${window.i18n.t('sort_incomplete_info')}</option>
         </select>
         <input id="productSearch" class="input" style="max-width: 220px;" placeholder="${window.i18n.t('search')}" />
         <div class="row" style="gap: 8px;">
@@ -7956,6 +7957,8 @@ function renderProductsSection() {
     entries.sort((a, b) => (salesMap[b.id] || 0) - (salesMap[a.id] || 0));
   } else if (state.productFilters.sortBy === 'salesAsc') {
     entries.sort((a, b) => (salesMap[a.id] || 0) - (salesMap[b.id] || 0));
+  } else if (state.productFilters.sortBy === 'incompleteInfo') {
+    entries = entries.filter((item) => item.incompleteInfo || item.missingInfo);
   }
 
   const pagination = paginateEntries(entries, state.productFilters);
@@ -8005,7 +8008,7 @@ function renderProductsSection() {
       <td>${formatNumber(product.maxStock)}</td>
       <td>
         <div class="row">
-          <canvas class="barcode-canvas" data-barcode="${product.barcode || ''}" height="40"></canvas>
+          <canvas class="barcode-canvas" data-barcode="${product.barcode || ''}" height="40" title="${product.barcode || ''}" style="cursor: pointer;"></canvas>
           <button class="btn ghost small" data-action="download-barcode">${window.i18n.t('download')}</button>
         </div>
       </td>
@@ -8033,6 +8036,9 @@ function renderProductsSection() {
     const barcodeCanvas = row.querySelector('.barcode-canvas');
     if (barcodeCanvas && product.barcode && typeof JsBarcode !== 'undefined') {
       JsBarcode(barcodeCanvas, product.barcode, { format: 'CODE128', displayValue: false, height: 30, width: 1.2 });
+    }
+    if (barcodeCanvas) {
+      barcodeCanvas.addEventListener('click', () => copyTextToClipboard(product.barcode || ''));
     }
 
     row.querySelector('[data-action="download-barcode"]').addEventListener('click', () => {
@@ -10010,14 +10016,18 @@ function renderProductCategoriesSection() {
   }
 
   entries.forEach(([id, cat]) => {
-    const count = countProductsByCategory(id);
+    const productCount = countProductsByCategory(id);
+    const childCategoryCount = countChildCategories(id);
+    const countText = childCategoryCount > 0 && productCount === 0
+      ? `${childCategoryCount} ${window.i18n.t('subcategories')}`
+      : `${productCount} ${window.i18n.t('products')}`;
     const card = document.createElement('div');
     card.className = 'card light';
     card.innerHTML = `
       <div class="row" style="justify-content: space-between;">
         <div>
           <strong>${getLocalizedName(cat)}</strong>
-          <div class="helper">${count} ${window.i18n.t('products')}</div>
+          <div class="helper">${countText}</div>
         </div>
         <div class="row">
           <button class="btn ghost small" data-action="open">${window.i18n.t('view')}</button>
@@ -10160,6 +10170,11 @@ function collectCategoryTree(rootId, categories) {
 function countProductsByCategory(categoryId) {
   const products = state.cache.products || {};
   return Object.values(products).filter((product) => product.categoryId === categoryId).length;
+}
+
+function countChildCategories(categoryId) {
+  const categories = state.cache.productCategories || {};
+  return Object.values(categories).filter((category) => (category.parentId || null) === categoryId).length;
 }
 
 function openCategoryProductsModal() {
@@ -22284,6 +22299,45 @@ function getCurrencySuffix() {
 function formatMoney(value) {
   if (value === null || value === undefined || value === '') return '-';
   return `${formatNumber(value)}${getCurrencySuffix()}`;
+}
+
+function showCopyNotice(message) {
+  let notice = document.getElementById('copyNotice');
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.id = 'copyNotice';
+    notice.style.cssText = 'position:fixed;bottom:24px;left:24px;z-index:3000;background:#1f8a44;color:#fff;padding:10px 16px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.16);font-weight:700;';
+    document.body.appendChild(notice);
+  }
+  notice.textContent = message;
+  notice.classList.remove('hidden');
+  clearTimeout(showCopyNotice.timer);
+  showCopyNotice.timer = setTimeout(() => {
+    notice.classList.add('hidden');
+  }, 1400);
+}
+
+async function copyTextToClipboard(value) {
+  const text = String(value || '').trim();
+  if (!text) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const input = document.createElement('textarea');
+      input.value = text;
+      input.setAttribute('readonly', '');
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+    showCopyNotice(`${window.i18n.t('barcode_copied')}: ${text}`);
+  } catch (_error) {
+    showCopyNotice(text);
+  }
 }
 
 function exportToExcel(rows, filename) {

@@ -149,6 +149,15 @@ const state = {
     currentPage: 1,
     pageSize: 10
   },
+  productInfoFilters: {
+    query: '',
+    currentPage: 1,
+    pageSize: 20
+  },
+  productInfoPicker: {
+    query: '',
+    selectedIds: new Set()
+  },
   materialFilters: {
     branchId: 'all',
     categoryId: 'all',
@@ -995,6 +1004,7 @@ const els = {
   productionLinkModal: document.getElementById('productionLinkModal'),
   productionIssueList: document.getElementById('productionIssueList'),
   productionLinkConfirm: document.getElementById('productionLinkConfirm'),
+  productionLinkSkip: document.getElementById('productionLinkSkip'),
   productionLinkCancel: document.getElementById('productionLinkCancel'),
   issueDetailOverlay: document.getElementById('issueDetailOverlay'),
   issueDetailBody: document.getElementById('issueDetailBody'),
@@ -1492,6 +1502,7 @@ function initSections() {
   setupUsersSection();
   setupTablesSection();
   setupProductsSection();
+  setupProductInfoSection();
   setupProductCategoriesSection();
   setupItemCardSection();
   setupCountryOriginsSection();
@@ -1525,6 +1536,7 @@ function rebuildSections() {
   setupUsersSection();
   setupTablesSection();
   setupProductsSection();
+  setupProductInfoSection();
   setupProductCategoriesSection();
   setupItemCardSection();
   setupCountryOriginsSection();
@@ -5794,9 +5806,7 @@ function printA4Report(title, metadataRows, headers, rows, summaryRows = []) {
       <strong>${item.value}</strong>
     </div>
   `).join('');
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) return;
-  printWindow.document.write(`
+  const html = `
     <!DOCTYPE html>
     <html lang="${lang}" dir="${dir}">
       <head>
@@ -5837,7 +5847,17 @@ function printA4Report(title, metadataRows, headers, rows, summaryRows = []) {
         </table>
       </body>
     </html>
-  `);
+  `;
+  if (window.figsDesktop?.isDesktopApp) {
+    window.figsDesktop.printHtml({ html, type: 'a4', silent: true }).catch((error) => {
+      console.error('Desktop A4 print failed:', error);
+      alert('تعذرت الطباعة على طابعة A4. تأكد من اختيار الطابعة في إعدادات الطابعات.');
+    });
+    return;
+  }
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) return;
+  printWindow.document.write(html);
   printWindow.document.close();
   printWindow.focus();
   printWindow.print();
@@ -9942,6 +9962,316 @@ function updateReorderNotice() {
   });
 }
 
+function setupProductInfoSection() {
+  const section = document.getElementById('section-productInfo');
+  if (!section) return;
+  section.innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <h2>معلومات المنتجات</h2>
+        <button id="addProductInfoBtn" class="btn primary">إضافة منتجات</button>
+      </div>
+      <div class="row" style="margin-top: 12px; flex-wrap: wrap;">
+        <input id="productInfoSearch" class="input" style="max-width: 320px;" placeholder="بحث باسم المنتج أو الباركود" />
+        <div class="row" style="gap: 8px;">
+          <span class="helper">عدد العناصر</span>
+          <select id="productInfoPageSize" class="input" style="max-width: 110px;">
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>اسم المنتج</th>
+            <th>المكونات</th>
+            <th>بلد المنشأ</th>
+            <th>الباركود</th>
+            <th>إجراءات</th>
+          </tr>
+        </thead>
+        <tbody id="productInfoTable"></tbody>
+      </table>
+      ${buildPaginationBarHtml('productInfoPageInfo', 'productInfoPagination')}
+    </div>
+    <div id="productInfoPickerOverlay" class="overlay hidden">
+      <div class="modal lg" style="max-width: 980px; width: 100%; text-align: start;">
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <h3>إضافة منتجات</h3>
+          <button id="productInfoPickerClose" class="btn ghost small">×</button>
+        </div>
+        <input id="productInfoPickerSearch" class="input" style="margin-top: 12px;" placeholder="بحث باسم المنتج أو الباركود" />
+        <div class="notice" style="margin-top: 12px;">
+          <span id="productInfoPickerSelectedCount">0 منتج محدد</span>
+        </div>
+        <div id="productInfoPickerResults" class="grid two" style="margin-top: 12px; max-height: 420px; overflow: auto;"></div>
+        <div class="row" style="justify-content: flex-end; margin-top: 14px;">
+          <button id="productInfoPickerCancel" class="btn ghost">إلغاء</button>
+          <button id="productInfoPickerAdd" class="btn primary">إضافة</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const search = document.getElementById('productInfoSearch');
+  const pageSize = document.getElementById('productInfoPageSize');
+  const addBtn = document.getElementById('addProductInfoBtn');
+  if (search) {
+    search.value = state.productInfoFilters.query || '';
+    search.addEventListener('input', () => {
+      state.productInfoFilters.query = search.value || '';
+      state.productInfoFilters.currentPage = 1;
+      renderProductInfoSection();
+    });
+  }
+  if (pageSize) {
+    pageSize.value = String(state.productInfoFilters.pageSize || 20);
+    pageSize.addEventListener('change', () => {
+      state.productInfoFilters.pageSize = Number(pageSize.value || 20);
+      state.productInfoFilters.currentPage = 1;
+      renderProductInfoSection();
+    });
+  }
+  if (addBtn) addBtn.addEventListener('click', () => openProductInfoPicker());
+
+  document.getElementById('productInfoPickerClose')?.addEventListener('click', closeProductInfoPicker);
+  document.getElementById('productInfoPickerCancel')?.addEventListener('click', closeProductInfoPicker);
+  document.getElementById('productInfoPickerAdd')?.addEventListener('click', addSelectedProductInfos);
+  document.getElementById('productInfoPickerSearch')?.addEventListener('input', (event) => {
+    state.productInfoPicker.query = event.target.value || '';
+    renderProductInfoPickerResults();
+  });
+
+  renderProductInfoSection();
+}
+
+function getProductInfoByProductId(productId) {
+  if (!productId) return null;
+  const infos = state.cache.productInfos || {};
+  return infos[productId] || Object.values(infos).find((info) => (info.productId || info.id) === productId) || null;
+}
+
+function getProductInfoEntryId(productId, info) {
+  if (!productId && !info) return '';
+  const infos = state.cache.productInfos || {};
+  if (productId && infos[productId]) return productId;
+  const found = Object.entries(infos).find(([, item]) => (item.productId || item.id) === productId || item === info);
+  return found?.[0] || productId || '';
+}
+
+function getProductInfoRows() {
+  const products = state.cache.products || {};
+  const infos = state.cache.productInfos || {};
+  const query = normalizeSearchValue(state.productInfoFilters.query || '');
+  return Object.entries(infos)
+    .map(([id, info]) => {
+      const productId = info.productId || id;
+      const product = products[productId] || {};
+      return { id, productId, info: { id, ...info }, product };
+    })
+    .filter((row) => {
+      if (!query) return true;
+      const text = normalizeSearchValue([
+        row.product.nameAr,
+        row.product.nameEn,
+        row.product.name,
+        row.info.productName,
+        row.info.ingredients,
+        row.info.origin,
+        row.info.barcode,
+        row.product.barcode
+      ].join(' '));
+      return text.includes(query);
+    })
+    .sort((a, b) => (getLocalizedName(a.product) || a.info.productName || '').localeCompare(getLocalizedName(b.product) || b.info.productName || '', 'ar'));
+}
+
+function renderProductInfoSection() {
+  const table = document.getElementById('productInfoTable');
+  if (!table) return;
+  const search = document.getElementById('productInfoSearch');
+  const pageSize = document.getElementById('productInfoPageSize');
+  if (search && search.value !== (state.productInfoFilters.query || '')) search.value = state.productInfoFilters.query || '';
+  if (pageSize) pageSize.value = String(state.productInfoFilters.pageSize || 20);
+
+  const rows = getProductInfoRows();
+  const pagination = paginateEntries(rows, state.productInfoFilters);
+  updatePaginationControls({
+    infoId: 'productInfoPageInfo',
+    containerId: 'productInfoPagination',
+    filters: state.productInfoFilters,
+    totalItems: rows.length,
+    onPageChange: (page) => {
+      state.productInfoFilters.currentPage = page;
+      renderProductInfoSection();
+    }
+  });
+
+  table.innerHTML = '';
+  if (!rows.length) {
+    table.innerHTML = '<tr><td colspan="5">لا توجد معلومات منتجات</td></tr>';
+    return;
+  }
+
+  pagination.items.forEach((row) => {
+    const productName = getLocalizedName(row.product) !== '-' ? getLocalizedName(row.product) : (row.info.productName || '-');
+    const productNameEn = row.product.nameEn || '';
+    const barcode = row.info.barcode || row.product.barcode || '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        <strong>${escapeHtml(productName)}</strong>
+        ${productNameEn ? `<div class="helper">${escapeHtml(productNameEn)}</div>` : ''}
+      </td>
+      <td>
+        <textarea class="input" rows="2" data-field="ingredients" data-id="${row.id}">${escapeHtml(row.info.ingredients || '')}</textarea>
+      </td>
+      <td>
+        <input class="input" data-field="origin" data-id="${row.id}" value="${escapeHtml(row.info.origin || '')}" />
+      </td>
+      <td>
+        <input class="input" dir="ltr" data-field="barcode" data-id="${row.id}" value="${escapeHtml(barcode)}" />
+      </td>
+      <td>
+        <button class="btn danger small" data-action="delete" data-id="${row.id}">حذف</button>
+      </td>
+    `;
+    table.appendChild(tr);
+  });
+
+  table.querySelectorAll('[data-field]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const field = input.dataset.field;
+      const value = field === 'barcode'
+        ? normalizeDigits(input.value || '').trim()
+        : String(input.value || '').trim();
+      if (field === 'barcode') input.value = value;
+      updateProductInfoField(input.dataset.id, field, value);
+    });
+  });
+  table.querySelectorAll('[data-action="delete"]').forEach((button) => {
+    button.addEventListener('click', () => deleteProductInfo(button.dataset.id));
+  });
+}
+
+function updateProductInfoField(infoId, field, value) {
+  if (!infoId || !field) return;
+  db.ref(`productInfos/${infoId}/${field}`).set(value).then(() => {
+    showCopyNotice('تم الحفظ');
+  }).catch((error) => {
+    console.error('Product info save failed:', error);
+    alert('تعذر حفظ معلومات المنتج');
+  });
+}
+
+function deleteProductInfo(infoId) {
+  if (!infoId) return;
+  if (!confirm('هل تريد حذف معلومات هذا المنتج؟')) return;
+  db.ref(`productInfos/${infoId}`).remove().catch((error) => {
+    console.error('Product info delete failed:', error);
+    alert('تعذر حذف معلومات المنتج');
+  });
+}
+
+function openProductInfoPicker() {
+  state.productInfoPicker.query = '';
+  state.productInfoPicker.selectedIds = new Set();
+  const overlay = document.getElementById('productInfoPickerOverlay');
+  const search = document.getElementById('productInfoPickerSearch');
+  if (search) search.value = '';
+  renderProductInfoPickerResults();
+  overlay?.classList.remove('hidden');
+  setTimeout(() => search?.focus(), 50);
+}
+
+function closeProductInfoPicker() {
+  document.getElementById('productInfoPickerOverlay')?.classList.add('hidden');
+}
+
+function getProductInfoPickerRows() {
+  const query = normalizeSearchValue(state.productInfoPicker.query || '');
+  const existing = new Set(Object.entries(state.cache.productInfos || {}).map(([id, info]) => info.productId || id));
+  if (!query) return [];
+  return Object.entries(state.cache.products || {})
+    .map(([id, product]) => ({ id, product }))
+    .filter((row) => !existing.has(row.id))
+    .filter((row) => normalizeSearchValue([row.product.nameAr, row.product.nameEn, row.product.name, row.product.barcode, row.product.code].join(' ')).includes(query))
+    .sort((a, b) => (getLocalizedName(a.product) || '').localeCompare(getLocalizedName(b.product) || '', 'ar'))
+    .slice(0, 80);
+}
+
+function renderProductInfoPickerResults() {
+  const container = document.getElementById('productInfoPickerResults');
+  const counter = document.getElementById('productInfoPickerSelectedCount');
+  const addBtn = document.getElementById('productInfoPickerAdd');
+  if (!container) return;
+  const selected = state.productInfoPicker.selectedIds || new Set();
+  if (counter) counter.textContent = `${selected.size} منتج محدد`;
+  if (addBtn) addBtn.disabled = selected.size === 0;
+  const rows = getProductInfoPickerRows();
+  if (!state.productInfoPicker.query) {
+    container.innerHTML = '<p class="helper">اكتب في البحث لعرض المنتجات بدون تحميل القائمة كاملة.</p>';
+    return;
+  }
+  if (!rows.length) {
+    container.innerHTML = '<p class="helper">لا توجد منتجات مطابقة أو كل النتائج مضافة مسبقاً.</p>';
+    return;
+  }
+  container.innerHTML = '';
+  rows.forEach(({ id, product }) => {
+    const card = document.createElement('label');
+    card.className = 'notice row';
+    card.style.justifyContent = 'space-between';
+    card.style.cursor = 'pointer';
+    card.innerHTML = `
+      <span>
+        <strong>${escapeHtml(getLocalizedName(product))}</strong>
+        ${product.nameEn ? `<div class="helper">${escapeHtml(product.nameEn)}</div>` : ''}
+        <div class="helper">${escapeHtml(product.barcode || product.code || 'بدون باركود')}</div>
+      </span>
+      <input type="checkbox" value="${id}" ${selected.has(id) ? 'checked' : ''} />
+    `;
+    const checkbox = card.querySelector('input');
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) selected.add(id);
+      else selected.delete(id);
+      renderProductInfoPickerResults();
+    });
+    container.appendChild(card);
+  });
+}
+
+function addSelectedProductInfos() {
+  const selected = Array.from(state.productInfoPicker.selectedIds || []);
+  if (!selected.length) return;
+  const updates = {};
+  selected.forEach((productId) => {
+    const product = state.cache.products?.[productId];
+    if (!product) return;
+    updates[productId] = {
+      id: productId,
+      productId,
+      productName: getLocalizedName(product),
+      ingredients: '',
+      origin: '',
+      barcode: product.barcode || '',
+      createdAt: Date.now()
+    };
+  });
+  if (!Object.keys(updates).length) return;
+  db.ref('productInfos').update(updates).then(() => {
+    closeProductInfoPicker();
+    showCopyNotice('تمت إضافة المنتجات');
+  }).catch((error) => {
+    console.error('Add product infos failed:', error);
+    alert('تعذر إضافة المنتجات');
+  });
+}
+
 function setupProductCategoriesSection() {
   const section = document.getElementById('section-productCategories');
   if (!section) return;
@@ -11406,6 +11736,17 @@ function bindProductionLinkModal() {
       if (!selected) return;
       if (state.productionDraft) {
         state.productionDraft.issueId = selected.value;
+        state.productionDraft.issueSkipped = false;
+      }
+      closeProductionLinkModal();
+      renderProductionDraft();
+    });
+  }
+  if (els.productionLinkSkip) {
+    els.productionLinkSkip.addEventListener('click', () => {
+      if (state.productionDraft) {
+        state.productionDraft.issueId = null;
+        state.productionDraft.issueSkipped = true;
       }
       closeProductionLinkModal();
       renderProductionDraft();
@@ -12418,6 +12759,7 @@ function resetProductionDraft() {
     productionDate: '',
     expiryDate: '',
     issueId: null,
+    issueSkipped: false,
     productionStaffId: '',
     branchId: '',
     editingId: null,
@@ -12564,6 +12906,7 @@ function openProductionEditModal(record) {
   state.productionDraft.productionDate = record.productionDate || '';
   state.productionDraft.expiryDate = record.expiryDate || '';
   state.productionDraft.issueId = record.issueId || null;
+  state.productionDraft.issueSkipped = !record.issueId;
   state.productionDraft.productionStaffId = record.productionStaffId || '';
   state.productionDraft.branchId = record.branchId || getMainBranchId() || '';
   state.productionDraft.editingId = record.id || null;
@@ -12712,6 +13055,7 @@ function openProductionItem(entry) {
   state.productionDraft.productionDate = '';
   state.productionDraft.expiryDate = '';
   state.productionDraft.issueId = null;
+  state.productionDraft.issueSkipped = false;
   state.productionDraft.onDatesSelected = () => {
     openQtyModal({
       title: getLocalizedName(entry.item),
@@ -12735,6 +13079,7 @@ function clearProductionItem() {
   state.productionDraft.productionDate = '';
   state.productionDraft.expiryDate = '';
   state.productionDraft.issueId = null;
+  state.productionDraft.issueSkipped = false;
   const errorEl = document.getElementById('productionError');
   if (errorEl) errorEl.textContent = '';
   const searchInput = document.getElementById('productionSearchInput');
@@ -12761,6 +13106,7 @@ function renderProductionDraft() {
   }
   const item = state.productionDraft.item;
   const issue = state.cache.stockIssue?.[state.productionDraft.issueId];
+  const issueLabel = state.productionDraft.issueSkipped ? 'تم التخطي' : (issue?.issueNumber || '-');
   container.innerHTML = `
     <div class="notice">
       <div><strong>${getLocalizedName(item.item)}</strong></div>
@@ -12769,7 +13115,7 @@ function renderProductionDraft() {
       <div class="helper">${window.i18n.t('production_date')}: ${state.productionDraft.productionDate || '-'}</div>
       <div class="helper">${window.i18n.t('expiry_date')}: ${state.productionDraft.expiryDate || '-'}</div>
       <div class="helper">${window.i18n.t('branch')}: ${getBranchLabel(state.productionDraft.branchId)}</div>
-      <div class="helper">${window.i18n.t('issue_number')}: ${issue?.issueNumber || '-'}</div>
+      <div class="helper">${window.i18n.t('issue_number')}: ${issueLabel}</div>
       <button id="productionChangeItem" class="btn ghost small" style="margin-top: 8px;">${window.i18n.t('change_product')}</button>
     </div>
   `;
@@ -12800,7 +13146,7 @@ function renderProductionDraft() {
   }
   const readyForLink = Boolean(state.productionDraft.productionDate && state.productionDraft.expiryDate && state.productionDraft.qty);
   if (linkBtn) linkBtn.disabled = !readyForLink;
-  const readyForPrint = readyForLink && Boolean(state.productionDraft.issueId) && Boolean(state.productionDraft.productionStaffId);
+  const readyForPrint = readyForLink && (Boolean(state.productionDraft.issueId) || Boolean(state.productionDraft.issueSkipped)) && Boolean(state.productionDraft.productionStaffId);
   if (printBtn) printBtn.disabled = !readyForPrint;
 }
 
@@ -12840,7 +13186,7 @@ function submitProductionVoucher() {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
-  if (!state.productionDraft.issueId) {
+  if (!state.productionDraft.issueId && !state.productionDraft.issueSkipped) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
@@ -12850,7 +13196,7 @@ function submitProductionVoucher() {
   }
   const staff = state.cache.productionStaff?.[state.productionDraft.productionStaffId];
   const productionStaffName = getStaffLabel(staff, null);
-  const issue = state.cache.stockIssue?.[state.productionDraft.issueId];
+  const issue = state.productionDraft.issueId ? state.cache.stockIssue?.[state.productionDraft.issueId] : null;
   const branchId = state.productionDraft.branchId;
 
   if (state.productionDraft.editingId) {
@@ -12860,7 +13206,7 @@ function submitProductionVoucher() {
     const payload = {
       productionStaffId: state.productionDraft.productionStaffId,
       productionStaffName: productionStaffName,
-      issueId: state.productionDraft.issueId,
+      issueId: state.productionDraft.issueId || null,
       issueNumber: issue?.issueNumber || null,
       itemId: state.productionDraft.item?.id || original.itemId,
       itemType: state.productionDraft.itemType || original.itemType,
@@ -12911,7 +13257,7 @@ function submitProductionVoucher() {
       storekeeperName: state.user?.name || null,
       productionStaffId: state.productionDraft.productionStaffId,
       productionStaffName: productionStaffName,
-      issueId: state.productionDraft.issueId,
+      issueId: state.productionDraft.issueId || null,
       issueNumber: issue?.issueNumber || null,
       itemId: state.productionDraft.item.id,
       itemType: state.productionDraft.itemType,
@@ -13392,6 +13738,18 @@ function getProductionLabelNames(record) {
   };
 }
 
+function getProductionLabelInfo(record) {
+  if (!record) return {};
+  const product = record.itemType === 'product' ? state.cache.products?.[record.itemId] : null;
+  const info = record.itemType === 'product' ? getProductInfoByProductId(record.itemId) : null;
+  const originFromSelect = product?.countryOriginId ? getLocalizedName(state.cache.countryOrigins?.[product.countryOriginId]) : '';
+  return {
+    ingredients: info?.ingredients || record.ingredients || '',
+    origin: info?.origin || record.origin || originFromSelect || '',
+    barcode: info?.barcode || product?.barcode || record.productionBarcode || ''
+  };
+}
+
 const labelPrintSettings = {
   widthMm: 50,
   heightMm: 25,
@@ -13425,7 +13783,8 @@ function buildBarcodeSvg(value) {
 
 function buildProductionLabelHtml(record) {
   const names = getProductionLabelNames(record);
-  const barcodeValue = record.productionBarcode || generateBarcodeValue();
+  const info = getProductionLabelInfo(record);
+  const barcodeValue = info.barcode || record.productionBarcode || generateBarcodeValue();
   const barcodeSvg = buildBarcodeSvg(barcodeValue);
   const title = names.nameAr || names.nameEn || record.itemName || '';
   const {
@@ -13473,13 +13832,14 @@ function buildProductionLabelHtml(record) {
           .label-content {
             display: flex;
             flex-direction: column;
-            gap: 0.5mm;
+            gap: 0.35mm;
             height: 100%;
             transform: translate(${contentShiftXmm}mm, ${contentShiftYmm}mm);
           }
-          .title { font-size: 11px; font-weight: 700; text-align: center; line-height: 1.15; }
-          .title.en { font-size: 10px; font-weight: 600; direction: ltr; }
-          .dates { font-size: 9px; font-weight: 700; text-align: center; line-height: 1.1; white-space: nowrap; }
+          .title { font-size: 10px; font-weight: 800; text-align: center; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .title.en { font-size: 7px; font-weight: 700; direction: ltr; }
+          .ingredients { font-size: 5.6px; font-weight: 700; text-align: right; line-height: 1.1; max-height: 7mm; overflow: hidden; }
+          .meta { display: flex; justify-content: space-between; gap: 1mm; font-size: 6px; font-weight: 800; line-height: 1; white-space: nowrap; }
           .barcode { margin-top: auto; text-align: center; }
           .barcode svg { width: 100%; }
         </style>
@@ -13491,7 +13851,9 @@ function buildProductionLabelHtml(record) {
               <div class="label-content">
                 <div class="title">${names.nameAr || record.itemName || ''}</div>
                 <div class="title en">${names.nameEn || record.itemName || ''}</div>
-                <div class="dates">انتاج: ${record.productionDate || '-'} / انتهاء: ${record.expiryDate || '-'}</div>
+                <div class="ingredients">المكونات: ${info.ingredients || '-'}</div>
+                <div class="meta"><span>بلد المنشأ: ${info.origin || '-'}</span></div>
+                <div class="meta"><span>إنتاج: ${record.productionDate || '-'}</span><span>انتهاء: ${record.expiryDate || '-'}</span></div>
                 <div class="barcode">${barcodeSvg}</div>
               </div>
             </div>
@@ -13504,6 +13866,26 @@ function buildProductionLabelHtml(record) {
 
 function printProductionLabel(record) {
   if (!record) return;
+  if (window.figsDesktop?.isDesktopApp) {
+    const names = getProductionLabelNames(record);
+    const info = getProductionLabelInfo(record);
+    window.figsDesktop.printZpl({
+      title: names.nameAr || record.itemName || '',
+      subtitle: names.nameEn || '',
+      meta: [
+        `المكونات: ${info.ingredients || '-'}`,
+        `بلد المنشأ: ${info.origin || '-'}`,
+        `إنتاج: ${record.productionDate || '-'}`,
+        `انتهاء: ${record.expiryDate || '-'}`
+      ],
+      barcode: info.barcode || record.productionBarcode || generateBarcodeValue(),
+      copies: 1
+    }).catch((error) => {
+      console.error('Desktop label print failed:', error);
+      alert('تعذرت طباعة الستيكر. تأكد من اختيار طابعة الستيكرات في إعدادات الطابعات.');
+    });
+    return;
+  }
   const html = buildProductionLabelHtml(record);
   const win = window.open('', '_blank', 'width=400,height=300');
   if (!win) return;
@@ -17843,7 +18225,10 @@ function buildReportHtml({ title, meta, columns, rows, footerNote, barcodeValue,
     </tr>
   `).join('');
   const barcodeHtml = barcodeValue ? `<div class="barcode"><svg id="reportBarcode"></svg></div>` : '';
-  const barcodeScript = barcodeValue
+  const isDesktopPrint = Boolean(window.figsDesktop?.isDesktopApp);
+  const barcodeScript = isDesktopPrint
+    ? ''
+    : barcodeValue
     ? `
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
       <script>
@@ -17938,6 +18323,13 @@ function buildReportHtml({ title, meta, columns, rows, footerNote, barcodeValue,
 }
 
 function openPrintWindow(html) {
+  if (window.figsDesktop?.isDesktopApp) {
+    window.figsDesktop.printHtml({ html, type: 'a4', silent: true }).catch((error) => {
+      console.error('Desktop report print failed:', error);
+      alert('تعذرت طباعة التقرير. تأكد من اختيار طابعة A4 في إعدادات الطابعات.');
+    });
+    return;
+  }
   const win = window.open('', '_blank', 'width=900,height=700');
   if (!win) return;
   win.document.write(html);
@@ -22176,6 +22568,7 @@ function watchData() {
     'orders',
     'customers',
     'products',
+    'productInfos',
     'countryOrigins',
     'productCategories',
     'units',
@@ -22244,6 +22637,7 @@ function refreshAllDataViews() {
   renderPendingStockMoves();
   renderDiscounts();
   renderProductsSection();
+  renderProductInfoSection();
   renderProductCategoriesSection();
   renderItemCardSection();
   renderCountryOriginsSection();

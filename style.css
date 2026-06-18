@@ -1559,3 +1559,144 @@ textarea:focus {
   padding-inline-start: 0;
   padding-inline-end: 8px;
 }
+
+/* Old-site cashier/accounting visual compatibility layer */
+body {
+  background: #f3f4f6;
+}
+
+.topbar {
+  background: #2563eb;
+  color: #fff;
+  border: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.topbar .tag,
+.topbar .helper {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.topbar .logo img {
+  background: #fff;
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.cashier-shell,
+.section,
+.content,
+main {
+  background: #f3f4f6;
+}
+
+.card,
+.modal.card,
+.invoice-panel,
+.invoice-step-body,
+.notice {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+}
+
+.btn {
+  border-radius: 10px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.btn.primary {
+  background: #16a34a;
+  color: #fff;
+}
+
+.btn.primary:hover {
+  background: #15803d;
+}
+
+.btn.ghost {
+  background: #f3f4f6;
+  color: #1f2937;
+  border: 1px solid #d1d5db;
+}
+
+.btn.ghost:hover {
+  background: #e5e7eb;
+}
+
+.btn.danger {
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.input,
+select.input,
+textarea.input {
+  border: 2px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.input:focus,
+select.input:focus,
+textarea.input:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
+.table {
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.table th {
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+  border: 0;
+}
+
+.table td {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.product-card {
+  background: #fff;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.product-card:hover {
+  border-color: #2563eb;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.18);
+}
+
+.invoice-modal {
+  background: #f3f4f6;
+  border-radius: 14px;
+}
+
+.invoice-header {
+  background: #2563eb;
+  color: #fff;
+  border-radius: 12px 12px 0 0;
+  padding: 14px 18px;
+}
+
+.summary {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+}
+
+.cashier-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+}

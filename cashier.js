@@ -41,6 +41,8 @@ const state = {
   transferReceiveDraft: null,
   transferDetailsDraft: null,
   transferRequestDragIndex: null,
+  ordersPage: 1,
+  ordersPageSize: 10,
   invoice: null,
   customerSearch: '',
   ordersSearch: '',
@@ -515,6 +517,7 @@ function bindUI() {
   if (els.orderSearchInput) {
     bindDebouncedInput(els.orderSearchInput, (value) => {
       state.ordersSearch = String(value || '').trim();
+      state.ordersPage = 1;
       renderOrdersTable();
     });
   }
@@ -2448,6 +2451,10 @@ function renderOrdersTable() {
     })
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
+  const totalPages = Math.max(1, Math.ceil(orders.length / state.ordersPageSize));
+  if (state.ordersPage > totalPages) state.ordersPage = totalPages;
+  const pagedOrders = orders.slice((state.ordersPage - 1) * state.ordersPageSize, state.ordersPage * state.ordersPageSize);
+
   els.ordersTable.innerHTML = '';
   if (!orders.length) {
     const row = document.createElement('tr');
@@ -2456,7 +2463,7 @@ function renderOrdersTable() {
     return;
   }
 
-  orders.forEach((order) => {
+  pagedOrders.forEach((order) => {
     const row = document.createElement('tr');
     row.innerHTML = `
       <td>${order.orderNumber || '-'}</td>
@@ -2474,6 +2481,26 @@ function renderOrdersTable() {
     row.querySelector('[data-action="print"]').addEventListener('click', () => printThermalReceipt(order));
     els.ordersTable.appendChild(row);
   });
+
+  const pagerRow = document.createElement('tr');
+  pagerRow.innerHTML = `
+    <td colspan="7">
+      <div class="cashier-pagination">
+        <button class="btn ghost small" data-page="prev" ${state.ordersPage <= 1 ? 'disabled' : ''}>السابق</button>
+        <strong>صفحة ${state.ordersPage} من ${totalPages} | ${pagedOrders.length} من ${orders.length}</strong>
+        <button class="btn ghost small" data-page="next" ${state.ordersPage >= totalPages ? 'disabled' : ''}>التالي</button>
+      </div>
+    </td>
+  `;
+  pagerRow.querySelector('[data-page="prev"]')?.addEventListener('click', () => {
+    state.ordersPage = Math.max(1, state.ordersPage - 1);
+    renderOrdersTable();
+  });
+  pagerRow.querySelector('[data-page="next"]')?.addEventListener('click', () => {
+    state.ordersPage = Math.min(totalPages, state.ordersPage + 1);
+    renderOrdersTable();
+  });
+  els.ordersTable.appendChild(pagerRow);
 }
 
 function openOrderDetails(order) {
@@ -3063,6 +3090,11 @@ function buildTransferA4Html({ title, subtitle, metadata = [], headers = [], row
   const headCells = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
   const bodyRows = rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('');
   const metaHtml = metadata.map((row) => `<p><strong>${escapeHtml(row.label)}:</strong> ${escapeHtml(row.value)}</p>`).join('');
+  const browserPrintScript = window.figsDesktop?.isDesktopApp ? '' : `
+        <script>
+          window.print();
+          window.onafterprint = function() { window.close(); };
+        <\/script>`;
   return `
     <!DOCTYPE html>
     <html lang="${lang}" dir="${dir}">
@@ -3100,16 +3132,20 @@ function buildTransferA4Html({ title, subtitle, metadata = [], headers = [], row
           <thead><tr>${headCells}</tr></thead>
           <tbody>${bodyRows || `<tr><td colspan="${headers.length || 1}">${escapeHtml(window.i18n.t('no_data'))}</td></tr>`}</tbody>
         </table>
-        <script>
-          window.print();
-          window.onafterprint = function() { window.close(); };
-        <\/script>
+        ${browserPrintScript}
       </body>
     </html>
   `;
 }
 
 function openTransferA4PrintWindow(html) {
+  if (window.figsDesktop?.isDesktopApp) {
+    window.figsDesktop.printHtml({ html, type: 'a4', silent: true }).catch((error) => {
+      console.error('Desktop A4 print failed:', error);
+      alert('تعذر إرسال الطباعة إلى طابعة الأوراق. تأكد من اختيار الطابعة من إعدادات الطابعات.');
+    });
+    return;
+  }
   const printWindow = window.open('', '_blank', 'width=980,height=720');
   if (!printWindow) return;
   printWindow.document.write(html);
@@ -3507,9 +3543,7 @@ function printThermalReceipt(order) {
 }
 
 function printThermalInvoiceHtml(invoiceContent) {
-  const printWindow = window.open('', '_blank', 'width=900,height=700');
-  if (!printWindow) return;
-  printWindow.document.write(`
+  const html = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
@@ -3532,13 +3566,24 @@ function printThermalInvoiceHtml(invoiceContent) {
     </head>
     <body>
       <div class="thermal-invoice">${invoiceContent}</div>
+      ${window.figsDesktop?.isDesktopApp ? '' : `
       <script>
         window.print();
         window.onafterprint = function() { window.close(); };
-      <\/script>
+      <\/script>`}
     </body>
     </html>
-  `);
+  `;
+  if (window.figsDesktop?.isDesktopApp) {
+    window.figsDesktop.printHtml({ html, type: 'receipt', silent: true }).catch((error) => {
+      console.error('Desktop receipt print failed:', error);
+      alert('تعذر إرسال الفاتورة إلى طابعة الفواتير. تأكد من اختيار الطابعة من إعدادات الطابعات.');
+    });
+    return;
+  }
+  const printWindow = window.open('', '_blank', 'width=900,height=700');
+  if (!printWindow) return;
+  printWindow.document.write(html);
   printWindow.document.close();
 }
 

@@ -13756,13 +13756,13 @@ const labelPrintSettings = {
   rotateDeg: 0,
   offsetXmm: 0,
   offsetYmm: 0,
-  contentShiftXmm: -3.4,
-  contentShiftYmm: 3.5,
-  paddingXmm: 3,
-  paddingYmm: 2.2,
-  barcodeHeight: 16,
-  barcodeWidth: 0.9,
-  barcodeFontSize: 7,
+  contentShiftXmm: 0,
+  contentShiftYmm: 0,
+  paddingXmm: 2.2,
+  paddingYmm: 1.2,
+  barcodeHeight: 12,
+  barcodeWidth: 0.75,
+  barcodeFontSize: 6,
   barcodeTextMargin: 1
 };
 
@@ -13832,16 +13832,16 @@ function buildProductionLabelHtml(record) {
           .label-content {
             display: flex;
             flex-direction: column;
-            gap: 0.35mm;
+            gap: 0.25mm;
             height: 100%;
             transform: translate(${contentShiftXmm}mm, ${contentShiftYmm}mm);
           }
-          .title { font-size: 10px; font-weight: 800; text-align: center; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-          .title.en { font-size: 7px; font-weight: 700; direction: ltr; }
-          .ingredients { font-size: 5.6px; font-weight: 700; text-align: right; line-height: 1.1; max-height: 7mm; overflow: hidden; }
-          .meta { display: flex; justify-content: space-between; gap: 1mm; font-size: 6px; font-weight: 800; line-height: 1; white-space: nowrap; }
+          .title { font-size: 8.2px; font-weight: 800; text-align: center; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .title.en { font-size: 5.8px; font-weight: 700; direction: ltr; }
+          .ingredients { font-size: 5.4px; font-weight: 700; text-align: right; line-height: 1.05; max-height: 4.8mm; overflow: hidden; }
+          .meta { display: flex; justify-content: space-between; gap: 1mm; font-size: 5.6px; font-weight: 800; line-height: 1; white-space: nowrap; }
           .barcode { margin-top: auto; text-align: center; }
-          .barcode svg { width: 100%; }
+          .barcode svg { width: 100%; max-height: 8.5mm; }
         </style>
       </head>
       <body>
@@ -13867,19 +13867,10 @@ function buildProductionLabelHtml(record) {
 function printProductionLabel(record) {
   if (!record) return;
   if (window.figsDesktop?.isDesktopApp) {
-    const names = getProductionLabelNames(record);
-    const info = getProductionLabelInfo(record);
-    window.figsDesktop.printZpl({
-      title: names.nameAr || record.itemName || '',
-      subtitle: names.nameEn || '',
-      meta: [
-        `المكونات: ${info.ingredients || '-'}`,
-        `بلد المنشأ: ${info.origin || '-'}`,
-        `إنتاج: ${record.productionDate || '-'}`,
-        `انتهاء: ${record.expiryDate || '-'}`
-      ],
-      barcode: info.barcode || record.productionBarcode || generateBarcodeValue(),
-      copies: 1
+    window.figsDesktop.printHtml({
+      html: buildProductionLabelHtml(record),
+      type: 'label',
+      silent: true
     }).catch((error) => {
       console.error('Desktop label print failed:', error);
       alert('تعذرت طباعة الستيكر. تأكد من اختيار طابعة الستيكرات في إعدادات الطابعات.');
@@ -22693,6 +22684,15 @@ function getCurrencySuffix() {
 function formatMoney(value) {
   if (value === null || value === undefined || value === '') return '-';
   return `${formatNumber(value)}${getCurrencySuffix()}`;
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function showCopyNotice(message) {

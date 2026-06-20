@@ -13146,7 +13146,7 @@ function renderProductionDraft() {
   }
   const readyForLink = Boolean(state.productionDraft.productionDate && state.productionDraft.expiryDate && state.productionDraft.qty);
   if (linkBtn) linkBtn.disabled = !readyForLink;
-  const readyForPrint = readyForLink && (Boolean(state.productionDraft.issueId) || Boolean(state.productionDraft.issueSkipped)) && Boolean(state.productionDraft.productionStaffId);
+  const readyForPrint = readyForLink && (Boolean(state.productionDraft.issueId) || Boolean(state.productionDraft.issueSkipped));
   if (printBtn) printBtn.disabled = !readyForPrint;
 }
 
@@ -13182,10 +13182,6 @@ function submitProductionVoucher() {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
-  if (!state.productionDraft.productionStaffId) {
-    if (errorEl) errorEl.textContent = window.i18n.t('error');
-    return;
-  }
   if (!state.productionDraft.issueId && !state.productionDraft.issueSkipped) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
@@ -13194,8 +13190,12 @@ function submitProductionVoucher() {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
-  const staff = state.cache.productionStaff?.[state.productionDraft.productionStaffId];
-  const productionStaffName = getStaffLabel(staff, null);
+  const staff = state.productionDraft.productionStaffId
+    ? state.cache.productionStaff?.[state.productionDraft.productionStaffId]
+    : null;
+  const productionStaffName = state.productionDraft.productionStaffId
+    ? getStaffLabel(staff, null)
+    : (state.user?.name || null);
   const issue = state.productionDraft.issueId ? state.cache.stockIssue?.[state.productionDraft.issueId] : null;
   const branchId = state.productionDraft.branchId;
 
@@ -13811,9 +13811,18 @@ function buildProductionLabelHtml(record) {
         <title>${title}</title>
         <style>
           @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
-          html, body { width: ${widthMm}mm; height: ${heightMm}mm; margin: 0; padding: 0; }
+          html, body {
+            width: ${widthMm}mm;
+            height: ${heightMm}mm;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            color: #000;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
           body { font-family: Arial, Tahoma, sans-serif; overflow: hidden; }
-          .sheet { width: ${widthMm}mm; height: ${heightMm}mm; overflow: hidden; }
+          .sheet { width: ${widthMm}mm; height: ${heightMm}mm; overflow: hidden; background: #fff; color: #000; }
           .label {
             width: ${widthMm}mm;
             height: ${heightMm}mm;
@@ -13822,6 +13831,8 @@ function buildProductionLabelHtml(record) {
             display: flex;
             flex-direction: column;
             transform: translate(${offsetXmm}mm, ${offsetYmm}mm);
+            background: #fff;
+            color: #000;
           }
           .label-rotator {
             width: ${rotatorWidthMm}mm;
@@ -13847,6 +13858,7 @@ function buildProductionLabelHtml(record) {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            color: #000;
           }
           .title.en {
             font-size: 5.3px;
@@ -13861,6 +13873,7 @@ function buildProductionLabelHtml(record) {
             line-height: 1.08;
             overflow: hidden;
             overflow-wrap: anywhere;
+            color: #000;
           }
           .meta {
             font-size: 5.2px;
@@ -13868,6 +13881,7 @@ function buildProductionLabelHtml(record) {
             line-height: 1;
             white-space: nowrap;
             overflow: hidden;
+            color: #000;
           }
           .origin { text-align: right; direction: rtl; }
           .dates {
@@ -13931,7 +13945,7 @@ function printProductionLabel(record) {
   win.document.write(html);
   win.document.close();
   win.onload = () => {
-    win.print();
+    setTimeout(() => win.print(), 350);
   };
 }
 

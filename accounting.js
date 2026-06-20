@@ -1377,7 +1377,14 @@ function bindNavigation() {
   }
 
   if (els.productionDateCancel) {
-    els.productionDateCancel.addEventListener('click', () => closeProductionDateModal());
+    els.productionDateCancel.addEventListener('click', () => {
+      closeProductionDateModal();
+      if (state.productionDraft?.item && !state.productionDraft.productionDate && !state.productionDraft.expiryDate) {
+        clearProductionItem();
+        renderProductionDraft();
+        renderProductionSearchResults();
+      }
+    });
   }
 
   if (els.productionLinkCancel) {
@@ -13069,6 +13076,10 @@ function openProductionItem(entry) {
     });
   };
   openProductionDateModal();
+  const searchInput = document.getElementById('productionSearchInput');
+  const results = document.getElementById('productionSearchResults');
+  if (searchInput) searchInput.value = '';
+  if (results) results.innerHTML = '';
   renderProductionDraft();
 }
 
@@ -13787,6 +13798,12 @@ function buildProductionLabelHtml(record) {
   const barcodeValue = info.barcode || record.productionBarcode || generateBarcodeValue();
   const barcodeSvg = buildBarcodeSvg(barcodeValue);
   const title = names.nameAr || names.nameEn || record.itemName || '';
+  const nameAr = escapeHtml(names.nameAr || record.itemName || '');
+  const nameEn = escapeHtml(names.nameEn || record.itemName || '');
+  const ingredients = escapeHtml(info.ingredients || '-');
+  const origin = escapeHtml(info.origin || '-');
+  const productionDate = escapeHtml(record.productionDate || '-');
+  const expiryDate = escapeHtml(record.expiryDate || '-');
   const {
     widthMm,
     heightMm,
@@ -13828,22 +13845,19 @@ function buildProductionLabelHtml(record) {
             height: ${heightMm}mm;
             padding: ${paddingYmm}mm ${paddingXmm}mm;
             box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
+            position: relative;
             transform: translate(${offsetXmm}mm, ${offsetYmm}mm);
             background: #fff;
             color: #000;
           }
           .label-rotator {
-            width: ${rotatorWidthMm}mm;
-            height: ${rotatorHeightMm}mm;
+            width: ${rotateDeg === 0 ? '100%' : `${rotatorWidthMm}mm`};
+            height: ${rotateDeg === 0 ? '100%' : `${rotatorHeightMm}mm`};
             transform: translate(${rotateShiftXmm}mm, ${rotateShiftYmm}mm) rotate(${rotateDeg}deg);
             transform-origin: top left;
           }
           .label-content {
-            display: grid;
-            grid-template-rows: auto auto minmax(3.2mm, 1fr) auto auto 7.4mm;
-            gap: 0.18mm;
+            position: relative;
             height: 100%;
             width: 100%;
             box-sizing: border-box;
@@ -13851,7 +13865,11 @@ function buildProductionLabelHtml(record) {
             transform: translate(${contentShiftXmm}mm, ${contentShiftYmm}mm);
           }
           .title {
-            font-size: 7.2px;
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+            font-size: 7.6px;
             font-weight: 900;
             text-align: center;
             line-height: 1.02;
@@ -13861,12 +13879,18 @@ function buildProductionLabelHtml(record) {
             color: #000;
           }
           .title.en {
+            top: 3.1mm;
             font-size: 5.3px;
             font-weight: 800;
             direction: ltr;
           }
           .ingredients {
-            font-size: 4.65px;
+            position: absolute;
+            top: 6.3mm;
+            right: 0;
+            left: 0;
+            height: 4.2mm;
+            font-size: 4.45px;
             font-weight: 800;
             text-align: right;
             direction: rtl;
@@ -13876,30 +13900,45 @@ function buildProductionLabelHtml(record) {
             color: #000;
           }
           .meta {
-            font-size: 5.2px;
+            position: absolute;
+            font-size: 5.1px;
             font-weight: 900;
             line-height: 1;
             white-space: nowrap;
             overflow: hidden;
             color: #000;
           }
-          .origin { text-align: right; direction: rtl; }
+          .origin {
+            top: 11.2mm;
+            right: 0;
+            left: 0;
+            text-align: right;
+            direction: rtl;
+          }
           .dates {
+            top: 14.2mm;
+            right: 0;
+            left: 0;
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 1.2mm;
+            gap: 2mm;
             direction: rtl;
           }
           .dates .production { text-align: right; }
           .dates .expiry { text-align: left; direction: rtl; }
           .barcode {
+            position: absolute;
+            left: 5mm;
+            right: 5mm;
+            top: 17.1mm;
+            height: 6.4mm;
             text-align: center;
             overflow: hidden;
             line-height: 0;
           }
           .barcode svg {
-            width: 78%;
-            max-height: 7.4mm;
+            width: 100%;
+            height: 6.4mm;
           }
         </style>
       </head>
@@ -13908,13 +13947,13 @@ function buildProductionLabelHtml(record) {
           <div class="label">
             <div class="label-rotator">
               <div class="label-content">
-                <div class="title">${names.nameAr || record.itemName || ''}</div>
-                <div class="title en">${names.nameEn || record.itemName || ''}</div>
-                <div class="ingredients">المكونات: ${info.ingredients || '-'}</div>
-                <div class="meta origin">بلد المنشأ: ${info.origin || '-'}</div>
+                <div class="title">${nameAr}</div>
+                <div class="title en">${nameEn}</div>
+                <div class="ingredients">المكونات: ${ingredients}</div>
+                <div class="meta origin">بلد المنشأ: ${origin}</div>
                 <div class="meta dates">
-                  <span class="production">إنتاج: ${record.productionDate || '-'}</span>
-                  <span class="expiry">انتهاء: ${record.expiryDate || '-'}</span>
+                  <span class="production">إنتاج: ${productionDate}</span>
+                  <span class="expiry">انتهاء: ${expiryDate}</span>
                 </div>
                 <div class="barcode">${barcodeSvg}</div>
               </div>

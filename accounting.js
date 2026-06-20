@@ -13782,7 +13782,7 @@ function buildBarcodeSvg(value) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   JsBarcode(svg, value, {
     format: 'CODE128',
-    displayValue: true,
+    displayValue: false,
     height: labelPrintSettings.barcodeHeight,
     width: labelPrintSettings.barcodeWidth,
     margin: 0,
@@ -13968,10 +13968,17 @@ function buildProductionLabelHtml(record) {
 function printProductionLabel(record) {
   if (!record) return;
   if (window.figsDesktop?.isDesktopApp) {
-    window.figsDesktop.printHtml({
-      html: buildProductionLabelHtml(record),
-      type: 'label',
-      silent: true
+    const names = getProductionLabelNames(record);
+    const info = getProductionLabelInfo(record);
+    window.figsDesktop.printZpl({
+      title: names.nameAr || record.itemName || '',
+      subtitle: names.nameEn || '',
+      ingredients: info.ingredients || '-',
+      origin: info.origin || '-',
+      productionDate: record.productionDate || '-',
+      expiryDate: record.expiryDate || '-',
+      barcode: info.barcode || record.productionBarcode || generateBarcodeValue(),
+      copies: 1
     }).catch((error) => {
       console.error('Desktop label print failed:', error);
       alert('تعذرت طباعة الستيكر. تأكد من اختيار طابعة الستيكرات في إعدادات الطابعات.');

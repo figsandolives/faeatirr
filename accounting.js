@@ -13758,11 +13758,11 @@ const labelPrintSettings = {
   offsetYmm: 0,
   contentShiftXmm: 0,
   contentShiftYmm: 0,
-  paddingXmm: 2.2,
-  paddingYmm: 1.2,
-  barcodeHeight: 12,
-  barcodeWidth: 0.75,
-  barcodeFontSize: 6,
+  paddingXmm: 1.8,
+  paddingYmm: 1,
+  barcodeHeight: 9,
+  barcodeWidth: 0.65,
+  barcodeFontSize: 5,
   barcodeTextMargin: 1
 };
 
@@ -13812,7 +13812,7 @@ function buildProductionLabelHtml(record) {
         <style>
           @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
           html, body { width: ${widthMm}mm; height: ${heightMm}mm; margin: 0; padding: 0; }
-          body { font-family: "Cairo", sans-serif; overflow: hidden; }
+          body { font-family: Arial, Tahoma, sans-serif; overflow: hidden; }
           .sheet { width: ${widthMm}mm; height: ${heightMm}mm; overflow: hidden; }
           .label {
             width: ${widthMm}mm;
@@ -13830,18 +13830,63 @@ function buildProductionLabelHtml(record) {
             transform-origin: top left;
           }
           .label-content {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25mm;
+            display: grid;
+            grid-template-rows: auto auto minmax(3.2mm, 1fr) auto auto 7.4mm;
+            gap: 0.18mm;
             height: 100%;
+            width: 100%;
+            box-sizing: border-box;
+            overflow: hidden;
             transform: translate(${contentShiftXmm}mm, ${contentShiftYmm}mm);
           }
-          .title { font-size: 8.2px; font-weight: 800; text-align: center; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-          .title.en { font-size: 5.8px; font-weight: 700; direction: ltr; }
-          .ingredients { font-size: 5.4px; font-weight: 700; text-align: right; line-height: 1.05; max-height: 4.8mm; overflow: hidden; }
-          .meta { display: flex; justify-content: space-between; gap: 1mm; font-size: 5.6px; font-weight: 800; line-height: 1; white-space: nowrap; }
-          .barcode { margin-top: auto; text-align: center; }
-          .barcode svg { width: 100%; max-height: 8.5mm; }
+          .title {
+            font-size: 7.2px;
+            font-weight: 900;
+            text-align: center;
+            line-height: 1.02;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .title.en {
+            font-size: 5.3px;
+            font-weight: 800;
+            direction: ltr;
+          }
+          .ingredients {
+            font-size: 4.65px;
+            font-weight: 800;
+            text-align: right;
+            direction: rtl;
+            line-height: 1.08;
+            overflow: hidden;
+            overflow-wrap: anywhere;
+          }
+          .meta {
+            font-size: 5.2px;
+            font-weight: 900;
+            line-height: 1;
+            white-space: nowrap;
+            overflow: hidden;
+          }
+          .origin { text-align: right; direction: rtl; }
+          .dates {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.2mm;
+            direction: rtl;
+          }
+          .dates .production { text-align: right; }
+          .dates .expiry { text-align: left; direction: rtl; }
+          .barcode {
+            text-align: center;
+            overflow: hidden;
+            line-height: 0;
+          }
+          .barcode svg {
+            width: 78%;
+            max-height: 7.4mm;
+          }
         </style>
       </head>
       <body>
@@ -13852,8 +13897,11 @@ function buildProductionLabelHtml(record) {
                 <div class="title">${names.nameAr || record.itemName || ''}</div>
                 <div class="title en">${names.nameEn || record.itemName || ''}</div>
                 <div class="ingredients">المكونات: ${info.ingredients || '-'}</div>
-                <div class="meta"><span>بلد المنشأ: ${info.origin || '-'}</span></div>
-                <div class="meta"><span>إنتاج: ${record.productionDate || '-'}</span><span>انتهاء: ${record.expiryDate || '-'}</span></div>
+                <div class="meta origin">بلد المنشأ: ${info.origin || '-'}</div>
+                <div class="meta dates">
+                  <span class="production">إنتاج: ${record.productionDate || '-'}</span>
+                  <span class="expiry">انتهاء: ${record.expiryDate || '-'}</span>
+                </div>
                 <div class="barcode">${barcodeSvg}</div>
               </div>
             </div>

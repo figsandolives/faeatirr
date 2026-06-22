@@ -12823,7 +12823,12 @@ function bindProductionSection() {
   }
 
   if (searchInput) {
-    searchInput.addEventListener('input', () => renderProductionSearchResults());
+    searchInput.addEventListener('keydown', (e) => e.stopPropagation(), true);
+    searchInput.addEventListener('keyup', (e) => e.stopPropagation(), true);
+    searchInput.addEventListener('input', (e) => {
+      e.stopPropagation();
+      renderProductionSearchResults();
+    });
     searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -12893,7 +12898,12 @@ function openProductionModal() {
   const errorEl = document.getElementById('productionError');
   if (errorEl) errorEl.textContent = '';
   const searchInput = document.getElementById('productionSearchInput');
-  if (searchInput) searchInput.value = '';
+  if (searchInput) {
+    searchInput.value = '';
+    searchInput.disabled = false;
+    searchInput.readOnly = false;
+    setTimeout(() => searchInput.focus(), 80);
+  }
   renderProductionSearchResults();
   overlay.classList.remove('hidden');
 }
@@ -13031,6 +13041,8 @@ function renderProductionSearchResults() {
     results.innerHTML = '';
     return;
   }
+  searchInput.disabled = false;
+  searchInput.readOnly = false;
   const query = searchInput.value.trim();
   if (!query) {
     results.innerHTML = '';
@@ -13792,6 +13804,159 @@ function buildBarcodeSvg(value) {
   return svg.outerHTML;
 }
 
+function fitTextToWidth(ctx, text, maxWidth, font) {
+  const value = String(text || '').trim();
+  if (!value) return '';
+  ctx.font = font;
+  if (ctx.measureText(value).width <= maxWidth) return value;
+  let output = value;
+  while (output.length > 1 && ctx.measureText(`${output}...`).width > maxWidth) {
+    output = output.slice(0, -1);
+  }
+  return `${output}...`;
+}
+
+function wrapText(ctx, text, maxWidth, maxLines = 2) {
+  const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  const lines = [];
+  let line = '';
+  words.forEach((word) => {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width <= maxWidth || !line) {
+      line = next;
+    } else {
+      lines.push(line);
+      line = word;
+    }
+  });
+  if (line) lines.push(line);
+  if (lines.length > maxLines) {
+    const kept = lines.slice(0, maxLines);
+    let last = kept[kept.length - 1] || '';
+    while (last.length > 1 && ctx.measureText(`${last}...`).width > maxWidth) {
+      last = last.slice(0, -1);
+    }
+    kept[kept.length - 1] = `${last}...`;
+    return kept;
+  }
+  return lines;
+}
+
+function drawLabelBarcode(ctx, barcodeValue, x, y, maxWidth, height) {
+  if (!barcodeValue || typeof JsBarcode === 'undefined') return;
+  const barcodeCanvas = document.createElement('canvas');
+  let moduleWidth = 1.35;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    JsBarcode(barcodeCanvas, barcodeValue, {
+      format: 'CODE128',
+      displayValue: false,
+      height,
+      width: moduleWidth,
+      margin: 0
+    });
+    if (barcodeCanvas.width <= maxWidth || moduleWidth <= 0.62) break;
+    moduleWidth -= 0.18;
+  }
+  const drawWidth = Math.min(barcodeCanvas.width, maxWidth);
+  const drawX = x + Math.max(0, Math.floor((maxWidth - drawWidth) / 2));
+  ctx.drawImage(barcodeCanvas, 0, 0, barcodeCanvas.width, barcodeCanvas.height, drawX, y, drawWidth, height);
+}
+
+function canvasToMonoGfa(canvas) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const { width, height } = canvas;
+  const image = ctx.getImageData(0, 0, width, height).data;
+  const rowBytes = Math.ceil(width / 8);
+  let hex = '';
+  for (let y = 0; y < height; y += 1) {
+    for (let byteX = 0; byteX < rowBytes; byteX += 1) {
+      let byte = 0;
+      for (let bit = 0; bit < 8; bit += 1) {
+        const x = byteX * 8 + bit;
+        if (x >= width) continue;
+        const idx = (y * width + x) * 4;
+        const alpha = image[idx + 3];
+        const luminance = (image[idx] * 0.299) + (image[idx + 1] * 0.587) + (image[idx + 2] * 0.114);
+        if (alpha > 32 && luminance < 160) {
+          byte |= (0x80 >> bit);
+        }
+      }
+      hex += byte.toString(16).padStart(2, '0').toUpperCase();
+    }
+  }
+  const totalBytes = rowBytes * height;
+  return { hex, totalBytes, rowBytes };
+}
+
+async function buildProductionLabelBitmapZpl(record) {
+  const names = getProductionLabelNames(record);
+  const info = getProductionLabelInfo(record);
+  const barcodeValue = info.barcode || record.productionBarcode || generateBarcodeValue();
+  const canvas = document.createElement('canvas');
+  canvas.width = 400;
+  canvas.height = 200;
+  const ctx = canvas.getContext('2d');
+
+  if (document.fonts?.ready) {
+    try { await document.fonts.ready; } catch (_) {}
+  }
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(10, 8, 380, 184);
+
+  const nameAr = names.nameAr || record.itemName || '';
+  const nameEn = names.nameEn || record.itemName || '';
+  const ingredients = info.ingredients || '-';
+  const origin = info.origin || '-';
+  const productionDate = record.productionDate || '-';
+  const expiryDate = record.expiryDate || '-';
+
+  ctx.fillStyle = '#000';
+  ctx.textBaseline = 'top';
+
+  ctx.direction = 'rtl';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 23px Arial, Tahoma, sans-serif';
+  ctx.fillText(fitTextToWidth(ctx, nameAr, 340, ctx.font), 200, 16);
+
+  ctx.direction = 'ltr';
+  ctx.font = 'bold 16px Arial, sans-serif';
+  ctx.fillText(fitTextToWidth(ctx, nameEn, 330, ctx.font), 200, 43);
+
+  ctx.direction = 'rtl';
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 14px Arial, Tahoma, sans-serif';
+  const ingredientLines = wrapText(ctx, `المكونات: ${ingredients}`, 350, 2);
+  ingredientLines.forEach((line, index) => ctx.fillText(line, 372, 66 + (index * 16)));
+
+  ctx.font = 'bold 14px Arial, Tahoma, sans-serif';
+  ctx.fillText(`بلد المنشأ: ${origin}`, 372, 101);
+
+  ctx.font = 'bold 15px Arial, Tahoma, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(`إنتاج: ${productionDate}`, 372, 124);
+  ctx.textAlign = 'left';
+  ctx.fillText(`انتهاء: ${expiryDate}`, 28, 124);
+
+  drawLabelBarcode(ctx, barcodeValue, 54, 148, 292, 38);
+
+  const { hex, totalBytes, rowBytes } = canvasToMonoGfa(canvas);
+  return [
+    '^XA',
+    '^PW400',
+    '^LL200',
+    '^LH0,0',
+    '^PR4',
+    '^MD24',
+    `^FO0,0^GFA,${totalBytes},${totalBytes},${rowBytes},${hex}^FS`,
+    '^PQ1',
+    '^XZ'
+  ].join('\n');
+}
+
 function buildProductionLabelHtml(record) {
   const names = getProductionLabelNames(record);
   const info = getProductionLabelInfo(record);
@@ -13965,24 +14130,16 @@ function buildProductionLabelHtml(record) {
   `;
 }
 
-function printProductionLabel(record) {
+async function printProductionLabel(record) {
   if (!record) return;
   if (window.figsDesktop?.isDesktopApp) {
-    const names = getProductionLabelNames(record);
-    const info = getProductionLabelInfo(record);
-    window.figsDesktop.printZpl({
-      title: names.nameAr || record.itemName || '',
-      subtitle: names.nameEn || '',
-      ingredients: info.ingredients || '-',
-      origin: info.origin || '-',
-      productionDate: record.productionDate || '-',
-      expiryDate: record.expiryDate || '-',
-      barcode: info.barcode || record.productionBarcode || generateBarcodeValue(),
-      copies: 1
-    }).catch((error) => {
+    try {
+      const zpl = await buildProductionLabelBitmapZpl(record);
+      await window.figsDesktop.printZpl({ zpl });
+    } catch (error) {
       console.error('Desktop label print failed:', error);
-      alert('تعذرت طباعة الستيكر. تأكد من اختيار طابعة الستيكرات في إعدادات الطابعات.');
-    });
+      alert(`تعذرت طباعة الستيكر: ${error?.message || error || 'تأكد من اختيار طابعة الستيكرات في إعدادات الطابعات.'}`);
+    }
     return;
   }
   const html = buildProductionLabelHtml(record);

@@ -13932,16 +13932,23 @@ async function buildProductionLabelBitmapZpl(record) {
   const ingredientLines = wrapText(ctx, `المكونات: ${ingredients}`, 350, 2);
   ingredientLines.forEach((line, index) => ctx.fillText(line, 372, 66 + (index * 16)));
 
-  ctx.font = 'bold 14px Arial, Tahoma, sans-serif';
-  ctx.fillText(`بلد المنشأ: ${origin}`, 372, 101);
+  const metaTop = 118;
+  const metaItems = [
+    { label: 'بلد المنشأ', value: origin, x: 325, max: 92, direction: 'rtl' },
+    { label: 'إنتاج', value: productionDate, x: 200, max: 96, direction: 'ltr' },
+    { label: 'انتهاء', value: expiryDate, x: 75, max: 96, direction: 'ltr' }
+  ];
+  metaItems.forEach((item) => {
+    ctx.direction = 'rtl';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 12px Arial, Tahoma, sans-serif';
+    ctx.fillText(item.label, item.x, metaTop);
+    ctx.direction = item.direction;
+    ctx.font = 'bold 13px Arial, Tahoma, sans-serif';
+    ctx.fillText(fitTextToWidth(ctx, item.value, item.max, ctx.font), item.x, metaTop + 15);
+  });
 
-  ctx.font = 'bold 15px Arial, Tahoma, sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillText(`إنتاج: ${productionDate}`, 372, 124);
-  ctx.textAlign = 'left';
-  ctx.fillText(`انتهاء: ${expiryDate}`, 28, 124);
-
-  drawLabelBarcode(ctx, barcodeValue, 54, 148, 292, 38);
+  drawLabelBarcode(ctx, barcodeValue, 64, 154, 272, 32);
 
   const { hex, totalBytes, rowBytes } = canvasToMonoGfa(canvas);
   return [
@@ -14064,46 +14071,55 @@ function buildProductionLabelHtml(record) {
             overflow-wrap: anywhere;
             color: #000;
           }
-          .meta {
+          .meta-row {
             position: absolute;
-            font-size: 5.1px;
-            font-weight: 900;
-            line-height: 1;
-            white-space: nowrap;
-            overflow: hidden;
-            color: #000;
-          }
-          .origin {
-            top: 11.2mm;
-            right: 0;
-            left: 0;
-            text-align: right;
-            direction: rtl;
-          }
-          .dates {
             top: 14.2mm;
             right: 0;
             left: 0;
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2mm;
-            direction: rtl;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1.5mm;
+            color: #000;
           }
-          .dates .production { text-align: right; }
-          .dates .expiry { text-align: left; direction: rtl; }
+          .meta-card {
+            min-width: 0;
+            text-align: center;
+            overflow: hidden;
+            color: #000;
+          }
+          .meta-label {
+            display: block;
+            font-size: 4.8px;
+            font-weight: 900;
+            line-height: 1;
+            direction: rtl;
+            white-space: nowrap;
+          }
+          .meta-value {
+            display: block;
+            margin-top: .7mm;
+            font-size: 5.2px;
+            font-weight: 900;
+            line-height: 1;
+            direction: ltr;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .meta-card.origin .meta-value { direction: rtl; }
           .barcode {
             position: absolute;
-            left: 5mm;
-            right: 5mm;
-            top: 17.1mm;
-            height: 6.4mm;
+            left: 7mm;
+            right: 7mm;
+            top: 20.2mm;
+            height: 4.4mm;
             text-align: center;
             overflow: hidden;
             line-height: 0;
           }
           .barcode svg {
             width: 100%;
-            height: 6.4mm;
+            height: 4.4mm;
           }
         </style>
       </head>
@@ -14115,10 +14131,19 @@ function buildProductionLabelHtml(record) {
                 <div class="title">${nameAr}</div>
                 <div class="title en">${nameEn}</div>
                 <div class="ingredients">المكونات: ${ingredients}</div>
-                <div class="meta origin">بلد المنشأ: ${origin}</div>
-                <div class="meta dates">
-                  <span class="production">إنتاج: ${productionDate}</span>
-                  <span class="expiry">انتهاء: ${expiryDate}</span>
+                <div class="meta-row">
+                  <div class="meta-card origin">
+                    <span class="meta-label">بلد المنشأ</span>
+                    <span class="meta-value">${origin}</span>
+                  </div>
+                  <div class="meta-card production">
+                    <span class="meta-label">إنتاج</span>
+                    <span class="meta-value">${productionDate}</span>
+                  </div>
+                  <div class="meta-card expiry">
+                    <span class="meta-label">انتهاء</span>
+                    <span class="meta-value">${expiryDate}</span>
+                  </div>
                 </div>
                 <div class="barcode">${barcodeSvg}</div>
               </div>

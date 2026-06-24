@@ -381,6 +381,10 @@ function bindEntrySearchTypeFilter(prefix, onChange) {
   [productCheckbox, materialCheckbox].forEach((checkbox) => {
     if (!checkbox) return;
     checkbox.addEventListener('change', () => {
+      if (prefix === 'production' && checkbox.checked) {
+        if (checkbox === productCheckbox && materialCheckbox) materialCheckbox.checked = false;
+        if (checkbox === materialCheckbox && productCheckbox) productCheckbox.checked = false;
+      }
       const selectedTypes = [];
       if (productCheckbox?.checked) selectedTypes.push('product');
       if (materialCheckbox?.checked) selectedTypes.push('material');
@@ -11747,6 +11751,7 @@ function bindProductionLinkModal() {
       }
       closeProductionLinkModal();
       renderProductionDraft();
+      openProductionLabelCountModal();
     });
   }
   if (els.productionLinkSkip) {
@@ -11757,6 +11762,7 @@ function bindProductionLinkModal() {
       }
       closeProductionLinkModal();
       renderProductionDraft();
+      openProductionLabelCountModal();
     });
   }
 }
@@ -11764,6 +11770,9 @@ function bindProductionLinkModal() {
 function openProductionLinkModal() {
   if (!els.productionLinkModal) return;
   renderProductionIssueList();
+  if (els.productionLinkConfirm) {
+    els.productionLinkConfirm.textContent = window.i18n?.t?.('print_label') || 'طباعة الملصق';
+  }
   els.productionLinkModal.classList.remove('hidden');
 }
 
@@ -11771,6 +11780,64 @@ function closeProductionLinkModal() {
   if (els.productionLinkModal) {
     els.productionLinkModal.classList.add('hidden');
   }
+}
+
+function openProductionLabelCountModal() {
+  const oldOverlay = document.getElementById('productionLabelCountOverlay');
+  if (oldOverlay) oldOverlay.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'productionLabelCountOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML = `
+    <div class="modal" style="width:min(420px, 100%);background:#fff;border-radius:14px;padding:22px;text-align:right;box-shadow:0 20px 60px rgba(0,0,0,.25);">
+      <h3 style="margin:0 0 14px;font-size:22px;font-weight:900;">اكتب العدد المطلوب</h3>
+      <input
+        id="productionLabelCountInput"
+        class="input"
+        inputmode="numeric"
+        autocomplete="off"
+        placeholder="اكتب العدد المطلوب"
+        style="width:100%;font-size:22px;text-align:center;font-weight:900;margin-bottom:10px;"
+      />
+      <p id="productionLabelCountError" class="helper form-error" style="min-height:20px;"></p>
+      <div class="row" style="justify-content:flex-end;gap:10px;margin-top:10px;">
+        <button id="productionLabelCountCancel" class="btn ghost">${window.i18n?.t?.('cancel') || 'إلغاء'}</button>
+        <button id="productionLabelCountPrint" class="btn primary">${window.i18n?.t?.('print_label') || 'طباعة الملصق'}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const input = document.getElementById('productionLabelCountInput');
+  const errorEl = document.getElementById('productionLabelCountError');
+  const close = () => overlay.remove();
+  const normalizeCountInput = () => {
+    input.value = normalizeDigits(input.value || '').replace(/[^\d]/g, '');
+  };
+  input.addEventListener('input', normalizeCountInput);
+  input.addEventListener('keydown', (event) => {
+    event.stopPropagation();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      document.getElementById('productionLabelCountPrint')?.click();
+    }
+  }, true);
+  document.getElementById('productionLabelCountCancel')?.addEventListener('click', close);
+  document.getElementById('productionLabelCountPrint')?.addEventListener('click', () => {
+    normalizeCountInput();
+    const count = Math.floor(Number(input.value || 0));
+    if (!Number.isFinite(count) || count <= 0) {
+      if (errorEl) errorEl.textContent = 'اكتب عدد صحيح أكبر من صفر';
+      input.focus();
+      return;
+    }
+    if (state.productionDraft) {
+      state.productionDraft.qty = count;
+      state.productionDraft.labelCopies = count;
+    }
+    close();
+    submitProductionVoucher();
+  });
+  setTimeout(() => input?.focus(), 50);
 }
 
 function getAllItems() {
@@ -12029,6 +12096,7 @@ function renderItemSearchResults(container, entries, onSelect) {
   entries.forEach((entry) => {
     const card = document.createElement('div');
     card.className = 'notice';
+    card.style.cursor = 'pointer';
     const typeLabel = entry.type === 'product' ? window.i18n.t('products') : window.i18n.t('stock_materials');
     const code = entry.item.code || '-';
     card.innerHTML = `
@@ -12765,6 +12833,11 @@ function resetProductionDraft() {
     qty: null,
     productionDate: '',
     expiryDate: '',
+    productInfoConfirmed: false,
+    productInfoDraft: {
+      ingredients: '',
+      origin: ''
+    },
     issueId: null,
     issueSkipped: false,
     productionStaffId: '',
@@ -12922,6 +12995,11 @@ function openProductionEditModal(record) {
   state.productionDraft.qty = record.qty || null;
   state.productionDraft.productionDate = record.productionDate || '';
   state.productionDraft.expiryDate = record.expiryDate || '';
+  state.productionDraft.productInfoConfirmed = true;
+  state.productionDraft.productInfoDraft = {
+    ingredients: record.ingredients || '',
+    origin: record.origin || ''
+  };
   state.productionDraft.issueId = record.issueId || null;
   state.productionDraft.issueSkipped = !record.issueId;
   state.productionDraft.productionStaffId = record.productionStaffId || '';
@@ -13027,9 +13105,10 @@ function handleProductionBarcodeScan() {
   const entries = getProductionSearchEntries();
   const match = findExactItemMatch(entries, query);
   if (match) {
-    openProductionItem(match);
-    searchInput.value = '';
-    renderProductionSearchResults();
+    if (openProductionItem(match)) {
+      searchInput.value = '';
+      renderProductionSearchResults();
+    }
   }
 }
 
@@ -13043,6 +13122,11 @@ function renderProductionSearchResults() {
   }
   searchInput.disabled = false;
   searchInput.readOnly = false;
+  const selectedTypes = normalizeEntrySearchTypes(state.productionDraft?.searchTypes);
+  if (selectedTypes.length !== 1) {
+    results.innerHTML = `<p class="helper">اختر نوع واحد فقط: المنتجات أو مواد المخزون</p>`;
+    return;
+  }
   const query = searchInput.value.trim();
   if (!query) {
     results.innerHTML = '';
@@ -13051,21 +13135,62 @@ function renderProductionSearchResults() {
   const entries = filterItemEntries(getProductionSearchEntries(), query);
   const exact = findExactItemMatch(entries, query);
   if (exact) {
-    openProductionItem(exact);
-    searchInput.value = '';
-    results.innerHTML = '';
+    if (openProductionItem(exact)) {
+      searchInput.value = '';
+      results.innerHTML = '';
+    }
     return;
   }
   renderItemSearchResults(results, entries, (entry) => openProductionItem(entry));
 }
 
+function setProductionError(message) {
+  const errorEl = document.getElementById('productionError');
+  if (errorEl) errorEl.textContent = message || '';
+}
+
+function getProductionInfoDefaults(entry) {
+  if (!entry) return { ingredients: '', origin: '' };
+  if (entry.type !== 'product') {
+    return {
+      ingredients: entry.item?.ingredients || '',
+      origin: entry.item?.origin || ''
+    };
+  }
+  const product = state.cache.products?.[entry.id] || entry.item || {};
+  const info = getProductInfoByProductId(entry.id);
+  const originFromSelect = product.countryOriginId ? getLocalizedName(state.cache.countryOrigins?.[product.countryOriginId]) : '';
+  return {
+    ingredients: info?.ingredients || product.ingredients || '',
+    origin: info?.origin || product.origin || originFromSelect || ''
+  };
+}
+
+function canSelectProductionItem(entry) {
+  if (!state.productionDraft?.productionStaffId) {
+    setProductionError('اختر موظف الإنتاج أولاً');
+    return false;
+  }
+  const selectedTypes = normalizeEntrySearchTypes(state.productionDraft.searchTypes);
+  if (selectedTypes.length !== 1) {
+    setProductionError('اختر نوع واحد فقط: المنتجات أو مواد المخزون');
+    return false;
+  }
+  if (!entry || !selectedTypes.includes(entry.type)) {
+    setProductionError('المنتج المختار لا يطابق نوع البحث المحدد');
+    return false;
+  }
+  return true;
+}
+
 function openProductionItem(entry) {
   const errorEl = document.getElementById('productionError');
+  if (!canSelectProductionItem(entry)) return false;
   if (state.productionDraft.item) {
     if (state.productionDraft.item.id !== entry.id) {
       if (errorEl) errorEl.textContent = window.i18n.t('single_product_only');
     }
-    return;
+    return false;
   }
   if (errorEl) errorEl.textContent = '';
   state.productionDraft.item = entry;
@@ -13073,26 +13198,20 @@ function openProductionItem(entry) {
   state.productionDraft.qty = null;
   state.productionDraft.productionDate = '';
   state.productionDraft.expiryDate = '';
+  state.productionDraft.productInfoConfirmed = false;
+  state.productionDraft.productInfoDraft = getProductionInfoDefaults(entry);
   state.productionDraft.issueId = null;
   state.productionDraft.issueSkipped = false;
   state.productionDraft.onDatesSelected = () => {
-    openQtyModal({
-      title: getLocalizedName(entry.item),
-      available: null,
-      ...getQtyModalUnitMeta(entry.item),
-      mode: 'add',
-      onConfirm: (qty) => {
-        state.productionDraft.qty = qty;
-        renderProductionDraft();
-      }
-    });
+    renderProductionDraft();
+    openProductionLinkModal();
   };
-  openProductionDateModal();
   const searchInput = document.getElementById('productionSearchInput');
   const results = document.getElementById('productionSearchResults');
   if (searchInput) searchInput.value = '';
   if (results) results.innerHTML = '';
   renderProductionDraft();
+  return true;
 }
 
 function clearProductionItem() {
@@ -13101,12 +13220,59 @@ function clearProductionItem() {
   state.productionDraft.qty = null;
   state.productionDraft.productionDate = '';
   state.productionDraft.expiryDate = '';
+  state.productionDraft.productInfoConfirmed = false;
+  state.productionDraft.productInfoDraft = {
+    ingredients: '',
+    origin: ''
+  };
   state.productionDraft.issueId = null;
   state.productionDraft.issueSkipped = false;
   const errorEl = document.getElementById('productionError');
   if (errorEl) errorEl.textContent = '';
   const searchInput = document.getElementById('productionSearchInput');
   if (searchInput) searchInput.value = '';
+}
+
+function saveProductionDraftProductInfo() {
+  const draft = state.productionDraft;
+  if (!draft?.item) return Promise.resolve();
+  const ingredients = String(draft.productInfoDraft?.ingredients || '').trim();
+  const origin = String(draft.productInfoDraft?.origin || '').trim();
+  if (draft.itemType !== 'product') {
+    draft.productInfoConfirmed = true;
+    return Promise.resolve();
+  }
+  const productId = draft.item.id;
+  const product = state.cache.products?.[productId] || draft.item.item || {};
+  const info = getProductInfoByProductId(productId);
+  const infoId = getProductInfoEntryId(productId, info) || productId;
+  const payload = {
+    id: infoId,
+    productId,
+    productName: getLocalizedName(product),
+    ingredients,
+    origin,
+    barcode: info?.barcode || product.barcode || '',
+    updatedAt: Date.now()
+  };
+  if (!info?.createdAt) payload.createdAt = Date.now();
+  return db.ref(`productInfos/${infoId}`).update(payload).then(() => {
+    draft.productInfoConfirmed = true;
+  });
+}
+
+function continueProductionAfterInfo() {
+  const ingredientsInput = document.getElementById('productionIngredientsInput');
+  const originInput = document.getElementById('productionOriginInput');
+  if (ingredientsInput) state.productionDraft.productInfoDraft.ingredients = ingredientsInput.value || '';
+  if (originInput) state.productionDraft.productInfoDraft.origin = originInput.value || '';
+  saveProductionDraftProductInfo().then(() => {
+    renderProductionDraft();
+    openProductionDateModal();
+  }).catch((error) => {
+    console.error('Production product info save failed:', error);
+    setProductionError('تعذر حفظ معلومات المنتج');
+  });
 }
 
 function renderProductionDraft() {
@@ -13117,7 +13283,10 @@ function renderProductionDraft() {
   const searchBtn = document.getElementById('productionSearchBtn');
   if (!container) return;
   if (printBtn) {
-    printBtn.textContent = state.productionDraft?.editingId ? window.i18n.t('update') : window.i18n.t('print_label');
+    printBtn.style.display = 'none';
+  }
+  if (linkBtn) {
+    linkBtn.textContent = 'اختيار سند الصرف / طباعة الملصق';
   }
   if (!state.productionDraft.item) {
     container.innerHTML = `<p class="helper">${window.i18n.t('select')}</p>`;
@@ -13128,13 +13297,50 @@ function renderProductionDraft() {
     return;
   }
   const item = state.productionDraft.item;
+  if (!state.productionDraft.productInfoConfirmed) {
+    const infoDraft = state.productionDraft.productInfoDraft || { ingredients: '', origin: '' };
+    container.innerHTML = `
+      <div class="notice">
+        <div><strong>${escapeHtml(getLocalizedName(item.item))}</strong></div>
+        <div class="grid two" style="margin-top: 10px;">
+          <div>
+            <label class="tag" for="productionIngredientsInput">المكونات</label>
+            <textarea id="productionIngredientsInput" class="input" rows="4" placeholder="المكونات">${escapeHtml(infoDraft.ingredients || '')}</textarea>
+          </div>
+          <div>
+            <label class="tag" for="productionOriginInput">بلد المنشأ</label>
+            <textarea id="productionOriginInput" class="input" rows="4" placeholder="بلد المنشأ">${escapeHtml(infoDraft.origin || '')}</textarea>
+          </div>
+        </div>
+        <div class="row" style="justify-content: flex-end; margin-top: 10px;">
+          <button id="productionInfoContinueBtn" class="btn primary">حفظ والمتابعة</button>
+          <button id="productionChangeItem" class="btn ghost small">${window.i18n.t('change_product')}</button>
+        </div>
+      </div>
+    `;
+    if (searchInput) searchInput.disabled = true;
+    if (searchBtn) searchBtn.disabled = true;
+    if (linkBtn) linkBtn.disabled = true;
+    if (printBtn) printBtn.disabled = true;
+    document.getElementById('productionIngredientsInput')?.addEventListener('input', (event) => {
+      state.productionDraft.productInfoDraft.ingredients = event.target.value || '';
+    });
+    document.getElementById('productionOriginInput')?.addEventListener('input', (event) => {
+      state.productionDraft.productInfoDraft.origin = event.target.value || '';
+    });
+    document.getElementById('productionInfoContinueBtn')?.addEventListener('click', () => continueProductionAfterInfo());
+    document.getElementById('productionChangeItem')?.addEventListener('click', () => {
+      clearProductionItem();
+      renderProductionDraft();
+      renderProductionSearchResults();
+    });
+    return;
+  }
   const issue = state.cache.stockIssue?.[state.productionDraft.issueId];
   const issueLabel = state.productionDraft.issueSkipped ? 'تم التخطي' : (issue?.issueNumber || '-');
   container.innerHTML = `
     <div class="notice">
       <div><strong>${getLocalizedName(item.item)}</strong></div>
-      <div class="helper">${window.i18n.t('quantity')}: ${state.productionDraft.qty === null || state.productionDraft.qty === undefined ? '-' : formatQuantityWithUnit(state.productionDraft.qty, item.item)}</div>
-      <button id="productionEditQty" class="btn ghost small" style="margin-top: 6px;">${window.i18n.t('edit')}</button>
       <div class="helper">${window.i18n.t('production_date')}: ${state.productionDraft.productionDate || '-'}</div>
       <div class="helper">${window.i18n.t('expiry_date')}: ${state.productionDraft.expiryDate || '-'}</div>
       <div class="helper">${window.i18n.t('branch')}: ${getBranchLabel(state.productionDraft.branchId)}</div>
@@ -13152,22 +13358,7 @@ function renderProductionDraft() {
       renderProductionSearchResults();
     });
   }
-  const editQtyBtn = document.getElementById('productionEditQty');
-  if (editQtyBtn) {
-    editQtyBtn.addEventListener('click', () => {
-      openQtyModal({
-        title: getLocalizedName(item.item),
-        available: null,
-        ...getQtyModalUnitMeta(item.item),
-        mode: 'add',
-        onConfirm: (qty) => {
-          state.productionDraft.qty = qty;
-          renderProductionDraft();
-        }
-      });
-    });
-  }
-  const readyForLink = Boolean(state.productionDraft.productionDate && state.productionDraft.expiryDate && state.productionDraft.qty);
+  const readyForLink = Boolean(state.productionDraft.productInfoConfirmed && state.productionDraft.productionDate && state.productionDraft.expiryDate);
   if (linkBtn) linkBtn.disabled = !readyForLink;
   const readyForPrint = readyForLink && (Boolean(state.productionDraft.issueId) || Boolean(state.productionDraft.issueSkipped));
   if (printBtn) printBtn.disabled = !readyForPrint;
@@ -13201,10 +13392,12 @@ function renderProductionIssueList() {
 function submitProductionVoucher() {
   const errorEl = document.getElementById('productionError');
   if (errorEl) errorEl.textContent = '';
-  if (!state.productionDraft.item || !state.productionDraft.qty || !state.productionDraft.productionDate || !state.productionDraft.expiryDate) {
+  const rawLabelCopies = Math.floor(Number(state.productionDraft.labelCopies || state.productionDraft.qty || 0));
+  if (!state.productionDraft.item || !rawLabelCopies || !state.productionDraft.productionDate || !state.productionDraft.expiryDate) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
+  const labelCopies = Math.max(1, rawLabelCopies);
   if (!state.productionDraft.issueId && !state.productionDraft.issueSkipped) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
@@ -13238,9 +13431,11 @@ function submitProductionVoucher() {
       itemNameEn: itemData.nameEn || itemData.name || original.itemNameEn || null,
       unitId: itemData.unitId || original.unitId || null,
       unitName: getResolvedItemUnitName(itemData) || original.unitName || null,
-      qty: state.productionDraft.qty,
+      qty: labelCopies,
       productionDate: state.productionDraft.productionDate,
       expiryDate: state.productionDraft.expiryDate,
+      ingredients: state.productionDraft.productInfoDraft?.ingredients || original.ingredients || null,
+      origin: state.productionDraft.productInfoDraft?.origin || original.origin || null,
       branchId
     };
     db.ref(`production/${editingId}`).update(payload).then(() => {
@@ -13251,7 +13446,7 @@ function submitProductionVoucher() {
       const oldQty = Number(original.qty || 0);
       const newItemType = state.productionDraft.itemType || oldItemType;
       const newItemId = state.productionDraft.item?.id || oldItemId;
-      const newQty = Number(state.productionDraft.qty || 0);
+      const newQty = Number(labelCopies || 0);
       const updates = [];
       if (oldItemType === newItemType && oldItemId === newItemId && oldBranchId === newBranchId) {
         const diff = newQty - oldQty;
@@ -13289,15 +13484,18 @@ function submitProductionVoucher() {
       itemNameEn: itemData.nameEn || itemData.name || null,
       unitId: itemData.unitId || null,
       unitName: getResolvedItemUnitName(itemData) || null,
-      qty: state.productionDraft.qty,
+      qty: labelCopies,
+      labelCopies,
       productionDate: state.productionDraft.productionDate,
       expiryDate: state.productionDraft.expiryDate,
+      ingredients: state.productionDraft.productInfoDraft?.ingredients || null,
+      origin: state.productionDraft.productInfoDraft?.origin || null,
       branchId
     };
     const productionRef = db.ref('production').push();
     productionRef.set(payload).then(() => {
-      updateItemStock(state.productionDraft.itemType, state.productionDraft.item.id, branchId, Number(state.productionDraft.qty || 0)).then(() => {
-        printProductionLabel(payload);
+      updateItemStock(state.productionDraft.itemType, state.productionDraft.item.id, branchId, Number(labelCopies || 0)).then(() => {
+        printProductionLabel(payload, labelCopies);
         resetProductionDraft();
         renderProductionSection();
         closeProductionModal();
@@ -13862,6 +14060,30 @@ function drawLabelBarcode(ctx, barcodeValue, x, y, maxWidth, height) {
   ctx.drawImage(barcodeCanvas, 0, 0, barcodeCanvas.width, barcodeCanvas.height, drawX, y, drawWidth, height);
 }
 
+function drawVerticalLabelBarcode(ctx, barcodeValue, x, y, maxWidth, maxHeight) {
+  if (!barcodeValue || typeof JsBarcode === 'undefined') return;
+  const barcodeCanvas = document.createElement('canvas');
+  let moduleWidth = 1.5;
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    JsBarcode(barcodeCanvas, barcodeValue, {
+      format: 'CODE128',
+      displayValue: false,
+      height: maxWidth,
+      width: moduleWidth,
+      margin: 0
+    });
+    if (barcodeCanvas.width <= maxHeight || moduleWidth <= 0.58) break;
+    moduleWidth -= 0.16;
+  }
+  const drawHeight = Math.min(barcodeCanvas.width, maxHeight);
+  const drawY = y + Math.max(0, Math.floor((maxHeight - drawHeight) / 2));
+  ctx.save();
+  ctx.translate(x, drawY + drawHeight);
+  ctx.rotate(-Math.PI / 2);
+  ctx.drawImage(barcodeCanvas, 0, 0, barcodeCanvas.width, barcodeCanvas.height, 0, 0, drawHeight, maxWidth);
+  ctx.restore();
+}
+
 function canvasToMonoGfa(canvas) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const { width, height } = canvas;
@@ -13888,7 +14110,7 @@ function canvasToMonoGfa(canvas) {
   return { hex, totalBytes, rowBytes };
 }
 
-async function buildProductionLabelBitmapZpl(record) {
+async function buildProductionLabelBitmapZpl(record, copies = 1) {
   const names = getProductionLabelNames(record);
   const info = getProductionLabelInfo(record);
   const barcodeValue = info.barcode || record.productionBarcode || generateBarcodeValue();
@@ -13904,7 +14126,7 @@ async function buildProductionLabelBitmapZpl(record) {
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.strokeStyle = '#000';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 3;
   ctx.strokeRect(10, 8, 380, 184);
 
   const nameAr = names.nameAr || record.itemName || '';
@@ -13917,40 +14139,41 @@ async function buildProductionLabelBitmapZpl(record) {
   ctx.fillStyle = '#000';
   ctx.textBaseline = 'top';
 
+  drawVerticalLabelBarcode(ctx, barcodeValue, 25, 28, 72, 144);
+
   ctx.direction = 'rtl';
   ctx.textAlign = 'center';
-  ctx.font = 'bold 23px Arial, Tahoma, sans-serif';
-  ctx.fillText(fitTextToWidth(ctx, nameAr, 340, ctx.font), 200, 16);
+  ctx.font = 'bold 35px Arial, Tahoma, sans-serif';
+  ctx.fillText(fitTextToWidth(ctx, nameAr, 250, ctx.font), 245, 26);
 
   ctx.direction = 'ltr';
-  ctx.font = 'bold 16px Arial, sans-serif';
-  ctx.fillText(fitTextToWidth(ctx, nameEn, 330, ctx.font), 200, 43);
+  ctx.font = 'bold 24px Arial, sans-serif';
+  ctx.fillText(fitTextToWidth(ctx, nameEn, 245, ctx.font), 245, 66);
 
   ctx.direction = 'rtl';
   ctx.textAlign = 'right';
-  ctx.font = 'bold 14px Arial, Tahoma, sans-serif';
-  const ingredientLines = wrapText(ctx, `المكونات: ${ingredients}`, 350, 2);
-  ingredientLines.forEach((line, index) => ctx.fillText(line, 372, 66 + (index * 16)));
+  ctx.font = 'bold 21px Arial, Tahoma, sans-serif';
+  const ingredientLines = wrapText(ctx, `المكونات: ${ingredients}`, 250, 2);
+  ingredientLines.forEach((line, index) => ctx.fillText(line, 372, 103 + (index * 22)));
 
-  const metaTop = 118;
+  const metaTop = 145;
   const metaItems = [
-    { label: 'بلد المنشأ', value: origin, x: 325, max: 92, direction: 'rtl' },
-    { label: 'إنتاج', value: productionDate, x: 200, max: 96, direction: 'ltr' },
-    { label: 'انتهاء', value: expiryDate, x: 75, max: 96, direction: 'ltr' }
+    { label: 'إنتاج:', value: productionDate, x: 335, max: 86, direction: 'ltr' },
+    { label: 'انتهاء:', value: expiryDate, x: 245, max: 86, direction: 'ltr' },
+    { label: 'بلد المنشأ:', value: origin, x: 148, max: 86, direction: 'rtl' }
   ];
   metaItems.forEach((item) => {
     ctx.direction = 'rtl';
     ctx.textAlign = 'center';
-    ctx.font = 'bold 12px Arial, Tahoma, sans-serif';
+    ctx.font = 'bold 18px Arial, Tahoma, sans-serif';
     ctx.fillText(item.label, item.x, metaTop);
     ctx.direction = item.direction;
-    ctx.font = 'bold 13px Arial, Tahoma, sans-serif';
-    ctx.fillText(fitTextToWidth(ctx, item.value, item.max, ctx.font), item.x, metaTop + 15);
+    ctx.font = 'bold 20px Arial, Tahoma, sans-serif';
+    ctx.fillText(fitTextToWidth(ctx, item.value, item.max, ctx.font), item.x, metaTop + 24);
   });
 
-  drawLabelBarcode(ctx, barcodeValue, 64, 154, 272, 32);
-
   const { hex, totalBytes, rowBytes } = canvasToMonoGfa(canvas);
+  const copiesCount = Math.max(1, Math.floor(Number(copies || 1)));
   return [
     '^XA',
     '^PW400',
@@ -13959,12 +14182,12 @@ async function buildProductionLabelBitmapZpl(record) {
     '^PR4',
     '^MD24',
     `^FO0,0^GFA,${totalBytes},${totalBytes},${rowBytes},${hex}^FS`,
-    '^PQ1',
+    `^PQ${copiesCount}`,
     '^XZ'
   ].join('\n');
 }
 
-function buildProductionLabelHtml(record) {
+function buildProductionLabelHtml(record, copies = 1) {
   const names = getProductionLabelNames(record);
   const info = getProductionLabelInfo(record);
   const barcodeValue = info.barcode || record.productionBarcode || generateBarcodeValue();
@@ -13992,138 +14215,8 @@ function buildProductionLabelHtml(record) {
   const rotatorHeightMm = isRotated ? widthMm : heightMm;
   const rotateShiftXmm = rotateDeg === 90 ? rotatorHeightMm : rotateDeg === 180 ? rotatorWidthMm : 0;
   const rotateShiftYmm = rotateDeg === -90 ? rotatorWidthMm : rotateDeg === 180 ? rotatorHeightMm : 0;
-
-  return `
-    <html>
-      <head>
-        <meta charset="UTF-8" />
-        <title>${title}</title>
-        <style>
-          @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
-          html, body {
-            width: ${widthMm}mm;
-            height: ${heightMm}mm;
-            margin: 0;
-            padding: 0;
-            background: #fff;
-            color: #000;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          body { font-family: Arial, Tahoma, sans-serif; overflow: hidden; }
-          .sheet { width: ${widthMm}mm; height: ${heightMm}mm; overflow: hidden; background: #fff; color: #000; }
-          .label {
-            width: ${widthMm}mm;
-            height: ${heightMm}mm;
-            padding: ${paddingYmm}mm ${paddingXmm}mm;
-            box-sizing: border-box;
-            position: relative;
-            transform: translate(${offsetXmm}mm, ${offsetYmm}mm);
-            background: #fff;
-            color: #000;
-          }
-          .label-rotator {
-            width: ${rotateDeg === 0 ? '100%' : `${rotatorWidthMm}mm`};
-            height: ${rotateDeg === 0 ? '100%' : `${rotatorHeightMm}mm`};
-            transform: translate(${rotateShiftXmm}mm, ${rotateShiftYmm}mm) rotate(${rotateDeg}deg);
-            transform-origin: top left;
-          }
-          .label-content {
-            position: relative;
-            height: 100%;
-            width: 100%;
-            box-sizing: border-box;
-            overflow: hidden;
-            transform: translate(${contentShiftXmm}mm, ${contentShiftYmm}mm);
-          }
-          .title {
-            position: absolute;
-            left: 0;
-            right: 0;
-            top: 0;
-            font-size: 7.6px;
-            font-weight: 900;
-            text-align: center;
-            line-height: 1.02;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            color: #000;
-          }
-          .title.en {
-            top: 3.1mm;
-            font-size: 5.3px;
-            font-weight: 800;
-            direction: ltr;
-          }
-          .ingredients {
-            position: absolute;
-            top: 6.3mm;
-            right: 0;
-            left: 0;
-            height: 4.2mm;
-            font-size: 4.45px;
-            font-weight: 800;
-            text-align: right;
-            direction: rtl;
-            line-height: 1.08;
-            overflow: hidden;
-            overflow-wrap: anywhere;
-            color: #000;
-          }
-          .meta-row {
-            position: absolute;
-            top: 14.2mm;
-            right: 0;
-            left: 0;
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 1.5mm;
-            color: #000;
-          }
-          .meta-card {
-            min-width: 0;
-            text-align: center;
-            overflow: hidden;
-            color: #000;
-          }
-          .meta-label {
-            display: block;
-            font-size: 4.8px;
-            font-weight: 900;
-            line-height: 1;
-            direction: rtl;
-            white-space: nowrap;
-          }
-          .meta-value {
-            display: block;
-            margin-top: .7mm;
-            font-size: 5.2px;
-            font-weight: 900;
-            line-height: 1;
-            direction: ltr;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-          .meta-card.origin .meta-value { direction: rtl; }
-          .barcode {
-            position: absolute;
-            left: 7mm;
-            right: 7mm;
-            top: 20.2mm;
-            height: 4.4mm;
-            text-align: center;
-            overflow: hidden;
-            line-height: 0;
-          }
-          .barcode svg {
-            width: 100%;
-            height: 4.4mm;
-          }
-        </style>
-      </head>
-      <body>
+  const copiesCount = Math.max(1, Math.floor(Number(copies || 1)));
+  const labelSheet = `
         <div class="sheet">
           <div class="label">
             <div class="label-rotator">
@@ -14150,16 +14243,158 @@ function buildProductionLabelHtml(record) {
             </div>
           </div>
         </div>
+  `;
+
+  return `
+    <html>
+      <head>
+        <meta charset="UTF-8" />
+        <title>${title}</title>
+        <style>
+          @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
+          html, body {
+            width: ${widthMm}mm;
+            height: ${heightMm}mm;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            color: #000;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          body { font-family: Arial, Tahoma, sans-serif; overflow: hidden; }
+          .sheet { width: ${widthMm}mm; height: ${heightMm}mm; overflow: hidden; background: #fff; color: #000; page-break-after: always; break-after: page; }
+          .sheet:last-child { page-break-after: auto; break-after: auto; }
+          .label {
+            width: ${widthMm}mm;
+            height: ${heightMm}mm;
+            padding: ${paddingYmm}mm ${paddingXmm}mm;
+            box-sizing: border-box;
+            position: relative;
+            transform: translate(${offsetXmm}mm, ${offsetYmm}mm);
+            background: #fff;
+            color: #000;
+          }
+          .label-rotator {
+            width: ${rotateDeg === 0 ? '100%' : `${rotatorWidthMm}mm`};
+            height: ${rotateDeg === 0 ? '100%' : `${rotatorHeightMm}mm`};
+            transform: translate(${rotateShiftXmm}mm, ${rotateShiftYmm}mm) rotate(${rotateDeg}deg);
+            transform-origin: top left;
+          }
+          .label-content {
+            position: relative;
+            height: 100%;
+            width: 100%;
+            box-sizing: border-box;
+            border: .35mm solid #000;
+            border-radius: 1mm;
+            overflow: hidden;
+            transform: translate(${contentShiftXmm}mm, ${contentShiftYmm}mm);
+          }
+          .title {
+            position: absolute;
+            left: 10.5mm;
+            right: 0;
+            top: .8mm;
+            font-size: 10.8px;
+            font-weight: 900;
+            text-align: center;
+            line-height: 1.02;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #000;
+          }
+          .title.en {
+            top: 5mm;
+            font-size: 8.4px;
+            font-weight: 900;
+            direction: ltr;
+          }
+          .ingredients {
+            position: absolute;
+            top: 10.5mm;
+            right: 0;
+            left: 10.5mm;
+            height: 4.8mm;
+            font-size: 7px;
+            font-weight: 900;
+            text-align: right;
+            direction: rtl;
+            line-height: 1.04;
+            overflow: hidden;
+            overflow-wrap: anywhere;
+            color: #000;
+          }
+          .meta-row {
+            position: absolute;
+            top: 17.2mm;
+            right: 0;
+            left: 10.5mm;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1mm;
+            color: #000;
+          }
+          .meta-card {
+            min-width: 0;
+            text-align: center;
+            overflow: hidden;
+            color: #000;
+          }
+          .meta-label {
+            display: block;
+            font-size: 6px;
+            font-weight: 900;
+            line-height: 1;
+            direction: rtl;
+            white-space: nowrap;
+          }
+          .meta-value {
+            display: block;
+            margin-top: .9mm;
+            font-size: 7px;
+            font-weight: 900;
+            line-height: 1;
+            direction: ltr;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .meta-card.origin .meta-value { direction: rtl; }
+          .barcode {
+            position: absolute;
+            left: .7mm;
+            top: 3mm;
+            width: 8.2mm;
+            height: 19mm;
+            text-align: center;
+            overflow: hidden;
+            line-height: 0;
+          }
+          .barcode svg {
+            position: absolute;
+            width: 19mm;
+            height: 8.2mm;
+            left: 0;
+            top: 19mm;
+            transform: rotate(-90deg);
+            transform-origin: top left;
+          }
+        </style>
+      </head>
+      <body>
+        ${Array.from({ length: copiesCount }, () => labelSheet).join('')}
       </body>
     </html>
   `;
 }
 
-async function printProductionLabel(record) {
+async function printProductionLabel(record, copies = 1) {
   if (!record) return;
   if (window.figsDesktop?.isDesktopApp) {
     try {
-      const zpl = await buildProductionLabelBitmapZpl(record);
+      const zpl = await buildProductionLabelBitmapZpl(record, copies);
       await window.figsDesktop.printZpl({ zpl });
     } catch (error) {
       console.error('Desktop label print failed:', error);
@@ -14167,7 +14402,7 @@ async function printProductionLabel(record) {
     }
     return;
   }
-  const html = buildProductionLabelHtml(record);
+  const html = buildProductionLabelHtml(record, copies);
   const win = window.open('', '_blank', 'width=400,height=300');
   if (!win) return;
   win.document.write(html);

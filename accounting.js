@@ -12829,7 +12829,7 @@ function resetProductionDraft() {
   state.productionDraft = {
     item: null,
     itemType: null,
-    searchTypes: [],
+    searchTypes: ['product'],
     qty: null,
     productionDate: '',
     expiryDate: '',
@@ -13122,7 +13122,12 @@ function renderProductionSearchResults() {
   }
   searchInput.disabled = false;
   searchInput.readOnly = false;
-  const selectedTypes = normalizeEntrySearchTypes(state.productionDraft?.searchTypes);
+  let selectedTypes = normalizeEntrySearchTypes(state.productionDraft?.searchTypes);
+  if (!selectedTypes.length) {
+    state.productionDraft.searchTypes = ['product'];
+    selectedTypes = ['product'];
+    renderEntrySearchTypeFilter('production', selectedTypes);
+  }
   if (selectedTypes.length !== 1) {
     results.innerHTML = `<p class="helper">اختر نوع واحد فقط: المنتجات أو مواد المخزون</p>`;
     return;
@@ -13972,20 +13977,26 @@ function getProductionLabelInfo(record) {
 }
 
 const labelPrintSettings = {
-  widthMm: 50,
-  heightMm: 25,
+  widthMm: 57,
+  heightMm: 38,
   rotateDeg: 0,
   offsetXmm: 0,
   offsetYmm: 0,
   contentShiftXmm: 0,
   contentShiftYmm: 0,
-  paddingXmm: 1.8,
+  paddingXmm: 1.4,
   paddingYmm: 1,
-  barcodeHeight: 9,
-  barcodeWidth: 0.65,
+  barcodeHeight: 24,
+  barcodeWidth: 1,
   barcodeFontSize: 5,
   barcodeTextMargin: 1
 };
+
+const ZEBRA_DPI = 203;
+
+function mmToDots(mm) {
+  return Math.round((Number(mm) || 0) * ZEBRA_DPI / 25.4);
+}
 
 function buildBarcodeSvg(value) {
   if (!value || typeof JsBarcode === 'undefined') return '<svg></svg>';
@@ -14006,12 +14017,112 @@ function fitTextToWidth(ctx, text, maxWidth, font) {
   const value = String(text || '').trim();
   if (!value) return '';
   ctx.font = font;
-  if (ctx.measureText(value).width <= maxWidth) return value;
-  let output = value;
-  while (output.length > 1 && ctx.measureText(`${output}...`).width > maxWidth) {
-    output = output.slice(0, -1);
+  return value;
+}
+
+function getFittedFontSize(ctx, text, maxWidth, maxSize, minSize, weight = 'bold', family = 'Arial, Tahoma, sans-serif') {
+  const value = String(text || '').trim();
+  for (let size = maxSize; size >= minSize; size -= 1) {
+    ctx.font = `${weight} ${size}px ${family}`;
+    if (!value || ctx.measureText(value).width <= maxWidth) return size;
   }
-  return `${output}...`;
+  return minSize;
+}
+
+function drawFittedLine(ctx, text, x, y, maxWidth, options = {}) {
+  const value = String(text || '').trim();
+  if (!value) return;
+  const {
+    maxSize = 24,
+    minSize = 12,
+    weight = 'bold',
+    family = 'Arial, Tahoma, sans-serif',
+    align = 'center',
+    direction = 'rtl'
+  } = options;
+  const size = getFittedFontSize(ctx, value, maxWidth, maxSize, minSize, weight, family);
+  ctx.save();
+  ctx.font = `${weight} ${size}px ${family}`;
+  ctx.fillStyle = '#000';
+  ctx.textAlign = align;
+  ctx.direction = direction;
+  ctx.textBaseline = 'top';
+  const measured = ctx.measureText(value).width;
+  const scaleX = measured > maxWidth ? Math.max(0.76, maxWidth / measured) : 1;
+  if (scaleX < 1) {
+    ctx.translate(x, y);
+    ctx.scale(scaleX, 1);
+    ctx.fillText(value, 0, 0);
+  } else {
+    ctx.fillText(value, x, y);
+  }
+  ctx.restore();
+}
+
+function wrapTextLines(ctx, text, maxWidth) {
+  const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  const lines = [];
+  let line = '';
+  words.forEach((word) => {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width <= maxWidth || !line) {
+      line = next;
+    } else {
+      lines.push(line);
+      line = word;
+    }
+  });
+  if (line) lines.push(line);
+  return lines;
+}
+
+function drawWrappedFittedText(ctx, text, x, y, maxWidth, maxLines, options = {}) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!value) return;
+  const {
+    maxSize = 18,
+    minSize = 11,
+    weight = 'bold',
+    family = 'Arial, Tahoma, sans-serif',
+    align = 'right',
+    direction = 'rtl',
+    lineGap = 3
+  } = options;
+  let selectedSize = minSize;
+  let selectedLines = [];
+  for (let size = maxSize; size >= minSize; size -= 1) {
+    ctx.font = `${weight} ${size}px ${family}`;
+    const lines = wrapTextLines(ctx, value, maxWidth);
+    if (lines.length <= maxLines) {
+      selectedSize = size;
+      selectedLines = lines;
+      break;
+    }
+    if (size === minSize) {
+      selectedLines = lines.slice(0, maxLines);
+    }
+  }
+  ctx.save();
+  ctx.font = `${weight} ${selectedSize}px ${family}`;
+  ctx.fillStyle = '#000';
+  ctx.textAlign = align;
+  ctx.direction = direction;
+  ctx.textBaseline = 'top';
+  const lineHeight = selectedSize + lineGap;
+  selectedLines.slice(0, maxLines).forEach((line, index) => {
+    const measured = ctx.measureText(line).width;
+    const scaleX = measured > maxWidth ? Math.max(0.76, maxWidth / measured) : 1;
+    if (scaleX < 1) {
+      ctx.save();
+      ctx.translate(x, y + (index * lineHeight));
+      ctx.scale(scaleX, 1);
+      ctx.fillText(line, 0, 0);
+      ctx.restore();
+    } else {
+      ctx.fillText(line, x, y + (index * lineHeight));
+    }
+  });
+  ctx.restore();
 }
 
 function wrapText(ctx, text, maxWidth, maxLines = 2) {
@@ -14063,8 +14174,16 @@ function drawLabelBarcode(ctx, barcodeValue, x, y, maxWidth, height) {
 function drawVerticalLabelBarcode(ctx, barcodeValue, x, y, maxWidth, maxHeight) {
   if (!barcodeValue || typeof JsBarcode === 'undefined') return;
   const barcodeCanvas = document.createElement('canvas');
-  let moduleWidth = 1.5;
-  for (let attempt = 0; attempt < 7; attempt += 1) {
+  let moduleWidth = 2;
+  JsBarcode(barcodeCanvas, barcodeValue, {
+    format: 'CODE128',
+    displayValue: false,
+    height: maxWidth,
+    width: moduleWidth,
+    margin: 0
+  });
+  if (barcodeCanvas.width > maxHeight) {
+    moduleWidth = 1;
     JsBarcode(barcodeCanvas, barcodeValue, {
       format: 'CODE128',
       displayValue: false,
@@ -14072,15 +14191,16 @@ function drawVerticalLabelBarcode(ctx, barcodeValue, x, y, maxWidth, maxHeight) 
       width: moduleWidth,
       margin: 0
     });
-    if (barcodeCanvas.width <= maxHeight || moduleWidth <= 0.58) break;
-    moduleWidth -= 0.16;
   }
   const drawHeight = Math.min(barcodeCanvas.width, maxHeight);
+  const drawWidth = Math.min(barcodeCanvas.height, maxWidth);
   const drawY = y + Math.max(0, Math.floor((maxHeight - drawHeight) / 2));
+  const drawX = x + Math.max(0, Math.floor((maxWidth - drawWidth) / 2));
   ctx.save();
-  ctx.translate(x, drawY + drawHeight);
+  ctx.imageSmoothingEnabled = false;
+  ctx.translate(drawX, drawY + drawHeight);
   ctx.rotate(-Math.PI / 2);
-  ctx.drawImage(barcodeCanvas, 0, 0, barcodeCanvas.width, barcodeCanvas.height, 0, 0, drawHeight, maxWidth);
+  ctx.drawImage(barcodeCanvas, 0, 0, barcodeCanvas.width, barcodeCanvas.height, 0, 0, drawHeight, drawWidth);
   ctx.restore();
 }
 
@@ -14115,8 +14235,8 @@ async function buildProductionLabelBitmapZpl(record, copies = 1) {
   const info = getProductionLabelInfo(record);
   const barcodeValue = info.barcode || record.productionBarcode || generateBarcodeValue();
   const canvas = document.createElement('canvas');
-  canvas.width = 400;
-  canvas.height = 200;
+  canvas.width = mmToDots(labelPrintSettings.widthMm);
+  canvas.height = mmToDots(labelPrintSettings.heightMm);
   const ctx = canvas.getContext('2d');
 
   if (document.fonts?.ready) {
@@ -14125,9 +14245,10 @@ async function buildProductionLabelBitmapZpl(record, copies = 1) {
 
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = false;
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 3;
-  ctx.strokeRect(10, 8, 380, 184);
+  ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
 
   const nameAr = names.nameAr || record.itemName || '';
   const nameEn = names.nameEn || record.itemName || '';
@@ -14139,45 +14260,68 @@ async function buildProductionLabelBitmapZpl(record, copies = 1) {
   ctx.fillStyle = '#000';
   ctx.textBaseline = 'top';
 
-  drawVerticalLabelBarcode(ctx, barcodeValue, 25, 28, 72, 144);
+  const barcodeBox = {
+    x: 16,
+    y: 28,
+    width: 96,
+    height: canvas.height - 56
+  };
+  drawVerticalLabelBarcode(ctx, barcodeValue, barcodeBox.x, barcodeBox.y, barcodeBox.width, barcodeBox.height);
 
-  ctx.direction = 'rtl';
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 35px Arial, Tahoma, sans-serif';
-  ctx.fillText(fitTextToWidth(ctx, nameAr, 250, ctx.font), 245, 26);
+  const contentLeft = barcodeBox.x + barcodeBox.width + 12;
+  const contentRight = canvas.width - 18;
+  const contentWidth = contentRight - contentLeft;
+  const centerX = contentLeft + (contentWidth / 2);
 
-  ctx.direction = 'ltr';
-  ctx.font = 'bold 24px Arial, sans-serif';
-  ctx.fillText(fitTextToWidth(ctx, nameEn, 245, ctx.font), 245, 66);
+  drawFittedLine(ctx, nameAr, centerX, 22, contentWidth, {
+    maxSize: 31,
+    minSize: 17,
+    align: 'center',
+    direction: 'rtl'
+  });
+  drawFittedLine(ctx, nameEn, centerX, 57, contentWidth, {
+    maxSize: 24,
+    minSize: 13,
+    align: 'center',
+    direction: 'ltr',
+    family: 'Arial, sans-serif'
+  });
+  drawWrappedFittedText(ctx, `المكونات: ${ingredients}`, contentRight, 93, contentWidth, 3, {
+    maxSize: 18,
+    minSize: 11,
+    align: 'right',
+    direction: 'rtl',
+    lineGap: 3
+  });
 
-  ctx.direction = 'rtl';
-  ctx.textAlign = 'right';
-  ctx.font = 'bold 21px Arial, Tahoma, sans-serif';
-  const ingredientLines = wrapText(ctx, `المكونات: ${ingredients}`, 250, 2);
-  ingredientLines.forEach((line, index) => ctx.fillText(line, 372, 103 + (index * 22)));
-
-  const metaTop = 145;
-  const metaItems = [
-    { label: 'إنتاج:', value: productionDate, x: 335, max: 86, direction: 'ltr' },
-    { label: 'انتهاء:', value: expiryDate, x: 245, max: 86, direction: 'ltr' },
-    { label: 'بلد المنشأ:', value: origin, x: 148, max: 86, direction: 'rtl' }
+  const metaTop = 212;
+  const columns = [
+    { label: 'إنتاج', value: productionDate, x: contentRight - 48, width: 96, direction: 'ltr' },
+    { label: 'انتهاء', value: expiryDate, x: contentRight - 150, width: 96, direction: 'ltr' },
+    { label: 'بلد المنشأ', value: origin, x: contentLeft + 42, width: 100, direction: 'rtl' }
   ];
-  metaItems.forEach((item) => {
-    ctx.direction = 'rtl';
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 18px Arial, Tahoma, sans-serif';
-    ctx.fillText(item.label, item.x, metaTop);
-    ctx.direction = item.direction;
-    ctx.font = 'bold 20px Arial, Tahoma, sans-serif';
-    ctx.fillText(fitTextToWidth(ctx, item.value, item.max, ctx.font), item.x, metaTop + 24);
+  columns.forEach((item) => {
+    drawFittedLine(ctx, item.label, item.x, metaTop, item.width, {
+      maxSize: 20,
+      minSize: 14,
+      align: 'center',
+      direction: 'rtl'
+    });
+    drawFittedLine(ctx, item.value, item.x, metaTop + 30, item.width, {
+      maxSize: 21,
+      minSize: 13,
+      align: 'center',
+      direction: item.direction,
+      family: 'Arial, Tahoma, sans-serif'
+    });
   });
 
   const { hex, totalBytes, rowBytes } = canvasToMonoGfa(canvas);
   const copiesCount = Math.max(1, Math.floor(Number(copies || 1)));
   return [
     '^XA',
-    '^PW400',
-    '^LL200',
+    `^PW${canvas.width}`,
+    `^LL${canvas.height}`,
     '^LH0,0',
     '^PR4',
     '^MD24',
@@ -14293,44 +14437,44 @@ function buildProductionLabelHtml(record, copies = 1) {
           }
           .title {
             position: absolute;
-            left: 10.5mm;
-            right: 0;
-            top: .8mm;
-            font-size: 10.8px;
+            left: 13mm;
+            right: 1mm;
+            top: 1.2mm;
+            font-size: 12px;
             font-weight: 900;
             text-align: center;
             line-height: 1.02;
             white-space: nowrap;
             overflow: hidden;
-            text-overflow: ellipsis;
+            text-overflow: clip;
             color: #000;
           }
           .title.en {
-            top: 5mm;
-            font-size: 8.4px;
+            top: 6.2mm;
+            font-size: 9.6px;
             font-weight: 900;
             direction: ltr;
           }
           .ingredients {
             position: absolute;
-            top: 10.5mm;
-            right: 0;
-            left: 10.5mm;
-            height: 4.8mm;
-            font-size: 7px;
+            top: 11.4mm;
+            right: 1mm;
+            left: 13mm;
+            height: 12mm;
+            font-size: 8px;
             font-weight: 900;
             text-align: right;
             direction: rtl;
-            line-height: 1.04;
+            line-height: 1.12;
             overflow: hidden;
             overflow-wrap: anywhere;
             color: #000;
           }
           .meta-row {
             position: absolute;
-            top: 17.2mm;
-            right: 0;
-            left: 10.5mm;
+            top: 27.2mm;
+            right: 1mm;
+            left: 13mm;
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
             gap: 1mm;
@@ -14344,7 +14488,7 @@ function buildProductionLabelHtml(record, copies = 1) {
           }
           .meta-label {
             display: block;
-            font-size: 6px;
+            font-size: 7.2px;
             font-weight: 900;
             line-height: 1;
             direction: rtl;
@@ -14352,32 +14496,32 @@ function buildProductionLabelHtml(record, copies = 1) {
           }
           .meta-value {
             display: block;
-            margin-top: .9mm;
-            font-size: 7px;
+            margin-top: 1mm;
+            font-size: 8px;
             font-weight: 900;
             line-height: 1;
             direction: ltr;
             white-space: nowrap;
             overflow: hidden;
-            text-overflow: ellipsis;
+            text-overflow: clip;
           }
           .meta-card.origin .meta-value { direction: rtl; }
           .barcode {
             position: absolute;
-            left: .7mm;
-            top: 3mm;
-            width: 8.2mm;
-            height: 19mm;
+            left: 1.2mm;
+            top: 4mm;
+            width: 10mm;
+            height: 30mm;
             text-align: center;
             overflow: hidden;
             line-height: 0;
           }
           .barcode svg {
             position: absolute;
-            width: 19mm;
-            height: 8.2mm;
+            width: 30mm;
+            height: 10mm;
             left: 0;
-            top: 19mm;
+            top: 30mm;
             transform: rotate(-90deg);
             transform-origin: top left;
           }

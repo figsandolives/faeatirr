@@ -9538,9 +9538,17 @@ function openProductModal(product = null) {
   const unitSelect = document.getElementById('productUnit');
   const countrySelect = document.getElementById('productCountryOrigin');
   const openingQtyInput = document.getElementById('productOpeningQty');
+  const fixedExpiryToggle = document.getElementById('productFixedExpiryEnabled');
+  const fixedExpiryFields = document.getElementById('productFixedExpiryFields');
+  const fixedProductionDateInput = document.getElementById('productFixedProductionDate');
+  const fixedExpiryDateInput = document.getElementById('productFixedExpiryDate');
 
   renderSelectOptions(unitSelect, { type: 'select', optionsPath: 'units' });
   renderSelectOptions(countrySelect, { type: 'select', optionsPath: 'countryOrigins' });
+  const syncFixedExpiryFields = () => {
+    if (!fixedExpiryFields || !fixedExpiryToggle) return;
+    fixedExpiryFields.classList.toggle('hidden', !fixedExpiryToggle.checked);
+  };
 
   if (product) {
     form.dataset.editId = product.id;
@@ -9562,11 +9570,19 @@ function openProductModal(product = null) {
     document.getElementById('productMinStock').value = product.minStock ?? '';
     document.getElementById('productReorderPoint').value = product.reorderPoint ?? '';
     document.getElementById('productMaxStock').value = product.maxStock ?? '';
+    if (fixedExpiryToggle) fixedExpiryToggle.checked = Boolean(product.fixedExpiryEnabled);
+    if (fixedProductionDateInput) fixedProductionDateInput.value = product.fixedProductionDate || '';
+    if (fixedExpiryDateInput) fixedExpiryDateInput.value = product.fixedExpiryDate || '';
   } else {
     codeInput.value = generateProductCode();
     barcodeInput.value = generateBarcodeValue();
     if (openingQtyInput) openingQtyInput.readOnly = false;
+    if (fixedExpiryToggle) fixedExpiryToggle.checked = false;
+    if (fixedProductionDateInput) fixedProductionDateInput.value = '';
+    if (fixedExpiryDateInput) fixedExpiryDateInput.value = '';
   }
+  syncFixedExpiryFields();
+  if (fixedExpiryToggle) fixedExpiryToggle.onchange = syncFixedExpiryFields;
 
   setupUnitDefinitionControls('product', product);
 
@@ -9606,6 +9622,9 @@ function saveProduct() {
   const price = Number(document.getElementById('productPrice').value || 0);
   const unitId = document.getElementById('productUnit').value;
   const countryOriginId = document.getElementById('productCountryOrigin')?.value || null;
+  const fixedExpiryEnabled = Boolean(document.getElementById('productFixedExpiryEnabled')?.checked);
+  const fixedProductionDate = document.getElementById('productFixedProductionDate')?.value || '';
+  const fixedExpiryDate = document.getElementById('productFixedExpiryDate')?.value || '';
   const unitDefinitionQtyRaw = document.getElementById('productUnitDefinitionQty')?.value.trim() || '';
   const unitDefinitionUnitId = document.getElementById('productUnitDefinitionUnit')?.value || '';
   const openingQtyInput = Number(document.getElementById('productOpeningQty').value || 0);
@@ -9628,6 +9647,10 @@ function saveProduct() {
     els.productError.textContent = window.i18n.t('error');
     return;
   }
+  if (fixedExpiryEnabled && (!fixedProductionDate || !fixedExpiryDate)) {
+    els.productError.textContent = 'اختر تاريخ الإنتاج وتاريخ الانتهاء';
+    return;
+  }
   const unitDefinitionQty = unitDefinitionQtyRaw && unitDefinitionUnitId ? unitDefinitionQtyRaw : null;
   const unitDefinitionUnitIdFinal = unitDefinitionQtyRaw && unitDefinitionUnitId ? unitDefinitionUnitId : null;
 
@@ -9640,6 +9663,9 @@ function saveProduct() {
     price,
     unitId,
     countryOriginId: countryOriginId || null,
+    fixedExpiryEnabled,
+    fixedProductionDate: fixedExpiryEnabled ? fixedProductionDate : null,
+    fixedExpiryDate: fixedExpiryEnabled ? fixedExpiryDate : null,
     unitDefinitionQty,
     unitDefinitionUnitId: unitDefinitionUnitIdFinal,
     openingQty,
@@ -11722,14 +11748,15 @@ function bindProductionDateModal() {
 
 function openProductionDateModal() {
   if (!els.productionDateModal) return;
+  applyFixedExpiryToProductionDraft();
   if (els.productionDateError) {
     els.productionDateError.textContent = '';
   }
-  if (els.productionDateInput && state.productionDraft?.productionDate) {
-    els.productionDateInput.value = state.productionDraft.productionDate;
+  if (els.productionDateInput) {
+    els.productionDateInput.value = state.productionDraft?.productionDate || new Date().toISOString().slice(0, 10);
   }
-  if (els.expiryDateInput && state.productionDraft?.expiryDate) {
-    els.expiryDateInput.value = state.productionDraft.expiryDate;
+  if (els.expiryDateInput) {
+    els.expiryDateInput.value = state.productionDraft?.expiryDate || '';
   }
   els.productionDateModal.classList.remove('hidden');
 }
@@ -13171,6 +13198,15 @@ function getProductionInfoDefaults(entry) {
   };
 }
 
+function applyFixedExpiryToProductionDraft() {
+  const draft = state.productionDraft;
+  if (!draft?.item || draft.itemType !== 'product') return;
+  const product = state.cache.products?.[draft.item.id] || draft.item.item || {};
+  if (!product.fixedExpiryEnabled) return;
+  draft.productionDate = product.fixedProductionDate || draft.productionDate || '';
+  draft.expiryDate = product.fixedExpiryDate || draft.expiryDate || '';
+}
+
 function canSelectProductionItem(entry) {
   if (!state.productionDraft?.productionStaffId) {
     setProductionError('اختر موظف الإنتاج أولاً');
@@ -13205,6 +13241,7 @@ function openProductionItem(entry) {
   state.productionDraft.expiryDate = '';
   state.productionDraft.productInfoConfirmed = false;
   state.productionDraft.productInfoDraft = getProductionInfoDefaults(entry);
+  applyFixedExpiryToProductionDraft();
   state.productionDraft.issueId = null;
   state.productionDraft.issueSkipped = false;
   state.productionDraft.onDatesSelected = () => {
@@ -22109,68 +22146,67 @@ function setupDevicesCashiersSection() {
   const devicesPagination = ensureTablePaginationState('devicesCashiersDevices');
   const cashiersPagination = ensureTablePaginationState('devicesCashiersCashiers');
   section.innerHTML = `
-    <div class="grid two">
-      <div class="card">
-        <h2>${window.i18n.t('devices_open')}</h2>
-        <div class="row" style="justify-content: flex-end; margin: 12px 0;">
-          ${buildPageSizeControlHtml('devicesPageSize')}
-        </div>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>${window.i18n.t('device_id')}</th>
-              <th>${window.i18n.t('device_label')}</th>
-              <th>${window.i18n.t('type')}</th>
-              <th>${window.i18n.t('status')}</th>
-              <th>${window.i18n.t('branch')}</th>
-              <th>${window.i18n.t('actions')}</th>
-            </tr>
-          </thead>
-          <tbody id="devicesTable"></tbody>
-        </table>
-        ${buildPaginationBarHtml('devicesPageInfo', 'devicesPagination')}
+    <div class="card" id="currentDeviceCard"></div>
+    <div class="card">
+      <h2>${window.i18n.t('devices_open')}</h2>
+      <div class="row" style="justify-content: flex-end; margin: 12px 0;">
+        ${buildPageSizeControlHtml('devicesPageSize')}
       </div>
-      <div class="card">
-        <div class="row" style="justify-content: space-between;">
-          <h2>${window.i18n.t('cashiers')}</h2>
-          <div class="row">
-            <button id="cashiersTemplateBtn" type="button" class="btn ghost small">${window.i18n.t('download_template')}</button>
-            <button id="cashiersBulkBtn" type="button" class="btn ghost small">${window.i18n.t('bulk_import_cashiers')}</button>
-            <input id="cashiersBulkInput" type="file" accept=".xlsx,.xls" class="hidden" />
-          </div>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>${window.i18n.t('device_id')}</th>
+            <th>${window.i18n.t('device_label')}</th>
+            <th>${window.i18n.t('type')}</th>
+            <th>${window.i18n.t('status')}</th>
+            <th>${window.i18n.t('branch')}</th>
+            <th>${window.i18n.t('actions')}</th>
+          </tr>
+        </thead>
+        <tbody id="devicesTable"></tbody>
+      </table>
+      ${buildPaginationBarHtml('devicesPageInfo', 'devicesPagination')}
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <h2>${window.i18n.t('cashiers')}</h2>
+        <div class="row">
+          <button id="cashiersTemplateBtn" type="button" class="btn ghost small">${window.i18n.t('download_template')}</button>
+          <button id="cashiersBulkBtn" type="button" class="btn ghost small">${window.i18n.t('bulk_import_cashiers')}</button>
+          <input id="cashiersBulkInput" type="file" accept=".xlsx,.xls" class="hidden" />
         </div>
-        <form id="cashierForm" class="grid two">
-          <div>
-            <label class="tag" for="cashierName">${window.i18n.t('cashier_name')}</label>
-            <input id="cashierName" class="input" />
-          </div>
-          <div>
-            <label class="tag" for="cashierCode">${window.i18n.t('cashier_code')}</label>
-            <div class="row">
-              <input id="cashierCode" class="input" />
-              <button id="generateCashierCode" type="button" class="btn ghost small">${window.i18n.t('generate_code')}</button>
-            </div>
-          </div>
-          <div class="row">
-            <button type="submit" class="btn primary">${window.i18n.t('add_cashier')}</button>
-          </div>
-        </form>
-        <p id="cashiersBulkStatus" class="helper" style="margin-top: 10px;"></p>
-        <div class="row" style="justify-content: flex-end; margin-top: 12px;">
-          ${buildPageSizeControlHtml('cashiersPageSize')}
-        </div>
-        <table class="table" style="margin-top: 12px;">
-          <thead>
-            <tr>
-              <th>${window.i18n.t('cashier_name')}</th>
-              <th>${window.i18n.t('cashier_code')}</th>
-              <th>${window.i18n.t('actions')}</th>
-            </tr>
-          </thead>
-          <tbody id="cashiersTable"></tbody>
-        </table>
-        ${buildPaginationBarHtml('cashiersPageInfo', 'cashiersPagination')}
       </div>
+      <form id="cashierForm" class="grid two">
+        <div>
+          <label class="tag" for="cashierName">${window.i18n.t('cashier_name')}</label>
+          <input id="cashierName" class="input" />
+        </div>
+        <div>
+          <label class="tag" for="cashierCode">${window.i18n.t('cashier_code')}</label>
+          <div class="row">
+            <input id="cashierCode" class="input" />
+            <button id="generateCashierCode" type="button" class="btn ghost small">${window.i18n.t('generate_code')}</button>
+          </div>
+        </div>
+        <div class="row">
+          <button type="submit" class="btn primary">${window.i18n.t('add_cashier')}</button>
+        </div>
+      </form>
+      <p id="cashiersBulkStatus" class="helper" style="margin-top: 10px;"></p>
+      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+        ${buildPageSizeControlHtml('cashiersPageSize')}
+      </div>
+      <table class="table" style="margin-top: 12px;">
+        <thead>
+          <tr>
+            <th>${window.i18n.t('cashier_name')}</th>
+            <th>${window.i18n.t('cashier_code')}</th>
+            <th>${window.i18n.t('actions')}</th>
+          </tr>
+        </thead>
+        <tbody id="cashiersTable"></tbody>
+      </table>
+      ${buildPaginationBarHtml('cashiersPageInfo', 'cashiersPagination')}
     </div>
   `;
 
@@ -22239,6 +22275,7 @@ function renderDevicesCashiers() {
   const devices = state.cache.devices || {};
   const statuses = state.cache.status || {};
   const branches = state.cache.branches || {};
+  renderCurrentDeviceCard(devices, statuses, branches);
 
   devicesTable.innerHTML = '';
   const deviceEntries = Object.entries(devices).filter(([id, device]) => {
@@ -22276,6 +22313,22 @@ function renderDevicesCashiers() {
       const branchNameAr = branchId ? branches[branchId]?.nameAr || branches[branchId]?.name : null;
       const branchNameEn = branchId ? branches[branchId]?.nameEn || branches[branchId]?.name : null;
       db.ref(`devices/${id}`).update({ branchId, branchNameAr, branchNameEn });
+      if (branchId) {
+        db.ref(`registeredDevices/${id}`).update({
+          id,
+          label: device.label || '',
+          branch: branchNameAr,
+          branchId,
+          branchNameAr,
+          branchNameEn,
+          updatedAt: serverTime
+        });
+      } else {
+        db.ref(`registeredDevices/${id}`).remove();
+      }
+      if (id === (state.deviceId || getDeviceId())) {
+        syncCurrentDeviceBranchLocal(branchId, branchNameAr);
+      }
     });
 
     const labelInput = document.createElement('input');
@@ -22290,6 +22343,10 @@ function renderDevicesCashiers() {
     unassignBtn.textContent = window.i18n.t('unassign');
     unassignBtn.addEventListener('click', () => {
       db.ref(`devices/${id}`).update({ branchId: null, branchName: null, branchNameAr: null, branchNameEn: null });
+      db.ref(`registeredDevices/${id}`).remove();
+      if (id === (state.deviceId || getDeviceId())) {
+        syncCurrentDeviceBranchLocal('', '');
+      }
     });
 
     const deleteBtn = document.createElement('button');
@@ -22380,6 +22437,124 @@ function renderDevicesCashiers() {
     });
 
     cashiersTable.appendChild(row);
+  });
+}
+
+function getBranchNameForDevice(device, branches = state.cache.branches || {}) {
+  if (!device) return '';
+  const branchId = device.branchId || '';
+  const branch = branchId ? branches[branchId] : null;
+  return device.branchNameAr || device.branchName || getLocalizedName(branch) || branch?.name || '';
+}
+
+function buildBranchOptionsHtml(selectedBranchId = '') {
+  const branches = state.cache.branches || {};
+  const options = Object.entries(branches).map(([id, branch]) => {
+    const name = getLocalizedName(branch) || branch?.name || id;
+    return `<option value="${escapeHtml(id)}" ${id === selectedBranchId ? 'selected' : ''}>${escapeHtml(name)}</option>`;
+  }).join('');
+  return `<option value="">غير مرتبط</option>${options}`;
+}
+
+function syncCurrentDeviceBranchLocal(branchId, branchName) {
+  if (branchId && branchName) {
+    localStorage.setItem('deviceBranchId', branchId);
+    localStorage.setItem('deviceBranch', branchName);
+  } else {
+    localStorage.removeItem('deviceBranchId');
+    localStorage.removeItem('deviceBranch');
+  }
+}
+
+function getDeviceBranchPayload(branchId) {
+  const branches = state.cache.branches || {};
+  const branch = branchId ? branches[branchId] : null;
+  const branchNameAr = branch ? (branch.nameAr || branch.name || '') : null;
+  const branchNameEn = branch ? (branch.nameEn || branch.name || '') : null;
+  return { branchId: branchId || null, branchNameAr, branchNameEn, branchName: branchNameAr };
+}
+
+function renderCurrentDeviceCard(devices = {}, statuses = {}, branches = {}) {
+  const card = document.getElementById('currentDeviceCard');
+  if (!card) return;
+  const deviceId = state.deviceId || getDeviceId();
+  const device = devices[deviceId] || {};
+  const status = statuses[deviceId] || {};
+  const branchName = getBranchNameForDevice(device, branches);
+  const isLinked = Boolean(device.branchId || branchName);
+  const isOnline = Boolean(status.online);
+  const pageLabel = device.page === 'cashier'
+    ? window.i18n.t('cashier')
+    : device.page === 'accounting'
+      ? window.i18n.t('accounting_and_inventory')
+      : '-';
+
+  card.innerHTML = `
+    <div class="row" style="justify-content: space-between; align-items: flex-start;">
+      <div>
+        <h2>الجهاز الحالي</h2>
+        <p class="helper">استخدم هذه البطاقة لربط هذا الجهاز مباشرة بفرع حتى يفتح الكاشير بدون رسالة الجهاز غير معرف.</p>
+      </div>
+      <span class="badge ${isLinked ? 'online' : 'offline'}">${isLinked ? 'مرتبط' : 'غير مرتبط'}</span>
+    </div>
+    <div class="grid two" style="margin-top: 14px;">
+      <div>
+        <label class="tag">رقم الجهاز</label>
+        <div class="input" style="background:#f8fafc; overflow-wrap:anywhere;">${escapeHtml(deviceId)}</div>
+      </div>
+      <div>
+        <label class="tag">${window.i18n.t('status')}</label>
+        <div class="input" style="background:#f8fafc;">
+          <span class="badge ${isOnline ? 'online' : 'offline'}">${window.i18n.t(isOnline ? 'online' : 'offline')}</span>
+          <span class="helper" style="margin-inline-start: 8px;">${pageLabel}</span>
+        </div>
+      </div>
+      <div>
+        <label class="tag">الفرع الحالي</label>
+        <div class="input" style="background:#f8fafc;">${escapeHtml(branchName || 'غير مرتبط')}</div>
+      </div>
+      <div>
+        <label class="tag" for="currentDeviceBranchSelect">ربط الجهاز الحالي بفرع</label>
+        <select id="currentDeviceBranchSelect" class="input">${buildBranchOptionsHtml(device.branchId || localStorage.getItem('deviceBranchId') || '')}</select>
+      </div>
+    </div>
+    <div class="row" style="margin-top: 14px;">
+      <button id="saveCurrentDeviceBranchBtn" type="button" class="btn primary">حفظ ربط الجهاز الحالي</button>
+      <button id="clearCurrentDeviceBranchBtn" type="button" class="btn danger">إلغاء ربط الجهاز الحالي</button>
+    </div>
+  `;
+
+  card.querySelector('#saveCurrentDeviceBranchBtn')?.addEventListener('click', async () => {
+    const branchId = card.querySelector('#currentDeviceBranchSelect')?.value || '';
+    if (!branchId) {
+      alert('اختر الفرع أولاً');
+      return;
+    }
+    const payload = getDeviceBranchPayload(branchId);
+    const label = localStorage.getItem('deviceLabel') || `ADM-${deviceId.slice(-4)}`;
+    await db.ref(`devices/${deviceId}`).update({
+      label,
+      deviceId,
+      page: 'accounting',
+      lastSeen: serverTime,
+      ...payload
+    });
+    await db.ref(`registeredDevices/${deviceId}`).update({
+      id: deviceId,
+      label,
+      branch: payload.branchNameAr,
+      branchId,
+      branchNameAr: payload.branchNameAr,
+      branchNameEn: payload.branchNameEn,
+      updatedAt: serverTime
+    });
+    syncCurrentDeviceBranchLocal(branchId, payload.branchNameAr);
+  });
+
+  card.querySelector('#clearCurrentDeviceBranchBtn')?.addEventListener('click', async () => {
+    syncCurrentDeviceBranchLocal('', '');
+    await db.ref(`devices/${deviceId}`).update({ branchId: null, branchName: null, branchNameAr: null, branchNameEn: null });
+    await db.ref(`registeredDevices/${deviceId}`).remove();
   });
 }
 

@@ -216,6 +216,22 @@
           <label class="tag" for="productCountryOrigin" data-i18n="country_origin"></label>
           <select id="productCountryOrigin" class="input"></select>
         </div>
+        <div style="grid-column: 1 / -1;">
+          <label class="row" style="justify-content: flex-start; gap: 8px; font-weight: 700;">
+            <input id="productFixedExpiryEnabled" type="checkbox" />
+            <span>تاريخ صلاحية محدد</span>
+          </label>
+          <div id="productFixedExpiryFields" class="grid two hidden" style="margin-top: 10px;">
+            <div>
+              <label class="tag" for="productFixedProductionDate">تاريخ الإنتاج</label>
+              <input id="productFixedProductionDate" class="input" type="date" />
+            </div>
+            <div>
+              <label class="tag" for="productFixedExpiryDate">تاريخ الانتهاء</label>
+              <input id="productFixedExpiryDate" class="input" type="date" />
+            </div>
+          </div>
+        </div>
         <div id="productUnitDefinitionWrap" class="hidden" style="grid-column: 1 / -1;">
           <button type="button" id="productUnitDefinitionToggle" class="btn ghost small" data-i18n="unit_definition"></button>
           <div id="productUnitDefinitionFields" class="row hidden" style="margin-top: 8px; flex-wrap: wrap;">
@@ -592,5 +608,6 @@
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="translation.js"></script>
   <script src="accounting.js"></script>
+  <script src="label-print-bridge.js"></script>
 </body>
 </html>

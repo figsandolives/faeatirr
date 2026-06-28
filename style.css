@@ -132,6 +132,12 @@ textarea {
   box-shadow: var(--shadow);
 }
 
+.btn.label-app-btn {
+  background: #12352f;
+  color: #fff;
+  box-shadow: var(--shadow);
+}
+
 .btn.ghost {
   background: rgba(0, 0, 0, 0.04);
   border: 1px solid rgba(30, 25, 20, 0.15);

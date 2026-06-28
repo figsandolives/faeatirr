@@ -1,480 +1,327 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cashier</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <header class="topbar">
-    <div class="logo">
-      <img src="logo.png" alt="logo" />
-      <div>
-        <div class="tag" data-i18n="cashier"></div>
-        <strong id="branchDisplay">-</strong>
-      </div>
-    </div>
-    <div class="info">
-      <div>
-        <div class="tag" data-i18n="cashier_name"></div>
-        <div id="cashierDisplay">-</div>
-      </div>
-      <div>
-        <div class="tag" data-i18n="branch"></div>
-        <div id="branchName">-</div>
-      </div>
-      <div>
-        <div class="tag" data-i18n="device_id"></div>
-        <div id="deviceIdDisplay">-</div>
-      </div>
-    </div>
-    <div class="row">
-      <button class="btn ghost small" id="logoutBtn" data-i18n="logout"></button>
-      <button class="btn ghost small" data-lang="ar" data-i18n="arabic"></button>
-      <button class="btn ghost small" data-lang="en">English</button>
-    </div>
-  </header>
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>نظام إدارة المطاعم</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
 
-  <main class="cashier-shell">
-    <section id="ordersSection" class="card">
-      <div class="row" style="justify-content: space-between; align-items: center;">
-        <h2 data-i18n="orders"></h2>
-        <div class="row">
-          <input id="orderSearchInput" class="input" style="max-width: 260px;" data-i18n-placeholder="search_orders" />
-          <button id="newInvoiceBtn" class="btn primary" data-i18n="new_invoice"></button>
-          <button id="openTablesBtn" class="btn ghost" data-i18n="tables"></button>
-          <button id="openTransfersBtn" class="btn ghost" data-i18n="transfers"></button>
-        </div>
-      </div>
-      <table class="table" style="margin-top: 12px;">
-        <thead>
-          <tr>
-            <th data-i18n="order_number"></th>
-            <th data-i18n="date_time"></th>
-            <th data-i18n="customer_name"></th>
-            <th data-i18n="customer_phone"></th>
-            <th data-i18n="cashier_name"></th>
-            <th data-i18n="total"></th>
-            <th data-i18n="actions"></th>
-          </tr>
-        </thead>
-        <tbody id="ordersTable"></tbody>
-      </table>
-    </section>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
 
-    <section id="cashierTransfersSection" class="card hidden">
-      <div class="row" style="justify-content: space-between; align-items: center;">
-        <h2 data-i18n="transfers"></h2>
-        <button id="newTransferRequestBtn" class="btn primary" data-i18n="new_transfer_request"></button>
-      </div>
-      <table class="table" style="margin-top: 12px;">
-        <thead>
-          <tr>
-            <th data-i18n="transfer_request_number"></th>
-            <th data-i18n="date_time"></th>
-            <th data-i18n="status"></th>
-            <th data-i18n="actions"></th>
-          </tr>
-        </thead>
-        <tbody id="transferRequestsTable"></tbody>
-      </table>
-      <table class="table" style="margin-top: 16px;">
-        <thead>
-          <tr>
-            <th data-i18n="transfer_number"></th>
-            <th data-i18n="date_time"></th>
-            <th data-i18n="status"></th>
-            <th data-i18n="actions"></th>
-          </tr>
-        </thead>
-        <tbody id="incomingTransfersTable"></tbody>
-      </table>
-      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
-        <button id="backToOrdersBtn" class="btn ghost" data-i18n="back"></button>
-      </div>
-    </section>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&amp;display=swap" rel="stylesheet">
+  <style>
+    body {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Cairo', sans-serif;
+    }
+    
+    html, body, #app {
+      height: 100%;
+      width: 100%;
+    }
+    
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      max-width: 90%;
+      max-height: 90%;
+      overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+    
+    .sidebar-item {
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+    
+    .sidebar-item:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+      transform: translateX(-5px);
+    }
+    
+    .sidebar-item.active {
+      background-color: rgba(255, 255, 255, 0.2);
+    }
+    
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #10b981;
+      color: white;
+      padding: 16px 24px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      z-index: 2000;
+      animation: slideIn 0.3s ease;
+    }
+    
+    .toast.error {
+      background: #ef4444;
+    }
+    
+    @keyframes slideIn {
+      from {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    
+    th {
+      background: #667eea;
+      color: white;
+      padding: 12px;
+      text-align: right;
+      font-weight: 600;
+    }
+    
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    tr:hover {
+      background-color: #f9fafb;
+    }
+    
+    .category-card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 12px;
+      padding: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    
+    .category-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+    }
+    
+    .product-card {
+      background: white;
+      border: 2px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    
+    .product-card:hover {
+      border-color: #667eea;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+    }
+    
+    .invoice-page {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: white;
+      z-index: 999;
+      overflow-y: auto;
+    }
+    
+    
+    .thermal-invoice {
+  width: 70mm;
+  margin: 0 auto;
+  padding: 5mm;
+  font-family: 'Cairo', sans-serif;
+  background: white;
+  font-size: 10px;
+}
+    
+    .quantity-input {
+      width: 60px;
+      text-align: center;
+      padding: 4px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
 
-    <section id="cashierTablesSection" class="card hidden">
-      <div class="row" style="justify-content: space-between; align-items: center;">
-        <h2 data-i18n="tables"></h2>
-        <button id="newTableBtn" class="btn primary" data-i18n="open_table"></button>
-      </div>
-      <div id="tablesList" class="grid three" style="margin-top: 12px;"></div>
-      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
-        <button id="backToOrdersFromTablesBtn" class="btn ghost" data-i18n="back"></button>
-      </div>
-    </section>
-  </main>
+    .invoice-product-toolbar {
+      display: flex;
+      align-items: stretch;
+      gap: 16px;
+      margin-bottom: 24px;
+      direction: ltr;
+    }
 
-  <div id="deviceOverlay" class="overlay hidden">
-    <div class="modal card">
-      <h2 data-i18n="device_not_assigned"></h2>
-      <p class="helper" data-i18n="waiting_for_assignment"></p>
-      <p id="deviceOverlayDeviceId" class="helper"></p>
-    </div>
-  </div>
+    .invoice-product-search {
+      flex: 1;
+      min-width: 0;
+      margin-bottom: 0;
+      direction: rtl;
+    }
 
-  <div id="cashierLogin" class="overlay">
-    <div class="modal card">
-      <h2 data-i18n="login_title"></h2>
-      <input id="cashierCodeInput" class="input" data-i18n-placeholder="enter_code" />
-      <button id="cashierLoginBtn" class="btn primary" data-i18n="login"></button>
-      <p id="cashierLoginError" class="helper" style="color: var(--danger);"></p>
-    </div>
-  </div>
+    .invoice-total-box {
+      min-width: 150px;
+      min-height: 54px;
+      background: white;
+      border: 2px solid #bfdbfe;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.12);
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 6px;
+      direction: ltr;
+      padding: 8px 14px;
+      white-space: nowrap;
+    }
 
-  <div id="orderDetailsOverlay" class="overlay hidden">
-    <div class="modal card" style="max-width: 560px; text-align: start;">
-      <h3 data-i18n="order_details"></h3>
-      <div id="orderDetailsBody"></div>
-      <button id="orderDetailsClose" class="btn ghost" data-i18n="cancel"></button>
-    </div>
-  </div>
+    .invoice-total-box.hidden {
+      display: none;
+    }
 
-  <div id="tableSelectModal" class="overlay hidden">
-    <div class="modal card" style="max-width: 680px; text-align: start;">
-      <h3 data-i18n="open_table"></h3>
-      <p class="helper" data-i18n="choose_table_number"></p>
-      <div id="tableSelectList" class="grid three" style="margin-top: 6px;"></div>
-      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
-        <button id="tableSelectCancelBtn" class="btn ghost" data-i18n="cancel"></button>
-      </div>
-    </div>
-  </div>
+    .invoice-total-value {
+      color: #2563eb;
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1;
+    }
 
-  <div id="tableCustomerTimingModal" class="overlay hidden">
-    <div class="modal card" style="max-width: 520px; text-align: start;">
-      <h3 data-i18n="add_customer_now_prompt_title"></h3>
-      <p class="helper" data-i18n="add_customer_now_prompt"></p>
-      <div class="row" style="justify-content: flex-end; margin-top: 8px;">
-        <button id="tableCustomerLaterBtn" class="btn ghost" data-i18n="add_later"></button>
-        <button id="tableCustomerNowBtn" class="btn primary" data-i18n="add_now"></button>
-      </div>
-      <div class="row" style="justify-content: flex-end;">
-        <button id="tableCustomerTimingCancelBtn" class="btn ghost small" data-i18n="cancel"></button>
-      </div>
-    </div>
-  </div>
+    .invoice-total-currency {
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
 
-  <div id="invoiceOverlay" class="overlay hidden">
-    <div class="modal invoice-modal" style="text-align: start;">
-      <div class="invoice-header">
-        <button id="invoiceCloseBtn" class="btn ghost small">×</button>
-        <h3 data-i18n="new_invoice"></h3>
-      </div>
+    .production-sticker {
+      width: 50mm;
+      height: 25mm;
+      box-sizing: border-box;
+      padding: 0.8mm 1.2mm 0.5mm;
+      overflow: hidden;
+      background: white;
+      color: #000;
+      border: 1px solid #d1d5db;
+      border-radius: 1.5mm;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+      font-family: Arial, Tahoma, sans-serif;
+      line-height: 1;
+    }
 
-      <div id="invoiceStepItems" class="invoice-step">
-        <div class="invoice-grid" style="margin-top: 12px;">
-          <div class="invoice-column invoice-panel">
-            <div class="row invoice-search" style="justify-content: space-between; align-items: center;">
-              <h4 data-i18n="products"></h4>
-              <div class="row" style="gap: 8px;">
-                <input id="invoiceSearchInput" class="input" data-i18n-placeholder="search_products" />
-                <button id="invoiceSearchBtn" class="btn ghost small" data-i18n="search"></button>
-              </div>
-            </div>
-            <div class="row" style="margin-top: 12px; justify-content: space-between; align-items: center;">
-              <button id="invoiceCategoryBack" class="btn ghost small" data-i18n="back" disabled></button>
-              <span id="invoiceCategoryPath" class="helper"></span>
-            </div>
-            <div class="invoice-catalog">
-              <div id="invoiceCategoryList" class="product-grid"></div>
-              <div id="invoiceProductList" class="product-grid"></div>
-            </div>
-          </div>
-          <div class="invoice-column invoice-panel cart-panel">
-            <h4 data-i18n="added_products"></h4>
-            <div id="invoiceCartList" class="invoice-cart invoice-cart-box"></div>
-            <button id="invoiceNextToDetails" class="btn primary invoice-next" data-i18n="next" disabled></button>
-          </div>
-        </div>
-      </div>
+    .sticker-names {
+      text-align: center;
+      line-height: 0.98;
+      margin-bottom: 0.25mm;
+      flex: 0 0 auto;
+    }
 
-      <div id="invoiceStepDetails" class="invoice-step hidden">
-        <div class="invoice-step-body compact">
-          <div class="stack invoice-form-stack">
-            <div>
-              <label class="tag" data-i18n="order_date"></label>
-              <input id="invoiceOrderDate" class="input" type="date" />
-            </div>
-            <div>
-              <label class="tag" data-i18n="delivery_time"></label>
-              <select id="invoiceDeliveryTime" class="input"></select>
-            </div>
-            <div>
-              <label class="tag" data-i18n="order_type"></label>
-              <select id="invoiceOrderType" class="input"></select>
-            </div>
-            <div id="invoicePickupBranchRow" class="hidden">
-              <label class="tag" data-i18n="pickup_branch"></label>
-              <select id="invoicePickupBranchSelect" class="input"></select>
-            </div>
-          </div>
-          <div class="row invoice-step-actions">
-            <button id="invoiceBackToItems" class="btn ghost" data-i18n="back"></button>
-            <button id="invoiceNextToCustomer" class="btn primary" data-i18n="next"></button>
-          </div>
-        </div>
-      </div>
+    .sticker-name-ar {
+      font-size: 7pt;
+      font-weight: 800;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-      <div id="invoiceStepCustomer" class="invoice-step hidden">
-        <div class="invoice-step-body">
-          <div class="row invoice-step-header" style="justify-content: space-between; align-items: center;">
-            <h4 data-i18n="customers"></h4>
-            <button id="addCustomerBtn" class="btn ghost small" data-i18n="add_customer"></button>
-          </div>
-          <div class="row invoice-search-row" style="margin-top: 12px;">
-            <input id="customerSearchInput" class="input" data-i18n-placeholder="search_customer_phone" />
-          </div>
-          <div class="customer-panels" style="margin-top: 12px;">
-            <div id="customerList" class="stack"></div>
-            <div id="selectedCustomerPanel" class="notice"></div>
-          </div>
-          <div class="row invoice-step-actions">
-            <button id="invoiceBackToDetails" class="btn ghost" data-i18n="back"></button>
-            <button id="invoiceNextToSummary" class="btn primary" data-i18n="next" disabled></button>
-          </div>
-        </div>
-      </div>
+    .sticker-name-en {
+      font-size: 4pt;
+      font-weight: 700;
+      direction: ltr;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-      <div id="invoiceStepSummary" class="invoice-step hidden">
-        <div class="invoice-step-body compact">
-          <div class="summary">
-            <div class="row" style="justify-content: space-between;">
-              <span data-i18n="subtotal"></span>
-              <strong id="invoiceSubtotal">0</strong>
-            </div>
-            <div class="row" style="justify-content: space-between;">
-              <span data-i18n="delivery_fee"></span>
-              <strong id="invoiceDeliveryFee">0</strong>
-            </div>
-            <div class="row" style="justify-content: space-between;">
-              <span data-i18n="discount"></span>
-              <strong id="invoiceDiscount">0</strong>
-            </div>
-            <div class="row" style="justify-content: space-between;">
-              <span data-i18n="total"></span>
-              <strong id="invoiceTotal">0</strong>
-            </div>
-          </div>
-          <div id="invoiceSummaryPaymentRow" style="margin-top: 10px;">
-            <label class="tag" data-i18n="payment_method"></label>
-            <select id="invoiceSummaryPaymentMethod" class="input" style="margin-top: 6px;"></select>
-          </div>
-          <div class="row invoice-step-actions">
-            <button id="applyManagerDiscountBtn" class="btn ghost small" data-i18n="apply_discount"></button>
-            <button id="invoiceBackToCustomer" class="btn ghost" data-i18n="back"></button>
-            <button id="invoiceSubmitBtn" class="btn primary" data-i18n="continue"></button>
-          </div>
-          <p id="invoiceSummaryMessage" class="helper"></p>
-        </div>
-      </div>
-    </div>
-  </div>
+    .sticker-ingredients {
+      font-size: 3.7pt;
+      font-weight: 700;
+      line-height: 1.05;
+      height: 4mm;
+      overflow: hidden;
+      text-align: right;
+      flex: 0 0 auto;
+    }
 
-  <div id="transferRequestModal" class="overlay hidden">
-    <div class="modal card" style="max-width: 900px; text-align: start;">
-      <div class="row" style="justify-content: space-between; align-items: center;">
-        <h3 data-i18n="transfer_request"></h3>
-        <button id="transferRequestCloseBtn" class="btn ghost small">×</button>
-      </div>
-      <div class="grid two" style="margin-top: 12px;">
-        <div>
-          <label class="tag" data-i18n="cashier_name"></label>
-          <input id="transferRequestCashier" class="input" readonly />
-        </div>
-        <div>
-          <label class="tag" data-i18n="branch"></label>
-          <input id="transferRequestBranch" class="input" readonly />
-        </div>
-      </div>
-      <div class="row" style="margin-top: 12px;">
-        <input id="transferRequestSearchInput" class="input" style="max-width: 320px;" data-i18n-placeholder="search_products" />
-        <button id="transferRequestSearchBtn" class="btn ghost small" data-i18n="search"></button>
-      </div>
-      <div id="transferRequestSearchResults" class="grid two" style="margin-top: 12px;"></div>
-      <div style="margin-top: 16px;">
-        <h4 data-i18n="items"></h4>
-        <div class="transfer-board">
-          <div class="transfer-column unassigned">
-            <div class="row" style="justify-content: space-between; align-items: center;">
-              <h5 data-i18n="unassigned_items"></h5>
-              <span class="helper" id="transferRequestUnassignedCount">0</span>
-            </div>
-            <div id="transferRequestItemsList" class="transfer-drop-list" data-group="unassigned"></div>
-          </div>
-          <div class="transfer-columns-grid">
-            <div class="transfer-column">
-              <div class="row" style="justify-content: space-between; align-items: center;">
-                <h5 data-i18n="transfer_group_sweets"></h5>
-              </div>
-              <div id="transferRequestGroup-sweets" class="transfer-drop-list" data-group="sweets"></div>
-            </div>
-            <div class="transfer-column">
-              <div class="row" style="justify-content: space-between; align-items: center;">
-                <h5 data-i18n="transfer_group_tableware"></h5>
-              </div>
-              <div id="transferRequestGroup-tableware" class="transfer-drop-list" data-group="tableware"></div>
-            </div>
-            <div class="transfer-column">
-              <div class="row" style="justify-content: space-between; align-items: center;">
-                <h5 data-i18n="transfer_group_supplies"></h5>
-              </div>
-              <div id="transferRequestGroup-supplies" class="transfer-drop-list" data-group="supplies"></div>
-            </div>
-            <div class="transfer-column">
-              <div class="row" style="justify-content: space-between; align-items: center;">
-                <h5 data-i18n="transfer_group_other"></h5>
-              </div>
-              <div id="transferRequestGroup-other" class="transfer-drop-list" data-group="other"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="row" style="justify-content: flex-end; margin-top: 16px;">
-        <button id="transferRequestCancelBtn" class="btn ghost" data-i18n="cancel"></button>
-        <button id="transferRequestSubmitBtn" class="btn primary" data-i18n="transfer_request"></button>
-      </div>
-      <p id="transferRequestError" class="helper form-error"></p>
-    </div>
-  </div>
+    .sticker-meta-row,
+    .sticker-date-row {
+      font-size: 3.8pt;
+      font-weight: 800;
+      line-height: 1;
+      display: flex;
+      justify-content: space-between;
+      gap: 0.7mm;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
 
-  <div id="transferDetailsModal" class="overlay hidden">
-    <div class="modal card" style="max-width: 1080px; text-align: start; max-height: 92vh; overflow: auto;">
-      <div class="row" style="justify-content: space-between; align-items: center;">
-        <h3 data-i18n="transfer_details"></h3>
-        <button id="transferDetailsCloseBtn" class="btn ghost small">×</button>
-      </div>
-      <div id="transferDetailsMeta" class="grid two" style="margin-top: 12px;"></div>
-      <div class="row" style="justify-content: flex-end; margin-top: 10px;">
-        <button id="transferDetailsPrintFullBtn" class="btn ghost small" data-i18n="print_full_report"></button>
-      </div>
-      <div id="transferDetailsColumns" class="transfer-columns-grid" style="margin-top: 12px;"></div>
-    </div>
-  </div>
+    .sticker-barcode-wrap {
+      height: 4.6mm;
+      margin-top: 0.15mm;
+      direction: ltr;
+      flex: 0 0 auto;
+    }
 
-  <div id="transferReceiveModal" class="overlay hidden">
-    <div class="modal card" style="max-width: 900px; text-align: start;">
-      <div class="row" style="justify-content: space-between; align-items: center;">
-        <h3 data-i18n="receive_transfer"></h3>
-        <button id="transferReceiveCloseBtn" class="btn ghost small">×</button>
-      </div>
-      <div class="grid two" style="margin-top: 12px;">
-        <div>
-          <label class="tag" data-i18n="cashier_name"></label>
-          <input id="transferReceiveCashier" class="input" readonly />
-        </div>
-        <div>
-          <label class="tag" data-i18n="branch"></label>
-          <input id="transferReceiveBranch" class="input" readonly />
-        </div>
-        <div>
-          <label class="tag" data-i18n="transfer_number"></label>
-          <input id="transferReceiveNumber" class="input" readonly />
-        </div>
-      </div>
-      <div style="margin-top: 16px;">
-        <h4 data-i18n="items"></h4>
-        <div id="transferReceiveItemsList" class="grid two"></div>
-      </div>
-      <div class="row" style="justify-content: flex-end; margin-top: 16px;">
-        <button id="transferReceiveCancelBtn" class="btn ghost" data-i18n="cancel"></button>
-        <button id="transferReceiveSubmitBtn" class="btn primary" data-i18n="receive_action"></button>
-      </div>
-      <p id="transferReceiveError" class="helper form-error"></p>
-    </div>
-  </div>
+    .sticker-barcode {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
 
-  <div id="qtyModal" class="overlay hidden">
-    <div class="modal card" style="max-width: 360px; text-align: start;">
-      <h3 id="qtyModalTitle">-</h3>
-      <div id="qtyModalUnit" class="tag" style="margin-top: 8px;"></div>
-      <div id="qtyModalStock" class="helper"></div>
-      <div class="qty-display" id="qtyModalDisplay">0</div>
-      <div class="keypad">
-        <button data-key="1">1</button>
-        <button data-key="2">2</button>
-        <button data-key="3">3</button>
-        <button data-key="4">4</button>
-        <button data-key="5">5</button>
-        <button data-key="6">6</button>
-        <button data-key="7">7</button>
-        <button data-key="8">8</button>
-        <button data-key="9">9</button>
-        <button data-key=",">,</button>
-        <button data-key="0">0</button>
-        <button data-key="back">⌫</button>
-      </div>
-      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
-        <button id="qtyModalCancel" class="btn ghost" data-i18n="cancel"></button>
-        <button id="qtyModalConfirm" class="btn primary" data-i18n="add"></button>
-      </div>
-      <p id="qtyModalError" class="helper form-error"></p>
-    </div>
-  </div>
+    .sticker-barcode-text {
+      direction: ltr;
+      text-align: center;
+      font-size: 3.4pt;
+      font-weight: 700;
+      line-height: 1;
+      margin-top: 0;
+      flex: 0 0 auto;
+    }
 
-  <div id="customerModal" class="overlay hidden">
-    <div class="modal card" style="max-width: 520px; text-align: start;">
-      <h3 data-i18n="add_customer"></h3>
-      <div class="grid two">
-        <div>
-          <label class="tag" data-i18n="customer_name"></label>
-          <input id="customerNameInput" class="input" />
-        </div>
-        <div>
-          <label class="tag" data-i18n="customer_phone"></label>
-          <input id="customerPhoneInput" class="input" />
-        </div>
-      </div>
-      <label class="row" style="gap: 8px; margin-top: 8px;">
-        <input type="checkbox" id="customerNameOnlyToggle" />
-        <span data-i18n="name_only"></span>
-      </label>
-      <div id="customerAddressFields" style="margin-top: 12px;">
-        <label class="tag" data-i18n="delivery_zone"></label>
-        <details id="customerZonePicker" class="multi-select-filter" style="margin-top: 8px;">
-          <summary id="customerZonePickerSummary" class="input" data-i18n="select_zone"></summary>
-          <div class="multi-select-panel">
-            <input id="customerZonePickerSearch" class="input" data-i18n-placeholder="search_zone" />
-            <div id="customerZonePickerOptions" class="multi-select-options" style="margin-top: 8px;"></div>
-          </div>
-        </details>
-        <input id="customerZoneInput" type="hidden" />
-        <label class="tag" data-i18n="address_details" style="margin-top: 8px;"></label>
-        <textarea id="customerAddressInput" class="input" rows="3"></textarea>
-      </div>
-      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
-        <button id="customerModalCancel" class="btn ghost" data-i18n="cancel"></button>
-        <button id="customerModalSave" class="btn primary" data-i18n="add"></button>
-      </div>
-      <p id="customerModalError" class="helper form-error"></p>
-    </div>
-  </div>
+    @media (max-width: 768px) {
+      .invoice-product-toolbar {
+        flex-direction: column;
+      }
 
-  <div id="managerDiscountModal" class="overlay hidden">
-    <div class="modal card" style="max-width: 420px; text-align: start;">
-      <h3 data-i18n="apply_discount"></h3>
-      <label class="tag" data-i18n="manager_code"></label>
-      <input id="managerCodeInput" class="input" type="password" data-i18n-placeholder="enter_code" />
-      <label class="tag" data-i18n="discount_type"></label>
-      <select id="managerDiscountType" class="input">
-        <option value="amount" data-i18n="discount_amount"></option>
-        <option value="percent" data-i18n="discount_percent"></option>
-      </select>
-      <label class="tag" data-i18n="discount_amount" style="margin-top: 8px;"></label>
-      <input id="managerDiscountValue" class="input" type="number" />
-      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
-        <button id="managerDiscountCancel" class="btn ghost" data-i18n="cancel"></button>
-        <button id="managerDiscountApply" class="btn primary" data-i18n="apply"></button>
-      </div>
-      <p id="managerDiscountError" class="helper form-error"></p>
-    </div>
-  </div>
+      .invoice-total-box {
+        align-self: flex-start;
+      }
+    }
 
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-  <script src="translation.js"></script>
-  <script src="cashier.js"></script>
-</body>
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+ </head>
+ <body>
+  <div id="app"></div>
+  <script src="cashier.js" defer></script>
+  <script src="label-print-bridge.js" defer></script>
+ </body>
 </html>

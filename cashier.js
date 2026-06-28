@@ -33,6 +33,7 @@
     let allProducts = [];
     let parsedExcelData = [];
     let allCategories = [];
+    let allProductCategories = [];
     let allCustomers = [];
     let allOrders = [];
     let allCashiers = [];
@@ -264,6 +265,7 @@
         allOrders,
         allCashiers,
         allProducts,
+        allProductCategories,
         allProductInfos,
         allProductPriceChanges,
         allDeliveryPrices,
@@ -288,6 +290,7 @@
       allOrders = Array.isArray(cache.allOrders) ? cache.allOrders : [];
       allCashiers = Array.isArray(cache.allCashiers) ? cache.allCashiers : [];
       allProducts = Array.isArray(cache.allProducts) ? cache.allProducts : [];
+      allProductCategories = Array.isArray(cache.allProductCategories) ? cache.allProductCategories : [];
       allProductInfos = Array.isArray(cache.allProductInfos) ? cache.allProductInfos : [];
       allProductPriceChanges = Array.isArray(cache.allProductPriceChanges) ? cache.allProductPriceChanges : [];
       allDeliveryPrices = cache.allDeliveryPrices || {};
@@ -386,6 +389,7 @@
         ['orders', 'الطلبات'],
         ['cashiers', 'الكاشيرات'],
         ['products', 'المنتجات'],
+        ['productCategories', 'تصنيفات منتجات الموقع الجديد'],
         ['productInfos', 'معلومات المنتجات'],
         ['productPriceChanges', 'سجل الأسعار'],
         ['deliveryPrices', 'أسعار التوصيل'],
@@ -427,6 +431,7 @@
           ordersSnapshot,
           cashiersSnapshot,
           productsSnapshot,
+          productCategoriesSnapshot,
           productInfosSnapshot,
           productPriceChangesSnapshot,
           deliveryPricesSnapshot,
@@ -452,6 +457,12 @@
         );
         allCashiers = toArray(cashiersSnapshot);
         allProducts = toArray(productsSnapshot);
+        allProductCategories = toArray(productCategoriesSnapshot).map(category => ({
+          ...category,
+          productIds: Array.isArray(category.productIds)
+            ? category.productIds
+            : (category.productIds ? Object.values(category.productIds) : [])
+        }));
         allProductInfos = toArray(productInfosSnapshot);
         allProductPriceChanges = toArray(productPriceChangesSnapshot).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
         allDeliveryPrices = deliveryPricesSnapshot.val() || {};
@@ -1098,10 +1109,23 @@ function setupRealtimeListeners() {
   });
 
   // 5. مراقبة الأقسام (Categories)
-  db.ref('categories').on('value', (snapshot) => {
-    allCategories = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
-    refreshUI();
-  });
+	  db.ref('categories').on('value', (snapshot) => {
+	    allCategories = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
+	    refreshUI();
+	  });
+
+	  db.ref('productCategories').on('value', (snapshot) => {
+	    allProductCategories = snapshot.val()
+	      ? Object.entries(snapshot.val()).map(([id, data]) => ({
+	          id,
+	          ...data,
+	          productIds: Array.isArray(data.productIds)
+	            ? data.productIds
+	            : (data.productIds ? Object.values(data.productIds) : [])
+	        }))
+	      : [];
+	    refreshUI();
+	  });
 
   // 6. مراقبة تصنيفات المخزون
   db.ref('inventoryCategories').on('value', (snapshot) => {
@@ -1554,7 +1578,7 @@ function refreshUI() {
         return;
       }
       
-      document.querySelector('.modal-overlay').remove();
+      document.querySelector('.modal-overlay')?.remove();
       await enterAccountingWithCachedData();
     }
 
@@ -1756,9 +1780,11 @@ function refreshUI() {
 	              <button onclick="startNewInvoiceFromCashier()" class="bg-green-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-green-700 transition">
 	                ➕ فاتورة جديدة
 	              </button>
-	              <button onclick="showShortageRequestsPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
-	                طلب نواقص
-	              </button>
+	              ${isShortageRequestBranch() ? `
+	                <button onclick="showShortageRequestsPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
+	                  طلب نواقص
+	                </button>
+	              ` : ''}
 	            </div>
               ${currentBranch === 'اليرموك' && hasOpenDailySession() ? `
                 <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-5 text-blue-800 font-bold">
@@ -1856,6 +1882,11 @@ function refreshUI() {
 	      return branch || 'cashier_branch';
 	    }
 
+	    function isShortageRequestBranch(branch = currentBranch) {
+	      const name = String(branch || '').trim();
+	      return name.includes('يرموك') || name.includes('حصانية');
+	    }
+
 	    function getShortageBranchLabel(request) {
 	      return request.branch || request.branchName || currentBranch || request.branchId || '-';
 	    }
@@ -1880,6 +1911,10 @@ function refreshUI() {
 	    }
 
 	    function showShortageRequestsPage() {
+	      if (!isShortageRequestBranch()) {
+	        showToast('طلب النواقص متاح فقط لفرعي أبو الحصانية واليرموك', true);
+	        return;
+	      }
 	      const existingPage = document.getElementById('shortageRequestsPage');
 	      if (existingPage) existingPage.remove();
 	      currentScreen = 'cashier';
@@ -2026,7 +2061,7 @@ function refreshUI() {
 	    function renderShortageSearchResultsHtml() {
 	      const rows = getShortageSearchRows();
 	      if (!shortageSearchTerm.trim()) {
-	        return '<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">اكتب للبحث عن الأصناف</div>';
+	        return renderShortageCategoryGridHtml();
 	      }
 	      if (!rows.length) {
 	        return '<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">لا توجد نتائج</div>';
@@ -2039,6 +2074,92 @@ function refreshUI() {
 	              <div class="font-bold mb-1">${escapeHtml(item.nameAr || item.name || item.nameEn || '-')}</div>
 	              <div class="text-purple-700 font-bold text-sm">${item.itemType === 'material' ? 'مواد مخزون' : 'منتج'}</div>
 	              <div class="text-gray-500 text-xs" dir="ltr">${escapeHtml(item.barcode || item.code || '')}</div>
+	            </div>
+	          `).join('')}
+	        </div>
+	      `;
+	    }
+
+	    function renderShortageCategoryGridHtml() {
+	      if (shortageSearchMode === 'materials') {
+	        const rootCategories = allInventoryCategories.filter(c => !c.parentId);
+	        return `
+	          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+	            ${rootCategories.length ? rootCategories.map(category => `
+	              <div class="category-card" onclick="showShortageMaterialCategory('${category.id}')">
+	                <div class="text-4xl mb-2">📁</div>
+	                <div class="font-bold text-lg">${escapeHtml(category.nameAr || category.name || category.nameEn || '-')}</div>
+	              </div>
+	            `).join('') : '<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">لا توجد أقسام مواد مخزون</div>'}
+	          </div>
+	        `;
+	      }
+	      const rootCategories = getCashierCategoryRows().filter(c => !c.parentId);
+	      return `
+	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+	          ${rootCategories.length ? rootCategories.map(category => `
+	            <div class="category-card" onclick="showShortageProductCategory('${category.id}')">
+	              <div class="text-4xl mb-2">📁</div>
+	              <div class="font-bold text-lg">${escapeHtml(category.nameAr || category.name || category.nameEn || '-')}</div>
+	            </div>
+	          `).join('') : '<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">لا توجد أقسام منتجات</div>'}
+	        </div>
+	      `;
+	    }
+
+	    function showShortageProductCategory(categoryId) {
+	      const categories = getCashierCategoryRows();
+	      const category = categories.find(c => c.id === categoryId);
+	      const subCategories = categories.filter(c => c.parentId === categoryId);
+	      const products = getCashierProductsForCategory(categoryId);
+	      const results = document.getElementById('shortageSearchResults');
+	      if (!results) return;
+	      results.innerHTML = `
+	        <button onclick="setShortageSearchTerm('')" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">← رجوع</button>
+	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(category?.nameAr || category?.name || '-')}</h3>
+	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+	          ${subCategories.map(subCat => `
+	            <div class="category-card" onclick="showShortageProductCategory('${subCat.id}')">
+	              <div class="text-3xl mb-2">📁</div>
+	              <div class="font-bold">${escapeHtml(subCat.nameAr || subCat.name || '-')}</div>
+	            </div>
+	          `).join('')}
+	          ${products.map(prod => `
+	            <div class="product-card" onclick="addItemToShortage('product', '${prod.id}')">
+	              <div class="text-4xl mb-2">📦</div>
+	              <div class="font-bold mb-1">${escapeHtml(prod.nameAr || prod.name || prod.nameEn || '-')}</div>
+	              <div class="text-purple-700 font-bold text-sm">منتج</div>
+	            </div>
+	          `).join('')}
+	        </div>
+	      `;
+	    }
+
+	    function showShortageMaterialCategory(categoryId) {
+	      const category = allInventoryCategories.find(c => c.id === categoryId);
+	      const subCategories = allInventoryCategories.filter(c => c.parentId === categoryId);
+	      const categoryItemIds = new Set((Array.isArray(category?.productIds) ? category.productIds : Object.values(category?.productIds || {})).map(String));
+	      const materials = allStockMaterials.filter(item => (
+	        String(item.categoryId || '') === String(categoryId)
+	        || categoryItemIds.has(String(item.id))
+	      ));
+	      const results = document.getElementById('shortageSearchResults');
+	      if (!results) return;
+	      results.innerHTML = `
+	        <button onclick="setShortageSearchTerm('')" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">← رجوع</button>
+	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(category?.nameAr || category?.name || '-')}</h3>
+	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+	          ${subCategories.map(subCat => `
+	            <div class="category-card" onclick="showShortageMaterialCategory('${subCat.id}')">
+	              <div class="text-3xl mb-2">📁</div>
+	              <div class="font-bold">${escapeHtml(subCat.nameAr || subCat.name || '-')}</div>
+	            </div>
+	          `).join('')}
+	          ${materials.map(item => `
+	            <div class="product-card" onclick="addItemToShortage('material', '${item.id}')">
+	              <div class="text-4xl mb-2">🧱</div>
+	              <div class="font-bold mb-1">${escapeHtml(item.nameAr || item.name || item.nameEn || '-')}</div>
+	              <div class="text-purple-700 font-bold text-sm">مواد مخزون</div>
 	            </div>
 	          `).join('')}
 	        </div>
@@ -2177,7 +2298,6 @@ function refreshUI() {
 	      };
 	      try {
 	        await db.ref(`transferRequests/${id}`).set(payload);
-	        allTransferRequests.unshift(payload);
 	        closeShortageDraftPage();
 	        showShortageSuccessMessage();
 	      } catch (error) {
@@ -2388,11 +2508,34 @@ function refreshUI() {
       showOrderTypeSelection();
     }
     
-    function renderCategoriesForInvoice() {
-      const rootCategories = allCategories.filter(c => !c.parentId);
-      
-      return `
-        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="categoriesGrid">
+	    function getCashierCategoryRows() {
+	      const rows = allProductCategories.length ? allProductCategories : allCategories;
+	      return rows.map(category => ({
+	        ...category,
+	        nameAr: category.nameAr || category.name || '',
+	        nameEn: category.nameEn || '',
+	        productIds: Array.isArray(category.productIds)
+	          ? category.productIds
+	          : (category.productIds ? Object.values(category.productIds) : [])
+	      }));
+	    }
+
+	    function getCashierProductsForCategory(categoryId) {
+	      const category = getCashierCategoryRows().find(c => c.id === categoryId);
+	      const categoryProductIds = new Set((category?.productIds || []).map(id => String(id)));
+	      return allProducts.filter(product => (
+	        String(product.categoryId || '') === String(categoryId)
+	        || categoryProductIds.has(String(product.id))
+	        || (Array.isArray(product.categoryIds) && product.categoryIds.map(String).includes(String(categoryId)))
+	      ));
+	    }
+
+	    function renderCategoriesForInvoice() {
+	      const categories = getCashierCategoryRows();
+	      const rootCategories = categories.filter(c => !c.parentId);
+	      
+	      return `
+	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="categoriesGrid">
           ${rootCategories.map(cat => `
             <div class="category-card" onclick="showCategoryProductsInvoice('${cat.id}')">
               <div class="text-4xl mb-2">📁</div>
@@ -2403,10 +2546,11 @@ function refreshUI() {
       `;
     }
     
-    function showCategoryProductsInvoice(categoryId) {
-  const category = allCategories.find(c => c.id === categoryId);
-  const subCategories = allCategories.filter(c => c.parentId === categoryId);
-  const products = allProducts.filter(p => p.categoryId === categoryId);
+	    function showCategoryProductsInvoice(categoryId) {
+	  const categories = getCashierCategoryRows();
+	  const category = categories.find(c => c.id === categoryId);
+	  const subCategories = categories.filter(c => c.parentId === categoryId);
+	  const products = getCashierProductsForCategory(categoryId);
   
   const container = document.getElementById('categoriesAndProductsContainer');
   container.innerHTML = `
@@ -3383,7 +3527,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     
     function showAddCustomerForDelivery() {
       const searchValue = convertToEnglishNumbers(document.getElementById('customerSearchDelivery')?.value || '').replace(/\D/g, '');
-      document.querySelector('.modal-overlay').remove();
+	      document.querySelector('.modal-overlay')?.remove();
       
       const modal = document.createElement('div');
       modal.className = 'modal-overlay';

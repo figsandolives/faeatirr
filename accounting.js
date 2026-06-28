@@ -11888,7 +11888,13 @@ function getProductEntries() {
 function getBranchLabel(branchId) {
   if (!branchId) return '-';
   const branch = state.cache.branches?.[branchId];
-  return getLocalizedName(branch) || '-';
+  const localized = getLocalizedName(branch);
+  if (localized && localized !== '-') return localized;
+  if (branchId === 'main') return 'الفرع الرئيسي';
+  if (branchId === 'yarmouk') return 'اليرموك';
+  if (branchId === 'abu_hasaniya') return 'أبو الحصانية';
+  if (branchId === 'main_warehouse') return 'المخزن الرئيسي';
+  return branchId || '-';
 }
 
 function renderBranchOptions(select, { excludeMain = false } = {}) {
@@ -13568,7 +13574,7 @@ function renderProductionTable() {
       <td>${formatDate(rec.createdAt)}</td>
       <td>${rec.productionDate || '-'}</td>
       <td>${rec.expiryDate || '-'}</td>
-      <td>${getBranchLabel(rec.branchId)}</td>
+	      <td>${getBranchLabel(rec.branchId) || rec.branch || rec.branchName || '-'}</td>
       <td>${rec.storekeeperName || '-'}</td>
       <td>${staffLabel}</td>
       <td><button class="btn ghost small" data-action="issue">${rec.issueNumber || '-'}</button></td>
@@ -17726,20 +17732,22 @@ function renderCashierTransferRequestsTable() {
     const statusLabel = getCashierTransferRequestStatusLabel(rec);
     row.innerHTML = `
       <td>${rec.requestNumber || '-'}</td>
-      <td>${getBranchLabel(rec.branchId)}</td>
+      <td>${getCashierTransferBranchLabel(rec)}</td>
       <td>${rec.cashierName || '-'}</td>
       <td>${formatDate(rec.createdAt)}</td>
       <td>${items.length}</td>
       <td>${statusLabel}</td>
       <td>
         <div class="row" style="gap: 6px; flex-wrap: wrap;">
-	          <button class="btn ghost small" data-action="view">${window.i18n.t('view')}</button>
 	          ${rec.status === 'pending' ? `<button class="btn primary small" data-action="accept">قبول الطلب</button>` : ''}
 	          ${rec.status === 'accepted' ? `
 	            <button class="btn ghost small" data-action="print">طباعة</button>
 	            <button class="btn primary small" data-action="deliver">تسليم</button>
 	          ` : ''}
-	          ${rec.status === 'sent' || rec.status === 'received' ? `<button class="btn ghost small" data-action="print">تقرير PDF</button>` : ''}
+	          ${rec.status === 'sent' || rec.status === 'received' ? `
+	            <button class="btn ghost small" data-action="view">${window.i18n.t('view')}</button>
+	            <button class="btn ghost small" data-action="print">تقرير PDF</button>
+	          ` : ''}
 	        </div>
 	      </td>
 	    `;
@@ -17756,15 +17764,21 @@ function renderCashierTransferRequestsTable() {
 	}
 
 function getCashierTransferRequestStatusLabel(rec) {
-	  const status = rec?.status || 'pending';
-	  if (status === 'accepted') return 'بانتظار التجهيز';
-	  if (status === 'sent') return 'تم الارسال';
-	  if (status === 'transferred') return window.i18n.t('transferred');
-	  if (status === 'received') return window.i18n.t('received');
-	  if (status === 'partial_received') return window.i18n.t('partial_received');
-	  if (status === 'rejected') return window.i18n.t('rejected');
-	  return 'بانتظار القبول';
-	}
+		  const status = rec?.status || 'pending';
+		  if (status === 'accepted') return 'بانتظار التجهيز';
+		  if (status === 'sent') return 'تم الارسال';
+		  if (status === 'transferred') return window.i18n.t('transferred');
+		  if (status === 'received') return window.i18n.t('received');
+		  if (status === 'partial_received') return window.i18n.t('partial_received');
+		  if (status === 'rejected') return window.i18n.t('rejected');
+		  return 'بانتظار القبول';
+		}
+
+function getCashierTransferBranchLabel(rec) {
+  if (!rec) return '-';
+  if (rec.branchId) return getBranchLabel(rec.branchId);
+  return rec.branch || rec.branchName || '-';
+}
 
 const CASHIER_TRANSFER_GROUPS = [
   { key: 'sweets', titleKey: 'transfer_group_sweets' },
@@ -17819,7 +17833,7 @@ function getCashierTransferItemName(item) {
 function buildCashierTransferPrintMeta(record) {
   return [
     { label: window.i18n.t('transfer_request_number'), value: record.requestNumber || '-' },
-    { label: window.i18n.t('branch'), value: getBranchLabel(record.branchId) },
+    { label: window.i18n.t('branch'), value: getCashierTransferBranchLabel(record) },
     { label: window.i18n.t('cashier_name'), value: record.cashierName || '-' },
     { label: window.i18n.t('date_time'), value: formatDate(record.createdAt) },
     { label: window.i18n.t('status'), value: getCashierTransferRequestStatusLabel(record) }

@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const accountingBtn = document.getElementById('go-accounting');
   const printOrdersBtn = document.getElementById('go-print-orders');
   const labelAppBtn = document.getElementById('go-label-app');
+  const productionLabelAppBtn = document.getElementById('go-production-label-app');
   const labelAdminBtn = document.getElementById('go-label-admin');
 
   cashierBtn.addEventListener('click', () => {
@@ -21,6 +22,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   labelAppBtn?.addEventListener('click', () => {
     window.location.href = 'label-app.html';
+  });
+
+  productionLabelAppBtn?.addEventListener('click', () => {
+    window.location.href = 'production-label-app.html';
   });
 
   labelAdminBtn?.addEventListener('click', () => {

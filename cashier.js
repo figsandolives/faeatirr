@@ -113,6 +113,8 @@
     let allInventoryTransfers = [];
     let allInventorySuppliers = [];
     let allInventoryPurchases = [];
+    let allStockMaterials = [];
+    let allTransferRequests = [];
     let selectedInventoryCategoryId = '';
     let selectedInventorySupplierId = '';
     let inventoryProductSearchTerm = '';
@@ -125,6 +127,12 @@
     let issueProductSearchTerm = '';
     let transferProductSearchTerm = '';
     let purchaseProductSearchTerm = '';
+    let shortageSearchTerm = '';
+    let shortageSearchMode = 'products';
+    let shortageRequestsPage = 1;
+    let currentShortageDraft = {
+      items: []
+    };
     let selectedProductsForInventory = [];
     let selectedInventoryProductsForCategory = [];
     let selectedSupplierProductsForAdd = [];
@@ -269,7 +277,9 @@
         allInventoryIssues,
         allInventoryTransfers,
         allInventorySuppliers,
-        allInventoryPurchases
+        allInventoryPurchases,
+        allStockMaterials,
+        allTransferRequests
       };
     }
 
@@ -292,6 +302,8 @@
       allInventoryTransfers = Array.isArray(cache.allInventoryTransfers) ? cache.allInventoryTransfers : [];
       allInventorySuppliers = Array.isArray(cache.allInventorySuppliers) ? cache.allInventorySuppliers : [];
       allInventoryPurchases = Array.isArray(cache.allInventoryPurchases) ? cache.allInventoryPurchases : [];
+      allStockMaterials = Array.isArray(cache.allStockMaterials) ? cache.allStockMaterials : [];
+      allTransferRequests = Array.isArray(cache.allTransferRequests) ? cache.allTransferRequests : [];
       return true;
     }
 
@@ -387,7 +399,9 @@
         ['inventoryIssues', 'سندات الصرف'],
         ['inventoryTransfers', 'سندات التحويل'],
         ['inventorySuppliers', 'الموردين'],
-        ['inventoryPurchases', 'سندات الشراء']
+        ['inventoryPurchases', 'سندات الشراء'],
+        ['stockMaterials', 'مواد المخزون'],
+        ['transferRequests', 'طلبات النواقص']
       ];
 
       try {
@@ -426,7 +440,9 @@
           inventoryIssuesSnapshot,
           inventoryTransfersSnapshot,
           inventorySuppliersSnapshot,
-          inventoryPurchasesSnapshot
+          inventoryPurchasesSnapshot,
+          stockMaterialsSnapshot,
+          transferRequestsSnapshot
         ] = await Promise.all(dataRefs.map(loadSnapshot));
 
         setLoadedOrders(
@@ -455,6 +471,8 @@
         allInventoryTransfers = toArray(inventoryTransfersSnapshot).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
         allInventorySuppliers = toArray(inventorySuppliersSnapshot);
         allInventoryPurchases = toArray(inventoryPurchasesSnapshot).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        allStockMaterials = toArray(stockMaterialsSnapshot);
+        allTransferRequests = toArray(transferRequestsSnapshot).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         if (onProgress) onProgress({ label: 'حفظ البيانات في المتصفح', loaded: dataRefs.length, total: dataRefs.length, percent: 98 });
         await writeAppDataCache(collectCurrentDataCache());
         return true;
@@ -1140,12 +1158,24 @@ function setupRealtimeListeners() {
   });
 
   // 12. مراقبة سندات الشراء
-  db.ref('inventoryPurchases').on('value', (snapshot) => {
-    allInventoryPurchases = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
-    allInventoryPurchases.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-    refreshUI();
-  });
-}
+	  db.ref('inventoryPurchases').on('value', (snapshot) => {
+	    allInventoryPurchases = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
+	    allInventoryPurchases.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+	    refreshUI();
+	  });
+
+	  db.ref('stockMaterials').on('value', (snapshot) => {
+	    allStockMaterials = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
+	    refreshUI();
+	  });
+
+	  db.ref('transferRequests').on('value', (snapshot) => {
+	    allTransferRequests = snapshot.val()
+	      ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+	      : [];
+	    refreshUI();
+	  });
+	}
 
 // 2. دالة تحديث واجهة المستخدم بدون ريفريش
 function refreshUI() {
@@ -1723,10 +1753,13 @@ function refreshUI() {
             <div class="max-w-6xl mx-auto">
               <div class="flex justify-between items-center mb-6">
                 <h2 class="text-3xl font-bold text-gray-800">الطلبات</h2>
-                <button onclick="startNewInvoiceFromCashier()" class="bg-green-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-green-700 transition">
-                  ➕ فاتورة جديدة
-                </button>
-              </div>
+	              <button onclick="startNewInvoiceFromCashier()" class="bg-green-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-green-700 transition">
+	                ➕ فاتورة جديدة
+	              </button>
+	              <button onclick="showShortageRequestsPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
+	                طلب نواقص
+	              </button>
+	            </div>
               ${currentBranch === 'اليرموك' && hasOpenDailySession() ? `
                 <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-5 text-blue-800 font-bold">
                   اليومية مفتوحة من ${formatTime(currentDailySession.openedAt)} | مبلغ البداية: ${formatNumberWithThreeDecimals(currentDailySession.openingAmount)} د.ك
@@ -1811,9 +1844,432 @@ function refreshUI() {
           </div>
         </div>
       `;
-    }
-    
-    function startNewInvoiceFromCashier() {
+	    }
+
+	    function getCurrentBranchIdForTransferRequest() {
+	      const cached = localStorage.getItem('deviceBranchId') || '';
+	      if (cached) return cached;
+	      const branch = String(currentBranch || '').trim();
+	      if (branch.includes('يرموك')) return 'yarmouk';
+	      if (branch.includes('حصانية')) return 'abu_hasaniya';
+	      if (branch.includes('رئيسي')) return 'main';
+	      return branch || 'cashier_branch';
+	    }
+
+	    function getShortageBranchLabel(request) {
+	      return request.branch || request.branchName || currentBranch || request.branchId || '-';
+	    }
+
+	    function getShortageStatusLabel(status) {
+	      if (status === 'sent') return 'تم الارسال';
+	      if (status === 'received') return 'تم الاستلام';
+	      if (status === 'accepted') return 'قيد التنفيذ';
+	      if (status === 'rejected') return 'مرفوض';
+	      return 'بانتظار تنفيذ الطلب';
+	    }
+
+	    function getCashierBranchShortageRequests() {
+	      const branchId = getCurrentBranchIdForTransferRequest();
+	      return allTransferRequests
+	        .filter(request => {
+	          const sameBranchId = String(request.branchId || '') === String(branchId || '');
+	          const sameBranchName = String(request.branch || request.branchName || '') === String(currentBranch || '');
+	          return sameBranchId || sameBranchName;
+	        })
+	        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+	    }
+
+	    function showShortageRequestsPage() {
+	      const existingPage = document.getElementById('shortageRequestsPage');
+	      if (existingPage) existingPage.remove();
+	      currentScreen = 'cashier';
+	      const requests = getCashierBranchShortageRequests();
+	      const page = document.createElement('div');
+	      page.className = 'invoice-page';
+	      page.id = 'shortageRequestsPage';
+	      page.innerHTML = `
+	        <div class="h-full flex flex-col bg-gray-100">
+	          <div class="no-print bg-purple-900 text-white p-4 flex justify-between items-center">
+	            <h2 class="text-2xl font-bold">طلب نواقص</h2>
+	            <button onclick="closeShortageRequestsPage()" class="text-3xl font-bold hover:text-red-300">✕</button>
+	          </div>
+	          <div class="flex-1 overflow-y-auto p-6">
+	            <div class="max-w-6xl mx-auto">
+	              <div class="flex justify-between items-center mb-6">
+	                <h3 class="text-3xl font-bold text-gray-800">طلبات النواقص</h3>
+	                <button onclick="showNewShortageRequestPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
+	                  طلب نواقص جديد
+	                </button>
+	              </div>
+	              <div class="bg-white rounded-xl shadow-lg p-6">
+	                <div class="overflow-x-auto">
+	                  <table>
+	                    <thead>
+	                      <tr>
+	                        <th>رقم طلب التحويل</th>
+	                        <th>الفرع</th>
+	                        <th>اسم الكاشير</th>
+	                        <th>التاريخ والوقت</th>
+	                        <th>العناصر</th>
+	                        <th>الحالة</th>
+	                        <th>الإجراءات</th>
+	                      </tr>
+	                    </thead>
+	                    <tbody>
+	                      ${requests.length ? requests.map(request => `
+	                        <tr>
+	                          <td>${escapeHtml(request.requestNumber || '-')}</td>
+	                          <td>${escapeHtml(getShortageBranchLabel(request))}</td>
+	                          <td>${escapeHtml(request.cashierName || '-')}</td>
+	                          <td>${formatDate(request.createdAt)} ${formatTime(request.createdAt)}</td>
+	                          <td>${(request.items || []).length}</td>
+	                          <td>${getShortageStatusLabel(request.status)}</td>
+	                          <td>
+	                            ${request.status === 'sent' ? `
+	                              <button onclick="openCashierReceiveShortage('${request.id}')" class="bg-green-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-green-700 transition">استلام</button>
+	                            ` : ''}
+	                          </td>
+	                        </tr>
+	                      `).join('') : '<tr><td colspan="7" class="text-center text-gray-500 py-8">لا توجد طلبات نواقص</td></tr>'}
+	                    </tbody>
+	                  </table>
+	                </div>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      `;
+	      document.body.appendChild(page);
+	    }
+
+	    function closeShortageRequestsPage() {
+	      document.getElementById('shortageRequestsPage')?.remove();
+	    }
+
+	    function resetShortageDraft() {
+	      currentShortageDraft = { items: [] };
+	      shortageSearchTerm = '';
+	      shortageSearchMode = 'products';
+	    }
+
+	    function showNewShortageRequestPage() {
+	      resetShortageDraft();
+	      renderShortageDraftPage();
+	    }
+
+	    function renderShortageDraftPage() {
+	      const existingPage = document.getElementById('shortageDraftPage');
+	      if (existingPage) existingPage.remove();
+	      const page = document.createElement('div');
+	      page.className = 'invoice-page shortage-draft-page';
+	      page.id = 'shortageDraftPage';
+	      page.innerHTML = `
+	        <div class="h-full flex flex-col">
+	          <div class="no-print bg-purple-900 text-white p-4 flex justify-between items-center">
+	            <h2 class="text-2xl font-bold">طلب نواقص جديد</h2>
+	            <button onclick="closeShortageDraftPage()" class="text-3xl font-bold hover:text-red-300">✕</button>
+	          </div>
+	          <div class="flex-1 flex overflow-hidden">
+	            <div class="w-96 bg-white border-l-2 border-purple-200 flex flex-col">
+	              <div class="p-4 border-b border-purple-200">
+	                <h3 class="text-lg font-bold text-gray-800">العناصر المطلوبة</h3>
+	              </div>
+	              <div id="shortageItemsContainer" class="flex-1 overflow-y-auto p-4"></div>
+	              <div class="p-4 border-t border-purple-200">
+	                <button id="submitShortageBtn" onclick="submitShortageRequest()" class="w-full bg-purple-800 text-white px-6 py-3 rounded-lg font-bold hover:bg-purple-900 transition">
+	                  طلب النواقص
+	                </button>
+	              </div>
+	            </div>
+	            <div class="flex-1 p-6 overflow-y-auto bg-purple-50">
+	              <div class="invoice-product-toolbar" style="direction: rtl;">
+	                <button onclick="setShortageSearchMode('products')" class="${shortageSearchMode === 'products' ? 'bg-purple-800 text-white' : 'bg-white text-purple-800'} px-5 py-3 rounded-lg font-bold border-2 border-purple-700">بحث منتجات</button>
+	                <button onclick="setShortageSearchMode('materials')" class="${shortageSearchMode === 'materials' ? 'bg-purple-800 text-white' : 'bg-white text-purple-800'} px-5 py-3 rounded-lg font-bold border-2 border-purple-700">بحث مواد مخزون</button>
+	                <input type="text" id="shortageSearchBox" value="${escapeHtml(shortageSearchTerm)}" oninput="setShortageSearchTerm(this.value)" placeholder="🔍 بحث..." class="invoice-product-search w-full p-3 border-2 border-purple-300 rounded-lg focus:border-purple-800 focus:outline-none text-lg">
+	              </div>
+	              <div id="shortageSearchResults">${renderShortageSearchResultsHtml()}</div>
+	            </div>
+	          </div>
+	        </div>
+	      `;
+	      document.body.appendChild(page);
+	      renderShortageItems();
+	      setTimeout(() => document.getElementById('shortageSearchBox')?.focus(), 50);
+	    }
+
+	    function closeShortageDraftPage() {
+	      document.getElementById('shortageDraftPage')?.remove();
+	    }
+
+	    function setShortageSearchMode(mode) {
+	      shortageSearchMode = mode === 'materials' ? 'materials' : 'products';
+	      renderShortageDraftPage();
+	    }
+
+	    function setShortageSearchTerm(value) {
+	      shortageSearchTerm = value || '';
+	      const results = document.getElementById('shortageSearchResults');
+	      if (results) results.innerHTML = renderShortageSearchResultsHtml();
+	    }
+
+	    function getShortageSearchRows() {
+	      const query = normalizeText(shortageSearchTerm);
+	      const rows = shortageSearchMode === 'materials'
+	        ? allStockMaterials.map(item => ({ ...item, itemType: 'material' }))
+	        : allProducts.map(item => ({ ...item, itemType: 'product' }));
+	      if (!query) return [];
+	      return rows
+	        .filter(item => normalizeText(`${item.nameAr || ''} ${item.nameEn || ''} ${item.name || ''} ${item.code || ''} ${item.barcode || ''}`).includes(query))
+	        .slice(0, 80);
+	    }
+
+	    function renderShortageSearchResultsHtml() {
+	      const rows = getShortageSearchRows();
+	      if (!shortageSearchTerm.trim()) {
+	        return '<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">اكتب للبحث عن الأصناف</div>';
+	      }
+	      if (!rows.length) {
+	        return '<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">لا توجد نتائج</div>';
+	      }
+	      return `
+	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+	          ${rows.map(item => `
+	            <div class="product-card" onclick="addItemToShortage('${item.itemType}', '${item.id}')">
+	              <div class="text-4xl mb-2">${item.itemType === 'material' ? '🧱' : '📦'}</div>
+	              <div class="font-bold mb-1">${escapeHtml(item.nameAr || item.name || item.nameEn || '-')}</div>
+	              <div class="text-purple-700 font-bold text-sm">${item.itemType === 'material' ? 'مواد مخزون' : 'منتج'}</div>
+	              <div class="text-gray-500 text-xs" dir="ltr">${escapeHtml(item.barcode || item.code || '')}</div>
+	            </div>
+	          `).join('')}
+	        </div>
+	      `;
+	    }
+
+	    function getShortageItemSource(itemType, itemId) {
+	      return itemType === 'material'
+	        ? allStockMaterials.find(item => item.id === itemId)
+	        : allProducts.find(item => item.id === itemId);
+	    }
+
+	    function addItemToShortage(itemType, itemId, qty = 1) {
+	      const source = getShortageItemSource(itemType, itemId);
+	      if (!source) {
+	        showToast('الصنف غير موجود', true);
+	        return;
+	      }
+	      const existing = currentShortageDraft.items.find(item => item.itemType === itemType && item.itemId === itemId);
+	      if (existing) {
+	        existing.qty += qty;
+	      } else {
+	        currentShortageDraft.items.push({
+	          itemId,
+	          itemType,
+	          name: source.nameAr || source.name || source.nameEn || '',
+	          nameAr: source.nameAr || source.name || '',
+	          nameEn: source.nameEn || '',
+	          unitId: source.unitId || null,
+	          barcode: source.barcode || '',
+	          qty
+	        });
+	      }
+	      renderShortageItems();
+	      showToast('تمت إضافة الصنف');
+	    }
+
+	    function renderShortageItems() {
+	      const container = document.getElementById('shortageItemsContainer');
+	      const submitBtn = document.getElementById('submitShortageBtn');
+	      if (!container) return;
+	      if (!currentShortageDraft.items.length) {
+	        container.innerHTML = '<div class="text-center text-gray-400 py-8">لا توجد عناصر</div>';
+	        if (submitBtn) submitBtn.disabled = true;
+	        return;
+	      }
+	      if (submitBtn) submitBtn.disabled = false;
+	      container.innerHTML = currentShortageDraft.items.map((item, index) => `
+	        <div class="bg-purple-50 border border-purple-100 p-3 rounded-lg mb-2">
+	          <div class="flex justify-between items-start mb-2">
+	            <div>
+	              <div class="font-bold">${escapeHtml(item.nameAr || item.name || '-')}</div>
+	              <div class="text-xs text-purple-700 font-bold">${item.itemType === 'material' ? 'مواد مخزون' : 'منتج'}</div>
+	            </div>
+	            <button onclick="removeShortageItem(${index})" class="text-red-600 hover:text-red-800 font-bold text-lg">✕</button>
+	          </div>
+	          <div class="flex items-center gap-2">
+	            <input type="number" min="1" step="1" value="${item.qty}" onchange="updateShortageItemQty(${index}, this.value)" class="quantity-input bg-white">
+	            <span class="text-sm text-gray-600">الكمية</span>
+	          </div>
+	        </div>
+	      `).join('');
+	    }
+
+	    function updateShortageItemQty(index, value) {
+	      const qty = Math.max(1, Math.floor(Number(convertToEnglishNumbers(value || '1')) || 1));
+	      if (currentShortageDraft.items[index]) {
+	        currentShortageDraft.items[index].qty = qty;
+	        renderShortageItems();
+	      }
+	    }
+
+	    function removeShortageItem(index) {
+	      currentShortageDraft.items.splice(index, 1);
+	      renderShortageItems();
+	    }
+
+	    function findShortageItemByBarcode(barcode, mode = 'products') {
+	      const value = normalizeBarcodeValue(barcode);
+	      if (!value) return null;
+	      const rows = mode === 'materials' ? allStockMaterials : allProducts;
+	      const match = rows.find(item => normalizeBarcodeValue(item.barcode) === value);
+	      return match ? { itemType: mode === 'materials' ? 'material' : 'product', item: match } : null;
+	    }
+
+	    function handleShortageBarcodeScan(barcode) {
+	      if (!document.getElementById('shortageDraftPage')) {
+	        resetShortageDraft();
+	        renderShortageDraftPage();
+	      }
+	      const match = findShortageItemByBarcode(barcode, shortageSearchMode) || findShortageItemByBarcode(barcode, 'products') || findShortageItemByBarcode(barcode, 'materials');
+	      if (!match) {
+	        showToast(`لم يتم العثور على صنف للباركود: ${barcode}`, true);
+	        return true;
+	      }
+	      addItemToShortage(match.itemType, match.item.id);
+	      const input = document.getElementById('shortageSearchBox');
+	      if (input) input.value = '';
+	      shortageSearchTerm = '';
+	      const results = document.getElementById('shortageSearchResults');
+	      if (results) results.innerHTML = renderShortageSearchResultsHtml();
+	      return true;
+	    }
+
+	    async function submitShortageRequest() {
+	      if (!currentShortageDraft.items.length) {
+	        showToast('الرجاء إضافة صنف واحد على الأقل', true);
+	        return;
+	      }
+	      const id = generateId();
+	      const createdAt = Date.now();
+	      const requestNumber = `TR-${new Date(createdAt).toISOString().slice(0, 10).replace(/-/g, '')}-${String(createdAt).slice(-5)}`;
+	      const payload = {
+	        id,
+	        requestNumber,
+	        branchId: getCurrentBranchIdForTransferRequest(),
+	        branch: currentBranch || '',
+	        branchName: currentBranch || '',
+	        cashierId: currentCashier?.id || '',
+	        cashierName: currentCashier?.name || '',
+	        cashierCode: currentCashier?.code || '',
+	        createdAt,
+	        status: 'pending',
+	        alertAcknowledged: false,
+	        items: currentShortageDraft.items.map(item => ({
+	          itemId: item.itemId,
+	          itemType: item.itemType,
+	          name: item.name || item.nameAr || '',
+	          nameAr: item.nameAr || item.name || '',
+	          nameEn: item.nameEn || '',
+	          unitId: item.unitId || null,
+	          barcode: item.barcode || '',
+	          qty: Number(item.qty || 0),
+	          requestedQty: Number(item.qty || 0)
+	        }))
+	      };
+	      try {
+	        await db.ref(`transferRequests/${id}`).set(payload);
+	        allTransferRequests.unshift(payload);
+	        closeShortageDraftPage();
+	        showShortageSuccessMessage();
+	      } catch (error) {
+	        console.error('Error submitting shortage request:', error);
+	        showToast('تعذر إرسال طلب النواقص', true);
+	      }
+	    }
+
+	    function showShortageSuccessMessage() {
+	      const modal = document.createElement('div');
+	      modal.className = 'modal-overlay';
+	      modal.innerHTML = `
+	        <div class="modal-content p-8 w-full max-w-md text-center">
+	          <div class="mx-auto mb-4 w-16 h-16 rounded-full bg-purple-100 text-purple-800 flex items-center justify-center text-3xl font-bold">✓</div>
+	          <h2 class="text-2xl font-bold text-purple-900 mb-3">تم ارسال طلب النواقص بنجاح</h2>
+	          <p class="text-gray-600 mb-6">سيظهر الطلب مباشرة عند المخازن وفي شاشة التلفزيون.</p>
+	          <button onclick="this.closest('.modal-overlay').remove(); showShortageRequestsPage()" class="w-full bg-purple-800 text-white px-6 py-3 rounded-lg font-bold hover:bg-purple-900 transition">تم</button>
+	        </div>
+	      `;
+	      document.body.appendChild(modal);
+	    }
+
+	    function openCashierReceiveShortage(requestId) {
+	      const request = allTransferRequests.find(item => item.id === requestId);
+	      if (!request) return;
+	      const items = request.items || [];
+	      const modal = document.createElement('div');
+	      modal.className = 'modal-overlay';
+	      modal.id = 'cashierReceiveShortageModal';
+	      modal.innerHTML = `
+	        <div class="modal-content p-6 w-full max-w-4xl" style="max-height: 90vh; overflow:auto;">
+	          <div class="flex justify-between items-center mb-4">
+	            <h2 class="text-2xl font-bold text-purple-900">استلام طلب النواقص ${escapeHtml(request.requestNumber || '')}</h2>
+	            <button onclick="this.closest('.modal-overlay').remove()" class="text-3xl font-bold text-gray-500 hover:text-red-600">×</button>
+	          </div>
+	          <button onclick="fillAllReceivedShortageQty()" class="bg-green-600 text-white px-5 py-3 rounded-lg font-bold hover:bg-green-700 transition mb-4">تم استلام كل النواقص</button>
+	          <div class="grid grid-cols-3 gap-3 font-bold bg-purple-100 p-3 rounded-lg mb-2">
+	            <div>اسم المنتج</div>
+	            <div>الكمية المرسلة</div>
+	            <div>الكمية المستلمة</div>
+	          </div>
+	          <div id="cashierReceiveShortageRows">
+	            ${items.map((item, index) => `
+	              <div class="grid grid-cols-3 gap-3 items-center border-b border-gray-200 py-3">
+	                <div class="font-bold">${escapeHtml(item.nameAr || item.name || '-')}</div>
+	                <div class="sent-qty font-bold" data-sent="${Number(item.sentQty ?? item.qty ?? item.requestedQty ?? 0)}">${Number(item.sentQty ?? item.qty ?? item.requestedQty ?? 0)}</div>
+	                <input class="received-shortage-qty p-3 border-2 border-gray-300 rounded-lg" data-index="${index}" type="text" inputmode="numeric" oninput="this.value = convertToEnglishNumbers(this.value).replace(/[^0-9.]/g, '')">
+	              </div>
+	            `).join('')}
+	          </div>
+	          <div class="flex justify-end gap-3 mt-5">
+	            <button onclick="this.closest('.modal-overlay').remove()" class="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold">إلغاء</button>
+	            <button onclick="submitCashierShortageReceive('${request.id}')" class="bg-purple-800 text-white px-6 py-3 rounded-lg font-bold hover:bg-purple-900 transition">استلام</button>
+	          </div>
+	        </div>
+	      `;
+	      document.body.appendChild(modal);
+	    }
+
+	    function fillAllReceivedShortageQty() {
+	      document.querySelectorAll('#cashierReceiveShortageRows .received-shortage-qty').forEach(input => {
+	        const sent = input.closest('.grid')?.querySelector('.sent-qty')?.dataset.sent || '';
+	        input.value = sent;
+	      });
+	    }
+
+	    async function submitCashierShortageReceive(requestId) {
+	      const request = allTransferRequests.find(item => item.id === requestId);
+	      if (!request) return;
+	      const rows = Array.from(document.querySelectorAll('#cashierReceiveShortageRows .received-shortage-qty'));
+	      const receivedItems = (request.items || []).map((item, index) => ({
+	        ...item,
+	        receivedQty: Number(convertToEnglishNumbers(rows[index]?.value || '0')) || 0
+	      }));
+	      try {
+	        await db.ref(`transferRequests/${requestId}`).update({
+	          status: 'received',
+	          receivedAt: firebase.database.ServerValue.TIMESTAMP,
+	          receivedByCashier: currentCashier?.name || '',
+	          receivedItems,
+	          items: receivedItems
+	        });
+	        document.getElementById('cashierReceiveShortageModal')?.remove();
+	        showToast('تم استلام طلب النواقص');
+	        showShortageRequestsPage();
+	      } catch (error) {
+	        console.error('Error receiving shortage request:', error);
+	        showToast('تعذر حفظ الاستلام', true);
+	      }
+	    }
+	
+	    function startNewInvoiceFromCashier() {
       if (currentBranch === 'اليرموك' && !hasOpenDailySession()) {
         showToast('يجب فتح اليومية أولاً', true);
         showOpenDailySessionModal();
@@ -2155,8 +2611,8 @@ function refreshUI() {
       return allProducts.find(product => normalizeBarcodeValue(product.barcode) === value) || null;
     }
 
-    function clearProductSearchBoxAfterScan(value) {
-      const searchBox = document.getElementById('productSearchBox');
+	    function clearProductSearchBoxAfterScan(value) {
+	      const searchBox = document.getElementById('productSearchBox');
       const scanned = normalizeBarcodeValue(value);
       if (searchBox) {
         const typed = normalizeBarcodeValue(searchBox.value);
@@ -2165,20 +2621,35 @@ function refreshUI() {
           searchProductsInInvoice();
         }
       }
-      const dailySearchBox = document.getElementById('dailyInvoiceSearchInput');
-      if (dailySearchBox) {
-        const typed = normalizeBarcodeValue(dailySearchBox.value);
-        if (!scanned || typed.includes(scanned) || scanned.includes(typed) || /^\d{4,}$/.test(typed)) {
-          dailySearchBox.value = '';
-        }
-      }
-    }
+	      const dailySearchBox = document.getElementById('dailyInvoiceSearchInput');
+	      if (dailySearchBox) {
+	        const typed = normalizeBarcodeValue(dailySearchBox.value);
+	        if (!scanned || typed.includes(scanned) || scanned.includes(typed) || /^\d{4,}$/.test(typed)) {
+	          dailySearchBox.value = '';
+	        }
+	      }
+	      const shortageSearchBox = document.getElementById('shortageSearchBox');
+	      if (shortageSearchBox) {
+	        const typed = normalizeBarcodeValue(shortageSearchBox.value);
+	        if (!scanned || typed.includes(scanned) || scanned.includes(typed) || /^\d{4,}$/.test(typed)) {
+	          shortageSearchBox.value = '';
+	          shortageSearchTerm = '';
+	          document.getElementById('shortageSearchResults')?.replaceChildren();
+	        }
+	      }
+	    }
 
     function handleBarcodeScan(value) {
       if (currentScreen !== 'cashier' || !currentCashier) return;
       const barcode = normalizeBarcodeValue(value);
-      if (!barcode || barcode.length < 4) return;
-      clearProductSearchBoxAfterScan(barcode);
+	      if (!barcode || barcode.length < 4) return;
+	      clearProductSearchBoxAfterScan(barcode);
+
+	      if (document.getElementById('shortageRequestsPage') || document.getElementById('shortageDraftPage')) {
+	        handleShortageBarcodeScan(barcode);
+	        clearProductSearchBoxAfterScan(barcode);
+	        return;
+	      }
 
       if (currentBranch === 'اليرموك' && !hasOpenDailySession()) {
         showToast('يجب فتح اليومية أولاً', true);
@@ -2222,11 +2693,11 @@ function refreshUI() {
       document.getElementById('productSearchBox')?.focus();
     }
 
-    function handleGlobalBarcodeKeydown(event) {
+	    function handleGlobalBarcodeKeydown(event) {
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target;
       const isTypingField = target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
-      const isBarcodeFriendlyInput = target?.id === 'productSearchBox' || target?.id === 'dailyInvoiceSearchInput';
+	      const isBarcodeFriendlyInput = target?.id === 'productSearchBox' || target?.id === 'dailyInvoiceSearchInput' || target?.id === 'shortageSearchBox';
       if (isTypingField && !isBarcodeFriendlyInput) return;
 
       if (event.key === 'Enter') {
@@ -2245,12 +2716,19 @@ function refreshUI() {
         barcodeScanBuffer = '';
       }
       const normalizedKey = normalizeBarcodeValue(event.key);
-      if (isBarcodeFriendlyInput && barcodeScanBuffer) {
-        event.preventDefault();
-      }
-      barcodeScanBuffer += normalizedKey || event.key;
-      barcodeScanLastTime = now;
-      clearTimeout(barcodeScanTimer);
+	      if (isBarcodeFriendlyInput && barcodeScanBuffer) {
+	        event.preventDefault();
+	      }
+	      barcodeScanBuffer += normalizedKey || event.key;
+	      barcodeScanLastTime = now;
+	      if (isBarcodeFriendlyInput) {
+	        setTimeout(() => {
+	          if (barcodeScanBuffer && target && target.value) {
+	            target.value = '';
+	          }
+	        }, 0);
+	      }
+	      clearTimeout(barcodeScanTimer);
       barcodeScanTimer = setTimeout(() => {
         if (barcodeScanBuffer.length >= 4) {
           const value = barcodeScanBuffer;

@@ -17733,30 +17733,38 @@ function renderCashierTransferRequestsTable() {
       <td>${statusLabel}</td>
       <td>
         <div class="row" style="gap: 6px; flex-wrap: wrap;">
-          <button class="btn ghost small" data-action="view">${window.i18n.t('view')}</button>
-          <button class="btn ghost small" data-action="print">${window.i18n.t('print_report')}</button>
-          ${rec.status === 'pending' ? `<button class="btn primary small" data-action="transfer">${window.i18n.t('transfer_action')}</button>` : ''}
-        </div>
-      </td>
-    `;
+	          <button class="btn ghost small" data-action="view">${window.i18n.t('view')}</button>
+	          ${rec.status === 'pending' ? `<button class="btn primary small" data-action="accept">قبول الطلب</button>` : ''}
+	          ${rec.status === 'accepted' ? `
+	            <button class="btn ghost small" data-action="print">طباعة</button>
+	            <button class="btn primary small" data-action="deliver">تسليم</button>
+	          ` : ''}
+	          ${rec.status === 'sent' || rec.status === 'received' ? `<button class="btn ghost small" data-action="print">تقرير PDF</button>` : ''}
+	        </div>
+	      </td>
+	    `;
     const viewBtn = row.querySelector('[data-action="view"]');
     if (viewBtn) viewBtn.addEventListener('click', () => openCashierTransferModal(rec, 'view'));
-    const printBtn = row.querySelector('[data-action="print"]');
-    if (printBtn) printBtn.addEventListener('click', () => printCashierTransferRequestReport(rec));
-    const transferBtn = row.querySelector('[data-action="transfer"]');
-    if (transferBtn) transferBtn.addEventListener('click', () => openCashierTransferModal(rec, 'transfer'));
-    table.appendChild(row);
-  });
-}
+	    const printBtn = row.querySelector('[data-action="print"]');
+	    if (printBtn) printBtn.addEventListener('click', () => printCashierTransferRequestReport(rec));
+	    const acceptBtn = row.querySelector('[data-action="accept"]');
+	    if (acceptBtn) acceptBtn.addEventListener('click', () => acceptCashierTransferRequest(rec));
+	    const deliverBtn = row.querySelector('[data-action="deliver"]');
+	    if (deliverBtn) deliverBtn.addEventListener('click', () => openCashierTransferDeliveryModal(rec));
+	    table.appendChild(row);
+	  });
+	}
 
 function getCashierTransferRequestStatusLabel(rec) {
-  const status = rec?.status || 'pending';
-  if (status === 'transferred') return window.i18n.t('transferred');
-  if (status === 'received') return window.i18n.t('received');
-  if (status === 'partial_received') return window.i18n.t('partial_received');
-  if (status === 'rejected') return window.i18n.t('rejected');
-  return window.i18n.t('pending');
-}
+	  const status = rec?.status || 'pending';
+	  if (status === 'accepted') return 'بانتظار التجهيز';
+	  if (status === 'sent') return 'تم الارسال';
+	  if (status === 'transferred') return window.i18n.t('transferred');
+	  if (status === 'received') return window.i18n.t('received');
+	  if (status === 'partial_received') return window.i18n.t('partial_received');
+	  if (status === 'rejected') return window.i18n.t('rejected');
+	  return 'بانتظار القبول';
+	}
 
 const CASHIER_TRANSFER_GROUPS = [
   { key: 'sweets', titleKey: 'transfer_group_sweets' },
@@ -17788,7 +17796,7 @@ function getCashierTransferItemsByGroup(items) {
 }
 
 function getCashierTransferItemTypeLabel(type) {
-  return type === 'stock' ? window.i18n.t('stock_materials') : window.i18n.t('products');
+  return type === 'stock' || type === 'material' ? window.i18n.t('stock_materials') : window.i18n.t('products');
 }
 
 function getCashierTransferItemNames(item) {
@@ -17860,7 +17868,9 @@ function printCashierTransferRequestReport(record) {
       names.en || '-',
       getCashierTransferGroupLabel(item.groupKey),
       getCashierTransferItemTypeLabel(item.itemType),
-      formatNumber(Number(item.qty || item.requestedQty || 0))
+      formatNumber(Number(item.requestedQty || item.qty || 0)),
+      formatNumber(Number(item.sentQty || 0)),
+      formatNumber(Number(item.receivedQty || 0))
     ];
   });
   printA4Report(
@@ -17872,9 +17882,17 @@ function printCashierTransferRequestReport(record) {
       window.i18n.t('item_name_en'),
       window.i18n.t('categories'),
       window.i18n.t('type'),
-      window.i18n.t('quantity')
+      'الكمية المطلوبة',
+      'الكمية المرسلة',
+      'الكمية المستلمة'
     ],
-    rows
+    rows,
+    record.status === 'received'
+      ? [
+          { label: 'إقرار الاستلام', value: `أقر الكاشير ${record.receivedByCashier || record.cashierName || '-'} بأنه استلم الأصناف الموضحة في هذا التقرير.` },
+          { label: 'وقت الاستلام', value: formatDate(record.receivedAt) }
+        ]
+      : []
   );
 }
 
@@ -18031,6 +18049,104 @@ function submitCashierTransfer() {
         renderCashierTransferRequestsSection();
       });
     });
+  });
+}
+
+function acceptCashierTransferRequest(record) {
+  if (!record?.id) return;
+  db.ref(`transferRequests/${record.id}`).update({
+    status: 'accepted',
+    alertAcknowledged: true,
+    acceptedAt: serverTime,
+    acceptedBy: state.user?.name || null
+  }).then(() => {
+    renderCashierTransferRequestsSection();
+  });
+}
+
+function openCashierTransferDeliveryModal(record) {
+  if (!record?.id) return;
+  const existing = document.getElementById('cashierTransferDeliveryModal');
+  if (existing) existing.remove();
+  const items = normalizeItems(record.items);
+  const overlay = document.createElement('div');
+  overlay.id = 'cashierTransferDeliveryModal';
+  overlay.className = 'overlay';
+  overlay.innerHTML = `
+    <div class="modal lg" style="text-align: start; max-height: 90vh; overflow: auto; max-width: 960px; width: 100%;">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <h3>تسليم طلب النواقص ${escapeHtml(record.requestNumber || '')}</h3>
+        <button class="btn ghost small" data-close>×</button>
+      </div>
+      <button class="btn primary" data-fill-all style="margin-top: 12px;">تم تأمين كل النواقص</button>
+      <div class="table-wrap" style="margin-top: 12px;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>اسم المنتج</th>
+              <th>الكمية المطلوبة</th>
+              <th>الكمية المرسلة</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map((item, index) => `
+              <tr>
+                <td>${escapeHtml(item.nameAr || item.name || getCashierTransferItemName(item))}</td>
+                <td data-requested="${Number(item.requestedQty || item.qty || 0)}">${formatNumber(Number(item.requestedQty || item.qty || 0))}</td>
+                <td>
+                  <input class="input cashier-transfer-sent-qty" data-index="${index}" inputmode="decimal" value="${item.sentQty || ''}" />
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="row" style="justify-content: flex-end; margin-top: 16px;">
+        <button class="btn ghost" data-close>${window.i18n.t('cancel')}</button>
+        <button class="btn primary" data-submit>ارسال</button>
+      </div>
+      <p class="helper form-error" data-error style="margin-top: 8px;"></p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelectorAll('[data-close]').forEach((button) => {
+    button.addEventListener('click', () => overlay.remove());
+  });
+  overlay.querySelector('[data-fill-all]')?.addEventListener('click', () => {
+    overlay.querySelectorAll('.cashier-transfer-sent-qty').forEach((input) => {
+      const requested = input.closest('tr')?.querySelector('[data-requested]')?.dataset.requested || '0';
+      input.value = requested;
+    });
+  });
+  overlay.querySelectorAll('.cashier-transfer-sent-qty').forEach((input) => {
+    input.addEventListener('input', () => {
+      input.value = normalizeSearchValue(input.value).replace(/[^0-9.]/g, '');
+    });
+  });
+  overlay.querySelector('[data-submit]')?.addEventListener('click', () => submitCashierTransferDelivery(record, overlay));
+}
+
+function submitCashierTransferDelivery(record, overlay) {
+  const inputs = Array.from(overlay.querySelectorAll('.cashier-transfer-sent-qty'));
+  const errorEl = overlay.querySelector('[data-error]');
+  const items = normalizeItems(record.items).map((item, index) => ({
+    ...item,
+    requestedQty: Number(item.requestedQty || item.qty || 0),
+    sentQty: Number(normalizeSearchValue(inputs[index]?.value || '0')) || 0
+  }));
+  if (!items.length || items.some((item) => Number(item.sentQty || 0) < 0)) {
+    if (errorEl) errorEl.textContent = window.i18n.t('error');
+    return;
+  }
+  db.ref(`transferRequests/${record.id}`).update({
+    status: 'sent',
+    sentAt: serverTime,
+    sentBy: state.user?.name || null,
+    items,
+    sentItems: items
+  }).then(() => {
+    overlay.remove();
+    renderCashierTransferRequestsSection();
   });
 }
 

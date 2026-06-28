@@ -1,13 +1,8 @@
 (function () {
-  const TARGET_DEVICE_ID = 'dev-qr0f7eci-xhht';
   const REQUEST_PATH = 'labelPrintRequests';
 
-  if (window.__labelPrintBridgeStarted) return;
-  window.__labelPrintBridgeStarted = true;
-
-  function getDeviceId() {
-    return localStorage.getItem('deviceId') || '';
-  }
+  if (window.__labelPrintBridgeLoaded) return;
+  window.__labelPrintBridgeLoaded = true;
 
   function zplSafe(value, maxLength) {
     return String(value || '')
@@ -66,59 +61,12 @@
     await firebase.database().ref(`${REQUEST_PATH}/${requestId}`).update({
       status: 'completed',
       printedAt: firebase.database.ServerValue.TIMESTAMP,
-      printedByDeviceId: TARGET_DEVICE_ID
+      printedByDeviceId: localStorage.getItem('deviceId') || ''
     });
   }
 
-  function startBridge() {
-    if (!window.firebase?.database) return;
-    if (getDeviceId() !== TARGET_DEVICE_ID) return;
-
-    const ref = firebase.database().ref(REQUEST_PATH);
-    ref.orderByChild('targetDeviceId').equalTo(TARGET_DEVICE_ID).on('child_added', async (snapshot) => {
-      const request = snapshot.val() || {};
-      if (request.status !== 'pending') return;
-      try {
-        await snapshot.ref.update({
-          status: 'printing',
-          startedAt: firebase.database.ServerValue.TIMESTAMP,
-          printedByDeviceId: TARGET_DEVICE_ID
-        });
-        await printRequest(snapshot.key, request);
-      } catch (error) {
-        console.error('Mobile label print request failed:', error);
-        await snapshot.ref.update({
-          status: 'failed',
-          error: error?.message || String(error || 'Print failed'),
-          failedAt: firebase.database.ServerValue.TIMESTAMP,
-          printedByDeviceId: TARGET_DEVICE_ID
-        });
-      }
-    });
-
-    ref.orderByChild('targetDeviceId').equalTo(TARGET_DEVICE_ID).on('child_changed', async (snapshot) => {
-      const request = snapshot.val() || {};
-      if (request.status !== 'pending') return;
-      try {
-        await snapshot.ref.update({
-          status: 'printing',
-          startedAt: firebase.database.ServerValue.TIMESTAMP,
-          printedByDeviceId: TARGET_DEVICE_ID
-        });
-        await printRequest(snapshot.key, request);
-      } catch (error) {
-        console.error('Mobile label print request failed:', error);
-        await snapshot.ref.update({
-          status: 'failed',
-          error: error?.message || String(error || 'Print failed'),
-          failedAt: firebase.database.ServerValue.TIMESTAMP,
-          printedByDeviceId: TARGET_DEVICE_ID
-        });
-      }
-    });
-  }
-
-  window.addEventListener('DOMContentLoaded', () => {
-    setTimeout(startBridge, 900);
-  });
+  window.labelPrintBridge = {
+    buildMobileLabelZpl,
+    printRequest
+  };
 })();

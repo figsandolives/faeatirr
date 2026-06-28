@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>أوامر طباعة الستيكرات</title>
+  <link rel="stylesheet" href="label-print-orders.css" />
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+</head>
+<body>
+  <main id="printOrdersApp" class="orders-shell">
+    <section class="loading-state">
+      <div class="spinner"></div>
+      <h1>أوامر طباعة</h1>
+      <p>جاري تحميل أوامر الطباعة...</p>
+    </section>
+  </main>
+  <script src="label-print-bridge.js"></script>
+  <script src="label-print-orders.js"></script>
+</body>
+</html>

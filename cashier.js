@@ -2786,7 +2786,7 @@ function refreshUI() {
     function handleBarcodeScan(value) {
       if (currentScreen !== 'cashier' || !currentCashier) return;
       const barcode = normalizeBarcodeValue(value);
-	      if (!barcode || barcode.length < 4) return;
+	      if (!/^\d{6,}$/.test(barcode)) return;
 	      clearProductSearchBoxAfterScan(barcode);
 
 	      if (document.getElementById('shortageRequestsPage') || document.getElementById('shortageDraftPage')) {
@@ -2845,11 +2845,13 @@ function refreshUI() {
       if (isTypingField && !isBarcodeFriendlyInput) return;
 
       if (event.key === 'Enter') {
-        if (barcodeScanBuffer) {
+        if (/^\d{6,}$/.test(barcodeScanBuffer)) {
           event.preventDefault();
           const value = barcodeScanBuffer;
           barcodeScanBuffer = '';
           handleBarcodeScan(value);
+        } else {
+          barcodeScanBuffer = '';
         }
         return;
       }
@@ -2860,21 +2862,16 @@ function refreshUI() {
         barcodeScanBuffer = '';
       }
       const normalizedKey = normalizeBarcodeValue(event.key);
-	      if (isBarcodeFriendlyInput && barcodeScanBuffer) {
-	        event.preventDefault();
+	      if (!/^\d$/.test(normalizedKey)) {
+	        barcodeScanBuffer = '';
+	        barcodeScanLastTime = now;
+	        return;
 	      }
 	      barcodeScanBuffer += normalizedKey || event.key;
 	      barcodeScanLastTime = now;
-	      if (isBarcodeFriendlyInput) {
-	        setTimeout(() => {
-	          if (barcodeScanBuffer && target && target.value) {
-	            target.value = '';
-	          }
-	        }, 0);
-	      }
 	      clearTimeout(barcodeScanTimer);
       barcodeScanTimer = setTimeout(() => {
-        if (barcodeScanBuffer.length >= 4) {
+        if (/^\d{6,}$/.test(barcodeScanBuffer)) {
           const value = barcodeScanBuffer;
           barcodeScanBuffer = '';
           handleBarcodeScan(value);
@@ -4112,11 +4109,8 @@ function showNumericKeypadForInvoice(index, inputField) {
 }
 
 
-    function printThermalInvoice(button) {
-  const invoiceContent = button.closest('.modal-content').querySelector('.thermal-invoice').innerHTML;
-  
-  const printWindow = window.open('', '_blank', 'width=800,height=600');
-  printWindow.document.write(`
+    function buildThermalInvoicePrintHtml(invoiceContent) {
+      return `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
@@ -4199,15 +4193,46 @@ function showNumericKeypadForInvoice(index, inputField) {
       <div class="thermal-invoice">
         ${invoiceContent}
       </div>
+    </body>
+    </html>
+  `;
+    }
+
+    async function printThermalInvoice(button) {
+  const invoiceContent = button.closest('.modal-content').querySelector('.thermal-invoice').innerHTML;
+  const printHtml = buildThermalInvoicePrintHtml(invoiceContent);
+
+  if (window.figsDesktop?.isDesktopApp) {
+    const originalText = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = 'جاري الطباعة...';
+    try {
+      await window.figsDesktop.printHtml({ html: printHtml, type: 'receipt', silent: true });
+      button.closest('.modal-overlay')?.remove();
+      showToast('تم إرسال الفاتورة للطابعة');
+      return;
+    } catch (error) {
+      console.error('Desktop receipt print failed:', error);
+      showToast(`تعذر طباعة الفاتورة: ${error.message || error}`, true);
+      button.disabled = false;
+      button.innerHTML = originalText;
+      return;
+    }
+  }
+
+  const printWindow = window.open('', '_blank', 'width=800,height=600');
+  if (!printWindow) {
+    showToast('تعذر فتح نافذة الطباعة', true);
+    return;
+  }
+  printWindow.document.write(printHtml.replace('</body>', `
       <script>
         window.print();
         window.onafterprint = function() {
           window.close();
         };
       <\/script>
-    </body>
-    </html>
-  `);
+    </body>`));
   printWindow.document.close();
 }
 

@@ -2178,9 +2178,9 @@ function refreshUI() {
 	                  ${cashierT('newInvoice')}
 	                </button>
 	                ${getCurrentBranchTables().length ? `
-	                  <button onclick="showTablesOpenPage()" class="bg-slate-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-slate-900 transition flex items-center justify-center gap-2">
-	                    ${getTableIconSvg('w-6 h-6')} <span>${cashierT('tables')}</span>
-	                  </button>
+		                  <button onclick="showTablesOpenPage()" style="background:#1f2937;color:#fff;box-shadow:0 10px 22px rgba(31,41,55,.18);" class="px-8 py-3 rounded-lg font-bold text-lg transition flex items-center justify-center gap-2">
+		                    ${getTableIconSvg('w-6 h-6')} <span>${cashierT('tables')}</span>
+		                  </button>
 	                ` : ''}
 	                ${isShortageRequestBranch() ? `
 	                  <button onclick="showShortageRequestsPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
@@ -2810,21 +2810,23 @@ function refreshUI() {
       page.className = 'invoice-page';
       page.id = 'tablesOpenPage';
       page.innerHTML = `
-        <div class="h-full flex flex-col bg-gray-100">
-          <div class="no-print bg-slate-800 text-white p-4 flex justify-between items-center">
-            <h2 class="text-2xl font-bold">${cashierT('openTable')}</h2>
-            <button onclick="document.getElementById('tablesOpenPage')?.remove()" class="text-3xl font-bold hover:text-red-300">✕</button>
+        <div class="h-full flex flex-col" style="background:#f3f4f6;">
+          <div class="no-print p-4 flex justify-between items-center" style="background:#1f2937;color:#fff;">
+            <h2 class="text-2xl font-bold" style="color:#fff;">${cashierT('openTable')}</h2>
+            <button onclick="document.getElementById('tablesOpenPage')?.remove()" style="color:#fff;background:rgba(255,255,255,.14);width:44px;height:44px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:30px;line-height:1;font-weight:900;">✕</button>
           </div>
           <div class="flex-1 overflow-y-auto p-6">
             <div class="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               ${tables.length ? tables.map(table => {
                 const draft = getTableDraft(branchId, table.tableNumber);
                 return `
-                  <div class="bg-white rounded-xl shadow-lg border-2 ${draft ? 'border-amber-300' : 'border-gray-100'} p-5">
-                    <div class="text-slate-800 mb-3">${getTableIconSvg('w-12 h-12')}</div>
-                    <div class="text-2xl font-black text-gray-800">${escapeHtml(table.tableNumber)}</div>
-                    <div class="text-sm text-gray-500 min-h-6">${escapeHtml(table.location || '')}</div>
-                    <div class="mt-3 text-sm font-bold ${draft ? 'text-amber-700' : 'text-green-700'}">${draft ? cashierT('reserved') : cashierT('available')}</div>
+                  <div class="relative bg-white rounded-xl shadow-lg border-2 ${draft ? 'border-amber-300' : 'border-gray-100'} p-5 text-center" style="min-height:210px;">
+                    <span
+                      title="${draft ? cashierT('reserved') : cashierT('available')}"
+                      style="position:absolute;top:14px;left:14px;width:16px;height:16px;border-radius:999px;background:${draft ? '#d97706' : '#16a34a'};box-shadow:0 0 0 4px ${draft ? 'rgba(217,119,6,.14)' : 'rgba(22,163,74,.14)'};"
+                    ></span>
+                    <div class="text-gray-800 mx-auto mb-4" style="width:52px;height:52px;display:flex;align-items:center;justify-content:center;">${getTableIconSvg('w-12 h-12')}</div>
+                    <div class="font-black text-gray-900" style="font-size:56px;line-height:1;">${escapeHtml(table.tableNumber)}</div>
                     <button
                       onclick="${draft ? `continueTableInvoice('${escapeHtml(table.id)}')` : `startTableInvoice('${escapeHtml(table.id)}')`}"
                       class="mt-4 w-full ${draft ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'} text-white px-4 py-3 rounded-lg font-bold transition"

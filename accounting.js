@@ -23964,8 +23964,8 @@ function renderTablesSection() {
       </table>
       ${buildPaginationBarHtml('tablesPageInfo', 'tablesPagination')}
     </div>
-    <div id="tableFormOverlay" class="modal-overlay ${isTableFormOpen ? '' : 'hidden'}">
-      <div class="modal-content" style="max-width: 560px;">
+    <div id="tableFormOverlay" class="overlay ${isTableFormOpen ? '' : 'hidden'}">
+      <div class="modal card" style="max-width: 560px; text-align: start;">
         <div class="row" style="justify-content: space-between; align-items: center;">
           <h3>${state.editingTableId ? window.i18n.t('edit') : window.i18n.t('add')}</h3>
           <button id="tableFormCloseBtn" class="btn ghost small">×</button>

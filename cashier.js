@@ -40,6 +40,10 @@
     let allProductPriceChanges = [];
     let allProductInfos = [];
     let allDeliveryPrices = {};
+    let allDeliveryZones = [];
+    let allBranches = [];
+    let allTables = [];
+    let allTableDrafts = [];
     let selectedDeliveryPriceGroup = 'mainYarmouk';
     let allDailySessions = [];
     let allRegisteredDevices = [];
@@ -60,7 +64,8 @@
     let barcodeScanBuffer = '';
     let barcodeScanLastTime = 0;
     let barcodeScanTimer = null;
-    let currentOrder = {
+    function createEmptyCurrentOrder(overrides = {}) {
+      return {
       items: [],
       customer: null,
       deliveryPrice: 0,
@@ -76,8 +81,17 @@
       cashChange: 0,
       discountType: 'none',
       discountValue: 0,
-      discountAmount: 0
-    };
+        discountAmount: 0,
+        tableId: '',
+        tableNumber: '',
+        tableBranchId: '',
+        tableLocation: '',
+        tableOpenedAt: 0,
+        ...overrides
+      };
+    }
+
+    let currentOrder = createEmptyCurrentOrder();
     let selectedProductsForCategory = [];
     let adminProductCategoryPath = [];
     let adminProductSearchTerm = '';
@@ -174,6 +188,12 @@
         logout: '🚪 خروج',
         orders: 'الطلبات',
         newInvoice: '➕ فاتورة جديدة',
+        tables: '🍽 الطاولات',
+        openTable: 'فتح طاولة',
+        continueTable: 'متابعة',
+        tableNumber: 'رقم الطاولة',
+        reserved: 'محجوزة',
+        available: 'متاحة',
         shortageRequest: 'طلب نواقص',
         dailyOpened: 'اليومية مفتوحة من',
         openingAmount: 'مبلغ البداية',
@@ -275,6 +295,12 @@
         logout: '🚪 Logout',
         orders: 'Orders',
         newInvoice: '➕ New Invoice',
+        tables: '🍽 Tables',
+        openTable: 'Open Table',
+        continueTable: 'Continue',
+        tableNumber: 'Table No.',
+        reserved: 'Reserved',
+        available: 'Available',
         shortageRequest: 'Shortage Request',
         dailyOpened: 'Daily session opened at',
         openingAmount: 'Opening amount',
@@ -402,6 +428,93 @@
 	    ];
 	    const PICKUP_BRANCHES = ['الفرع الرئيسي', 'اليرموك', 'أبو الحصانية', 'المخزن الرئيسي'];
 
+    function getCurrentCashierBranchId() {
+      const savedId = localStorage.getItem('deviceBranchId') || '';
+      if (savedId) return savedId;
+      const branchName = String(currentBranch || '').trim();
+      if (!branchName) return '';
+      const matched = allBranches.find(branch => {
+        const names = [branch.nameAr, branch.name, branch.nameEn, branch.branchName, branch.branchNameAr]
+          .map(value => String(value || '').trim())
+          .filter(Boolean);
+        return names.includes(branchName);
+      });
+      if (matched) return matched.id || '';
+      if (branchName.includes('يرموك')) return 'yarmouk';
+      if (branchName.includes('حصانية')) return 'abu_hasaniya';
+      if (branchName.includes('رئيسي')) return 'main';
+      return '';
+    }
+
+    function getCurrentBranchTables() {
+      const branchId = getCurrentCashierBranchId();
+      if (!branchId) return [];
+      return allTables
+        .filter(table => table.active !== false)
+        .filter(table => String(table.branchId || '') === String(branchId))
+        .map(table => ({
+          ...table,
+          tableNumber: String(table.tableNumber || table.number || '').trim()
+        }))
+        .filter(table => table.tableNumber)
+        .sort((a, b) => String(a.tableNumber).localeCompare(String(b.tableNumber), undefined, { numeric: true }));
+    }
+
+    function getTableIconSvg(className = 'w-6 h-6') {
+      return `
+        <svg class="${className}" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+          <rect x="10" y="12" width="28" height="8" rx="4" fill="currentColor" opacity="0.95"/>
+          <path d="M16 20v16M32 20v16M13 36h6M29 36h6" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+          <path d="M8 12c0-4 3-7 7-7h18c4 0 7 3 7 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity="0.35"/>
+        </svg>
+      `;
+    }
+
+    function getTableDraftKey(branchId, tableNumber) {
+      return `${String(branchId || '').replace(/[.#$\[\]/]/g, '_')}_${String(tableNumber || '').replace(/[.#$\[\]/]/g, '_')}`;
+    }
+
+    function getTableDraft(branchId, tableNumber) {
+      const key = getTableDraftKey(branchId, tableNumber);
+      return allTableDrafts.find(draft => draft.id === key) || null;
+    }
+
+    function orderHasTableDraftData(order = currentOrder) {
+      return Boolean(
+        (order.items || []).length ||
+        order.customer ||
+        order.orderType ||
+        order.paymentMethod ||
+        order.selectedAddress
+      );
+    }
+
+    async function saveCurrentTableDraft() {
+      if (!currentOrder.tableNumber || !currentOrder.tableBranchId || !orderHasTableDraftData()) return;
+      const key = getTableDraftKey(currentOrder.tableBranchId, currentOrder.tableNumber);
+      await db.ref(`tableDrafts/${key}`).set({
+        ...currentOrder,
+        id: key,
+        branchId: currentOrder.tableBranchId,
+        branch: currentBranch || '',
+        cashierCode: currentCashier?.code || '',
+        cashierName: currentCashier?.name || '',
+        updatedAt: Date.now(),
+        tableOpenedAt: currentOrder.tableOpenedAt || Date.now()
+      });
+      const index = allTableDrafts.findIndex(draft => draft.id === key);
+      const nextDraft = { ...currentOrder, id: key, branchId: currentOrder.tableBranchId };
+      if (index >= 0) allTableDrafts[index] = nextDraft;
+      else allTableDrafts.push(nextDraft);
+    }
+
+    async function clearTableDraft(order = currentOrder) {
+      if (!order.tableNumber || !order.tableBranchId) return;
+      const key = getTableDraftKey(order.tableBranchId, order.tableNumber);
+      await db.ref(`tableDrafts/${key}`).remove();
+      allTableDrafts = allTableDrafts.filter(draft => draft.id !== key);
+    }
+
     // Helper Functions
     function generateId() {
       return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -509,6 +622,10 @@
         allProductInfos,
         allProductPriceChanges,
         allDeliveryPrices,
+        allDeliveryZones,
+        allBranches,
+        allTables,
+        allTableDrafts,
         allDailySessions,
         allRegisteredDevices,
         allCustomers,
@@ -534,6 +651,10 @@
       allProductInfos = Array.isArray(cache.allProductInfos) ? cache.allProductInfos : [];
       allProductPriceChanges = Array.isArray(cache.allProductPriceChanges) ? cache.allProductPriceChanges : [];
       allDeliveryPrices = cache.allDeliveryPrices || {};
+      allDeliveryZones = Array.isArray(cache.allDeliveryZones) ? cache.allDeliveryZones : [];
+      allBranches = Array.isArray(cache.allBranches) ? cache.allBranches : [];
+      allTables = Array.isArray(cache.allTables) ? cache.allTables : [];
+      allTableDrafts = Array.isArray(cache.allTableDrafts) ? cache.allTableDrafts : [];
       allDailySessions = Array.isArray(cache.allDailySessions) ? cache.allDailySessions : [];
       allRegisteredDevices = Array.isArray(cache.allRegisteredDevices) ? cache.allRegisteredDevices : [];
       allCustomers = Array.isArray(cache.allCustomers) ? cache.allCustomers : [];
@@ -633,6 +754,10 @@
         ['productInfos', 'معلومات المنتجات'],
         ['productPriceChanges', 'سجل الأسعار'],
         ['deliveryPrices', 'أسعار التوصيل'],
+        ['deliveryZones', 'مناطق التوصيل'],
+        ['branches', 'الفروع'],
+        ['tables', 'الطاولات'],
+        ['tableDrafts', 'مسودات الطاولات'],
         ['dailySessions', 'يوميات الموظفين'],
         ['registeredDevices', 'الأجهزة'],
         ['customers', 'العملاء'],
@@ -675,6 +800,10 @@
           productInfosSnapshot,
           productPriceChangesSnapshot,
           deliveryPricesSnapshot,
+          deliveryZonesSnapshot,
+          branchesSnapshot,
+          tablesSnapshot,
+          tableDraftsSnapshot,
           dailySessionsSnapshot,
           registeredDevicesSnapshot,
           customersSnapshot,
@@ -706,6 +835,10 @@
         allProductInfos = toArray(productInfosSnapshot);
         allProductPriceChanges = toArray(productPriceChangesSnapshot).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
         allDeliveryPrices = deliveryPricesSnapshot.val() || {};
+        allDeliveryZones = toArray(deliveryZonesSnapshot);
+        allBranches = toArray(branchesSnapshot);
+        allTables = toArray(tablesSnapshot);
+        allTableDrafts = toArray(tableDraftsSnapshot);
         allDailySessions = toArray(dailySessionsSnapshot).sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0));
         allRegisteredDevices = toArray(registeredDevicesSnapshot);
         allCustomers = sortCustomersNewestFirst(toArray(customersSnapshot));
@@ -1323,6 +1456,26 @@ function setupRealtimeListeners() {
 
   db.ref('deliveryPrices').on('value', (snapshot) => {
     allDeliveryPrices = snapshot.val() || {};
+    refreshUI();
+  });
+
+  db.ref('deliveryZones').on('value', (snapshot) => {
+    allDeliveryZones = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
+    refreshUI();
+  });
+
+  db.ref('branches').on('value', (snapshot) => {
+    allBranches = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
+    refreshUI();
+  });
+
+  db.ref('tables').on('value', (snapshot) => {
+    allTables = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
+    refreshUI();
+  });
+
+  db.ref('tableDrafts').on('value', (snapshot) => {
+    allTableDrafts = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
     refreshUI();
   });
 
@@ -2024,6 +2177,11 @@ function refreshUI() {
 	                <button onclick="startNewInvoiceFromCashier()" class="bg-green-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-green-700 transition">
 	                  ${cashierT('newInvoice')}
 	                </button>
+	                ${getCurrentBranchTables().length ? `
+	                  <button onclick="showTablesOpenPage()" class="bg-slate-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-slate-900 transition flex items-center justify-center gap-2">
+	                    ${getTableIconSvg('w-6 h-6')} <span>${cashierT('tables')}</span>
+	                  </button>
+	                ` : ''}
 	                ${isShortageRequestBranch() ? `
 	                  <button onclick="showShortageRequestsPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
 	                    ${cashierT('shortageRequest')}
@@ -2643,22 +2801,93 @@ function refreshUI() {
       showNewInvoicePage();
     }
 
+    function showTablesOpenPage() {
+      const existing = document.getElementById('tablesOpenPage');
+      if (existing) existing.remove();
+      const tables = getCurrentBranchTables();
+      const branchId = getCurrentCashierBranchId();
+      const page = document.createElement('div');
+      page.className = 'invoice-page';
+      page.id = 'tablesOpenPage';
+      page.innerHTML = `
+        <div class="h-full flex flex-col bg-gray-100">
+          <div class="no-print bg-slate-800 text-white p-4 flex justify-between items-center">
+            <h2 class="text-2xl font-bold">${cashierT('openTable')}</h2>
+            <button onclick="document.getElementById('tablesOpenPage')?.remove()" class="text-3xl font-bold hover:text-red-300">✕</button>
+          </div>
+          <div class="flex-1 overflow-y-auto p-6">
+            <div class="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              ${tables.length ? tables.map(table => {
+                const draft = getTableDraft(branchId, table.tableNumber);
+                return `
+                  <div class="bg-white rounded-xl shadow-lg border-2 ${draft ? 'border-amber-300' : 'border-gray-100'} p-5">
+                    <div class="text-slate-800 mb-3">${getTableIconSvg('w-12 h-12')}</div>
+                    <div class="text-2xl font-black text-gray-800">${escapeHtml(table.tableNumber)}</div>
+                    <div class="text-sm text-gray-500 min-h-6">${escapeHtml(table.location || '')}</div>
+                    <div class="mt-3 text-sm font-bold ${draft ? 'text-amber-700' : 'text-green-700'}">${draft ? cashierT('reserved') : cashierT('available')}</div>
+                    <button
+                      onclick="${draft ? `continueTableInvoice('${escapeHtml(table.id)}')` : `startTableInvoice('${escapeHtml(table.id)}')`}"
+                      class="mt-4 w-full ${draft ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'} text-white px-4 py-3 rounded-lg font-bold transition"
+                    >
+                      ${draft ? cashierT('continueTable') : cashierT('openTable')}
+                    </button>
+                  </div>
+                `;
+              }).join('') : `<div class="col-span-full bg-white rounded-xl p-8 text-center text-gray-500">${cashierT('noResults')}</div>`}
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(page);
+    }
+
+    function getCashierTableById(tableId) {
+      return getCurrentBranchTables().find(table => String(table.id || '') === String(tableId || '')) || null;
+    }
+
+    function startTableInvoice(tableId) {
+      const table = getCashierTableById(tableId);
+      if (!table) {
+        showToast('الطاولة غير موجودة', true);
+        return;
+      }
+      document.getElementById('tablesOpenPage')?.remove();
+      currentOrder = createEmptyCurrentOrder({
+        orderType: 'dine_in',
+        tableId: table.id || '',
+        tableNumber: table.tableNumber || '',
+        tableBranchId: table.branchId || getCurrentCashierBranchId(),
+        tableLocation: table.location || '',
+        tableOpenedAt: Date.now()
+      });
+      showInvoiceCustomerSelection(true);
+    }
+
+    function continueTableInvoice(tableId) {
+      const table = getCashierTableById(tableId);
+      if (!table) {
+        showToast('الطاولة غير موجودة', true);
+        return;
+      }
+      const draft = getTableDraft(table.branchId || getCurrentCashierBranchId(), table.tableNumber);
+      document.getElementById('tablesOpenPage')?.remove();
+      currentOrder = createEmptyCurrentOrder({
+        ...(draft || {}),
+        tableId: table.id || draft?.tableId || '',
+        tableNumber: table.tableNumber || draft?.tableNumber || '',
+        tableBranchId: table.branchId || draft?.tableBranchId || getCurrentCashierBranchId(),
+        tableLocation: table.location || draft?.tableLocation || '',
+        tableOpenedAt: draft?.tableOpenedAt || Date.now()
+      });
+      if (currentOrder.customer || (currentOrder.items || []).length) {
+        showInvoiceProductsPage();
+      } else {
+        showInvoiceCustomerSelection(true);
+      }
+    }
+
     function showNewInvoicePage() {
-      currentOrder = {
-        items: [],
-        customer: null,
-        deliveryPrice: 0,
-        orderType: null,
-        paymentMethod: '',
-        selectedAddress: null,
-        deliveryTimingType: 'within2',
-        deliveryDate: '',
-        deliveryTimeFrom: '',
-        deliveryTimeTo: '',
-        pickupBranch: '',
-        cashReceived: 0,
-        cashChange: 0
-      };
+      currentOrder = createEmptyCurrentOrder({ orderType: null });
 
       showInvoiceCustomerSelection(true);
     }
@@ -2674,7 +2903,7 @@ function refreshUI() {
         <div class="h-full flex flex-col">
           <!-- Header with close button -->
           <div class="no-print bg-blue-600 text-white p-4 flex justify-between items-center">
-  <h2 class="text-2xl font-bold">${cashierT('newInvoiceTitle')}</h2>
+            <h2 class="text-2xl font-bold">${currentOrder.tableNumber ? `${cashierT('openTable')} ${escapeHtml(currentOrder.tableNumber)}` : cashierT('newInvoiceTitle')}</h2>
             <button onclick="closeInvoicePage()" class="text-3xl font-bold hover:text-red-300">✕</button>
           </div>
           
@@ -2719,26 +2948,21 @@ function refreshUI() {
       updateSelectedItemsDisplay();
     }
     
-    function closeInvoicePage() {
+    async function closeInvoicePage(skipTableDraft = false) {
+      if (!skipTableDraft) {
+        try {
+          await saveCurrentTableDraft();
+        } catch (error) {
+          console.error('Error saving table draft:', error);
+          showToast('تعذر حفظ مسودة الطاولة', true);
+        }
+      }
       const page = document.getElementById('invoicePage');
       if (page) {
         page.remove();
       }
-      currentOrder = {
-        items: [],
-        customer: null,
-        deliveryPrice: 0,
-        orderType: null,
-        paymentMethod: '',
-        selectedAddress: null,
-        deliveryTimingType: 'within2',
-        deliveryDate: '',
-        deliveryTimeFrom: '',
-        deliveryTimeTo: '',
-        pickupBranch: '',
-        cashReceived: 0,
-        cashChange: 0
-      };
+      currentOrder = createEmptyCurrentOrder({ orderType: null });
+      if (currentScreen === 'cashier') renderCashier();
     }
 
     function goNextFromProducts() {
@@ -2748,6 +2972,12 @@ function refreshUI() {
       }
       if (!currentOrder.customer) {
         showInvoiceCustomerSelection(false);
+        return;
+      }
+      if (currentOrder.tableNumber) {
+        currentOrder.orderType = 'dine_in';
+        currentOrder.deliveryPrice = 0;
+        showPaymentMethodSelection();
         return;
       }
       showOrderTypeSelection();
@@ -2931,12 +3161,37 @@ function refreshUI() {
 
     function getSavedDeliveryPriceForArea(area, groupKey = getDeliveryPriceGroupForBranch()) {
       if (!area || !allDeliveryPrices) return '';
-      const groupedRow = allDeliveryPrices[groupKey]?.[area];
-      const legacyRow = allDeliveryPrices[area];
-      const row = groupedRow !== undefined ? groupedRow : legacyRow;
-      if (row === undefined || row === null) return '';
-      const value = typeof row === 'object' ? row.price : row;
-      return value === '' || value === undefined || value === null ? '' : parseFloat(value);
+      const readPriceValue = (row) => {
+        if (row === undefined || row === null || row === '') return '';
+        const value = typeof row === 'object' ? row.price : row;
+        if (value === '' || value === undefined || value === null) return '';
+        const numeric = parseFloat(value);
+        return isNaN(numeric) ? '' : numeric;
+      };
+      const groupedPrice = readPriceValue(allDeliveryPrices[groupKey]?.[area]);
+      if (groupedPrice !== '') return groupedPrice;
+      const legacyPrice = readPriceValue(allDeliveryPrices[area]);
+      if (legacyPrice !== '') return legacyPrice;
+
+      const normalizedArea = normalizeText(area).replace(/[إأآا]/g, 'ا').replace(/ة/g, 'ه');
+      const zoneIds = new Set(allDeliveryZones
+        .filter(zone => {
+          const name = zone.nameAr || zone.name || zone.nameEn || '';
+          return normalizeText(name).replace(/[إأآا]/g, 'ا').replace(/ة/g, 'ه') === normalizedArea;
+        })
+        .map(zone => String(zone.id || '')));
+      if (!zoneIds.size) return '';
+      for (const row of Object.values(allDeliveryPrices || {})) {
+        if (!row || typeof row !== 'object') continue;
+        const rowZoneIds = Array.isArray(row.zoneIds)
+          ? row.zoneIds
+          : (row.zoneIds && typeof row.zoneIds === 'object' ? Object.values(row.zoneIds) : []);
+        if (!rowZoneIds.some(id => zoneIds.has(String(id)))) continue;
+        if (row.groupKey && row.groupKey !== groupKey) continue;
+        const price = readPriceValue(row);
+        if (price !== '') return price;
+      }
+      return '';
     }
 
     function getResolvedDeliveryPriceForArea(area, groupKey = getDeliveryPriceGroupForBranch()) {
@@ -3056,21 +3311,7 @@ function refreshUI() {
       if (!invoicePage || !selectedItemsContainer) {
         document.querySelector('.modal-overlay')?.remove();
         if (!invoicePage) {
-          currentOrder = {
-            items: [],
-            customer: null,
-            deliveryPrice: 0,
-            orderType: null,
-            paymentMethod: '',
-            selectedAddress: null,
-            deliveryTimingType: 'within2',
-            deliveryDate: '',
-            deliveryTimeFrom: '',
-            deliveryTimeTo: '',
-            pickupBranch: '',
-            cashReceived: 0,
-            cashChange: 0
-          };
+          currentOrder = createEmptyCurrentOrder({ orderType: null });
         }
         showInvoiceProductsPage();
       }
@@ -4169,9 +4410,11 @@ function showNumericKeypadForInvoice(index, inputField) {
       const order = {
         invoiceNumber,
         timestamp,
+        createdAt: timestamp,
         cashier: currentCashier.name || '',
         cashierCode: currentCashier.code || '',
         branch: currentBranch || '',
+        branchId: currentOrder.tableBranchId || getCurrentCashierBranchId() || '',
         dailySessionId: currentBranch === 'اليرموك' && currentDailySession ? currentDailySession.id : '',
         customerName: currentOrder.customer.name || '',
         phoneNumber: currentOrder.customer.phone || '',
@@ -4189,15 +4432,22 @@ function showNumericKeypadForInvoice(index, inputField) {
         cashReceived: currentOrder.cashReceived || 0,
         cashChange: currentOrder.cashChange || 0,
         notes: currentOrder.notes || '',
+        tableId: currentOrder.tableId || '',
+        tableNumber: currentOrder.tableNumber || '',
+        tableBranchId: currentOrder.tableBranchId || '',
+        tableLocation: currentOrder.tableLocation || '',
+        tableOpenedAt: currentOrder.tableOpenedAt || '',
+        tableClosedAt: currentOrder.tableNumber ? timestamp : '',
         total: currentOrder.items.reduce((sum, item) => sum + item.total, 0) + (currentOrder.deliveryPrice || 0)
       };
       
       try {
         const orderId = generateId();
         await db.ref(`orders/${orderId}`).set({ ...order, id: orderId });
+        await clearTableDraft(currentOrder);
         await loadData();
         
-        closeInvoicePage();
+        await closeInvoicePage(true);
         showThermalInvoice(order);
         showToast('تم حفظ الفاتورة بنجاح');
       } catch (error) {
@@ -4252,8 +4502,13 @@ function showNumericKeypadForInvoice(index, inputField) {
           <div style="font-weight: bold; border-bottom: 1px solid #eee; margin-bottom: 3px;">العميل: ${order.customerName}</div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
             <span>📞 ${order.phoneNumber.replace(/^\+?965\s?/, '')}</span>
-            <span style="background: #000; color: #fff; padding: 0 5px; border-radius: 2px;">${order.orderType === 'delivery' ? 'توصيل' : 'استلام'}</span>
+            <span style="background: #000; color: #fff; padding: 0 5px; border-radius: 2px;">${order.tableNumber ? `طاولة ${order.tableNumber}` : (order.orderType === 'delivery' ? 'توصيل' : 'استلام')}</span>
           </div>
+          ${order.tableNumber ? `
+            <div style="font-size: 10px; color: #92400e; margin-top: 4px;">
+              🍽️ الطاولة: ${order.tableNumber}${order.tableLocation ? ` - ${order.tableLocation}` : ''}
+            </div>
+          ` : ''}
           <div style="display: flex; justify-content: space-between;">
             <span>${order.address ? `📍 ${order.address}` : ''}</span>
             <span style="background: #000; color: #fff; padding: 0 5px; border-radius: 2px;">${getPaymentMethodLabel(order.paymentMethod, false)}</span>
@@ -4950,21 +5205,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       currentCashier = null;
       currentBranch = null;
       currentDailySession = null;
-      currentOrder = {
-        items: [],
-        customer: null,
-        deliveryPrice: 0,
-        orderType: null,
-        paymentMethod: '',
-        selectedAddress: null,
-        deliveryTimingType: 'within2',
-        deliveryDate: '',
-        deliveryTimeFrom: '',
-        deliveryTimeTo: '',
-        pickupBranch: '',
-        cashReceived: 0,
-        cashChange: 0
-      };
+      currentOrder = createEmptyCurrentOrder({ orderType: null });
       document.querySelector('.modal-overlay').remove();
       currentScreen = 'home';
       renderHome();

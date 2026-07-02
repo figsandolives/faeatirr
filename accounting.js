@@ -445,6 +445,33 @@ function itemHasSupplier(item, supplierId) {
   return getItemSupplierIds(item).includes(targetId);
 }
 
+function getSupplierAssignedItemIds(supplier) {
+  const ids = [];
+  const collect = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(collect);
+      return;
+    }
+    if (typeof value === 'object') {
+      Object.entries(value).forEach(([key, nestedValue]) => {
+        if (nestedValue === true) ids.push(key);
+        else if (typeof nestedValue === 'string' || typeof nestedValue === 'number') ids.push(nestedValue);
+        else collect(nestedValue);
+      });
+      return;
+    }
+    ids.push(value);
+  };
+  collect(supplier?.productIds);
+  collect(supplier?.products);
+  collect(supplier?.itemIds);
+  collect(supplier?.items);
+  collect(supplier?.materialIds);
+  collect(supplier?.materials);
+  return new Set(ids.map((id) => String(id || '').trim()).filter(Boolean));
+}
+
 function buildItemSupplierUpdates(basePath, item, supplierIds) {
   const nextSupplierIds = Array.from(new Set((supplierIds || []).map((id) => String(id || '').trim()).filter(Boolean)));
   return {
@@ -2169,10 +2196,40 @@ function getDeliveryPriceAreas() {
 
 function getSavedDeliveryPriceForArea(area, groupKey = state.selectedDeliveryPriceGroup || 'mainYarmouk') {
   const prices = state.cache.deliveryPrices || {};
-  const groupedRow = prices[groupKey]?.[area];
-  if (groupedRow && groupedRow.price !== undefined) return Number(groupedRow.price);
-  const legacyRow = prices[area];
-  if (legacyRow && legacyRow.price !== undefined) return Number(legacyRow.price);
+  const readPriceValue = (row) => {
+    if (row === undefined || row === null || row === '') return '';
+    if (typeof row === 'number' || typeof row === 'string') {
+      const value = Number(row);
+      return Number.isNaN(value) ? '' : value;
+    }
+    if (typeof row === 'object' && row.price !== undefined) {
+      const value = Number(row.price);
+      return Number.isNaN(value) ? '' : value;
+    }
+    return '';
+  };
+  const groupedPrice = readPriceValue(prices[groupKey]?.[area]);
+  if (groupedPrice !== '') return groupedPrice;
+  const legacyPrice = readPriceValue(prices[area]);
+  if (legacyPrice !== '') return legacyPrice;
+
+  const normalizedArea = normalizeSearchValue(area);
+  const zones = state.cache.deliveryZones || {};
+  const matchingZoneIds = new Set(Object.entries(zones)
+    .filter(([, zone]) => normalizeSearchValue(getLocalizedName(zone) || zone?.nameAr || zone?.name || '') === normalizedArea)
+    .map(([id]) => String(id)));
+  if (!matchingZoneIds.size) return '';
+
+  for (const row of Object.values(prices)) {
+    if (!row || typeof row !== 'object') continue;
+    const zoneIds = Array.isArray(row.zoneIds)
+      ? row.zoneIds
+      : (row.zoneIds && typeof row.zoneIds === 'object' ? Object.values(row.zoneIds) : []);
+    if (!zoneIds.some((id) => matchingZoneIds.has(String(id)))) continue;
+    if (row.groupKey && row.groupKey !== groupKey) continue;
+    const value = readPriceValue(row);
+    if (value !== '') return value;
+  }
   return '';
 }
 
@@ -12195,12 +12252,13 @@ function renderStorageLocationOptions(select) {
 function getSupplierItems(supplierId) {
   const products = state.cache.products || {};
   const materials = state.cache.stockMaterials || {};
+  const assignedIds = getSupplierAssignedItemIds(state.cache.suppliers?.[supplierId]);
   const entries = [];
   Object.entries(products).forEach(([id, item]) => {
-    if (itemHasSupplier(item, supplierId)) entries.push({ id, type: 'product', item });
+    if (itemHasSupplier(item, supplierId) || assignedIds.has(String(id))) entries.push({ id, type: 'product', item });
   });
   Object.entries(materials).forEach(([id, item]) => {
-    if (itemHasSupplier(item, supplierId)) entries.push({ id, type: 'material', item });
+    if (itemHasSupplier(item, supplierId) || assignedIds.has(String(id))) entries.push({ id, type: 'material', item });
   });
   return entries;
 }
@@ -12873,7 +12931,8 @@ function renderIssueSearchResults() {
   if (!searchInput || !results) return;
   const query = searchInput.value.trim();
   if (!query) {
-    results.innerHTML = '';
+    const entries = getPurchaseSearchEntries().slice(0, 80);
+    renderItemSearchResults(results, entries, (entry) => openPurchaseQtyModal(entry));
     return;
   }
   const entries = filterItemEntries(getIssueSearchEntries(), query);
@@ -20805,7 +20864,13 @@ function renderOrders() {
       <td>${formatMoney(getOrderDeliveryFee(order))}</td>
       <td>${formatMoney(getOrderGrandTotal(order))}</td>
       <td>${escapeHtml(getOrderPaymentLabel(order))}</td>
-      <td><button class="btn ghost small" data-action="edit">${window.i18n.t('edit')}</button></td>
+      <td>
+        <div class="row" style="gap: 6px; flex-wrap: nowrap;">
+          <button class="btn ghost small" data-action="print">طباعة</button>
+          <button class="btn ghost small" data-action="pdf">تحميل PDF</button>
+          <button class="btn ghost small" data-action="edit">${window.i18n.t('edit')}</button>
+        </div>
+      </td>
     `;
     row.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
       if (e.target.checked) {
@@ -20815,6 +20880,8 @@ function renderOrders() {
       }
     });
     row.querySelector('[data-action="edit"]').addEventListener('click', () => openOrderEditModal(order));
+    row.querySelector('[data-action="print"]').addEventListener('click', () => printOrderInvoice(order));
+    row.querySelector('[data-action="pdf"]').addEventListener('click', () => downloadOrderInvoicePdf(order));
     row.querySelector('[data-action="customer"]').addEventListener('click', () => openCustomerOrders(order.customerId));
     table.appendChild(row);
   });
@@ -20974,6 +21041,107 @@ function printOrders() {
       { label: window.i18n.t('grand_total'), value: formatMoney(totals.total) }
     ]
   );
+}
+
+function buildOrderInvoiceHtml(order) {
+  const items = getOrderItems(order);
+  const invoiceNumber = escapeHtml(getOrderInvoiceNumber(order));
+  const deliveryFee = getOrderDeliveryFee(order);
+  const subtotal = getOrderItemsSubtotal(order);
+  const grandTotal = getOrderGrandTotal(order);
+  return `
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+      <head>
+        <title>فاتورة ${invoiceNumber}</title>
+        <style>
+          @page { size: A4; margin: 12mm; }
+          body { font-family: 'Cairo', Arial, sans-serif; color: #1f2937; direction: rtl; }
+          .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #e5e7eb; padding-bottom: 14px; margin-bottom: 16px; }
+          .logo { width: 72px; height: 72px; object-fit: contain; }
+          h1 { margin: 0 0 6px; font-size: 24px; }
+          .meta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 18px; margin: 14px 0; font-size: 13px; }
+          .meta div { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+          th, td { border: 1px solid #e5e7eb; padding: 9px; text-align: start; font-size: 12px; }
+          th { background: #f3f4f6; font-weight: 800; }
+          .totals { width: 320px; margin: 18px 0 0 auto; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+          .total-row { display: flex; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; }
+          .total-row:last-child { border-bottom: 0; background: #111827; color: white; font-weight: 800; }
+        </style>
+      </head>
+      <body>
+        <div class="head">
+          <div>
+            <h1>فاتورة ${invoiceNumber}</h1>
+            <div>${escapeHtml(getOrderBranchName(order) || '-')}</div>
+            <div>${escapeHtml(formatDate(getOrderTimestamp(order)))}</div>
+          </div>
+          <img class="logo" src="logo.png" alt="logo" />
+        </div>
+        <div class="meta">
+          <div><strong>العميل:</strong> ${escapeHtml(getOrderCustomerName(order) || '-')}</div>
+          <div><strong>الهاتف:</strong> ${escapeHtml(getOrderCustomerPhone(order) || '-')}</div>
+          <div><strong>الكاشير:</strong> ${escapeHtml(getOrderCashierName(order) || '-')}</div>
+          <div><strong>طريقة الدفع:</strong> ${escapeHtml(getOrderPaymentLabel(order) || '-')}</div>
+          <div><strong>نوع الطلب:</strong> ${escapeHtml(getOrderTypeLabel(order) || '-')}</div>
+          <div><strong>المنطقة:</strong> ${escapeHtml(getOrderZoneName(order) || '-')}</div>
+          ${order.tableNumber ? `<div><strong>رقم الطاولة:</strong> ${escapeHtml(order.tableNumber)}</div>` : ''}
+          ${order.address ? `<div><strong>العنوان:</strong> ${escapeHtml(order.address)}</div>` : ''}
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>المنتج</th>
+              <th>الكمية</th>
+              <th>السعر</th>
+              <th>الإجمالي</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.length ? items.map((item) => `
+              <tr>
+                <td>${escapeHtml(item.productName || item.name || '-')}</td>
+                <td>${escapeHtml(formatNumber(item.quantity || 0))} ${escapeHtml(item.unit || '')}</td>
+                <td>${formatMoney(item.price || 0)}</td>
+                <td>${formatMoney(item.total || 0)}</td>
+              </tr>
+            `).join('') : `<tr><td colspan="4">${window.i18n.t('no_data')}</td></tr>`}
+          </tbody>
+        </table>
+        <div class="totals">
+          <div class="total-row"><span>صافي المنتجات</span><strong>${formatMoney(subtotal)}</strong></div>
+          <div class="total-row"><span>التوصيل</span><strong>${formatMoney(deliveryFee)}</strong></div>
+          <div class="total-row"><span>الإجمالي</span><strong>${formatMoney(grandTotal)}</strong></div>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+function openOrderInvoiceWindow(order, autoPrint = true) {
+  const html = buildOrderInvoiceHtml(order);
+  if (window.figsDesktop?.isDesktopApp) {
+    window.figsDesktop.printHtml({ html, type: 'a4', silent: false }).catch((error) => {
+      console.error('Desktop invoice print failed:', error);
+      alert('تعذرت طباعة الفاتورة.');
+    });
+    return;
+  }
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) return;
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.focus();
+  if (autoPrint) setTimeout(() => printWindow.print(), 250);
+}
+
+function printOrderInvoice(order) {
+  openOrderInvoiceWindow(order, true);
+}
+
+function downloadOrderInvoicePdf(order) {
+  openOrderInvoiceWindow(order, true);
 }
 
 function openOrderEditModal(order) {
@@ -23457,8 +23625,8 @@ function getTableOrders(branchId, tableNumber, fromDate, toDate) {
     .filter((order) => String(order.tableNumber || '') === String(tableNumber || ''))
     .filter((order) => isTimestampInOptionalRange(order.createdAt, fromDate, toDate))
     .map((order) => {
-      const productsAmount = Number(order.subtotal ?? order.netTotal ?? ((order.total || 0) - (order.deliveryFee || 0)));
-      const deliveryFee = Number(order.deliveryFee || 0);
+      const deliveryFee = Number(order.deliveryFee ?? order.deliveryPrice ?? 0);
+      const productsAmount = Number(order.subtotal ?? order.netTotal ?? ((order.total || 0) - deliveryFee));
       const total = Number(order.total || 0);
       const openedAt = Number(order.tableOpenedAt || order.createdAt || 0);
       const closedAt = Number(order.tableClosedAt || order.createdAt || 0);
@@ -23466,7 +23634,7 @@ function getTableOrders(branchId, tableNumber, fromDate, toDate) {
         id: order.id,
         invoiceNumber: order.orderNumber || order.invoiceNumber || order.id || '-',
         customerName: order.customerName || '-',
-        customerPhone: order.customerPhone || '-',
+        customerPhone: order.customerPhone || order.phoneNumber || '-',
         branchName: getBranchLabel(order.branchId || branchId),
         cashierId: order.cashierId || '',
         cashierName: order.cashierName || '-',
@@ -23750,17 +23918,14 @@ function renderTablesSection() {
     return String(a.tableNumber || '').localeCompare(String(b.tableNumber || ''), undefined, { numeric: true });
   });
 
-  const totals = rows.reduce((acc, row) => {
-    acc.orders += Number(row.ordersCount || 0);
-    acc.revenue += Number(row.revenue || 0);
-    return acc;
-  }, { orders: 0, revenue: 0 });
+  const isTableFormOpen = Boolean(state.tableFormOpen || state.editingTableId);
 
   section.innerHTML = `
     <div class="card">
       <div class="row" style="justify-content: space-between;">
         <h2>${window.i18n.t('tables')}</h2>
         <div class="row">
+          <button id="tablesAddBtn" class="btn primary">${window.i18n.t('add')}</button>
           <button id="tablesExportBtn" class="btn ghost">${window.i18n.t('download')}</button>
           <button id="tablesPrintBtn" class="btn ghost">${window.i18n.t('print_report')}</button>
         </div>
@@ -23782,23 +23947,6 @@ function renderTablesSection() {
       <div class="row" style="justify-content: flex-end; margin-top: 12px;">
         ${buildPageSizeControlHtml('tablesPageSize')}
       </div>
-      <div class="grid two" style="margin-top: 12px;">
-        <div class="card light"><strong>${window.i18n.t('total_orders_label')}</strong><div class="report-total-value">${totals.orders}</div></div>
-        <div class="card light"><strong>${window.i18n.t('table_revenue')}</strong><div class="report-total-value">${formatMoney(totals.revenue)}</div></div>
-      </div>
-      <div class="card light" style="margin-top: 12px;">
-        <div class="row" style="justify-content: space-between; align-items: center;">
-          <strong>${state.editingTableId ? window.i18n.t('edit') : window.i18n.t('add')}</strong>
-        </div>
-        <div class="row" style="margin-top: 8px; flex-wrap: wrap;">
-          <input id="tableNumberInput" class="input" style="max-width: 180px;" placeholder="${window.i18n.t('table_number')}" />
-          <select id="tableBranchInput" class="input" style="max-width: 220px;"></select>
-          <input id="tableLocationInput" class="input" style="max-width: 260px;" placeholder="${window.i18n.t('table_location')}" />
-          <button id="tableSaveBtn" class="btn primary">${window.i18n.t('save')}</button>
-          <button id="tableCancelEditBtn" class="btn ghost ${state.editingTableId ? '' : 'hidden'}">${window.i18n.t('cancel')}</button>
-        </div>
-        <p id="tableFormError" class="helper form-error"></p>
-      </div>
     </div>
     <div class="card">
       <table class="table">
@@ -23816,7 +23964,34 @@ function renderTablesSection() {
       </table>
       ${buildPaginationBarHtml('tablesPageInfo', 'tablesPagination')}
     </div>
+    <div id="tableFormOverlay" class="modal-overlay ${isTableFormOpen ? '' : 'hidden'}">
+      <div class="modal-content" style="max-width: 560px;">
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <h3>${state.editingTableId ? window.i18n.t('edit') : window.i18n.t('add')}</h3>
+          <button id="tableFormCloseBtn" class="btn ghost small">×</button>
+        </div>
+        <div class="grid one" style="margin-top: 12px;">
+          <input id="tableNumberInput" class="input" placeholder="${window.i18n.t('table_number')}" />
+          <select id="tableBranchInput" class="input"></select>
+          <input id="tableLocationInput" class="input" placeholder="${window.i18n.t('table_location')}" />
+        </div>
+        <p id="tableFormError" class="helper form-error"></p>
+        <div class="row" style="justify-content: flex-end; margin-top: 14px;">
+          <button id="tableCancelEditBtn" class="btn ghost">${window.i18n.t('cancel')}</button>
+          <button id="tableSaveBtn" class="btn primary">${window.i18n.t('add')}</button>
+        </div>
+      </div>
+    </div>
   `;
+
+  const addBtn = document.getElementById('tablesAddBtn');
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      state.editingTableId = null;
+      state.tableFormOpen = true;
+      renderTablesSection();
+    });
+  }
 
   const branchFilter = document.getElementById('tablesBranchFilter');
   if (branchFilter) {
@@ -23924,10 +24099,12 @@ function renderTablesSection() {
       if (state.editingTableId) {
         db.ref(`tables/${state.editingTableId}`).update(payload).then(() => {
           state.editingTableId = null;
+          state.tableFormOpen = false;
           renderTablesSection();
         });
       } else {
         db.ref('tables').push({ ...payload, createdAt: serverTime }).then(() => {
+          state.tableFormOpen = false;
           renderTablesSection();
         });
       }
@@ -23938,6 +24115,15 @@ function renderTablesSection() {
   if (cancelEditBtn) {
     cancelEditBtn.addEventListener('click', () => {
       state.editingTableId = null;
+      state.tableFormOpen = false;
+      renderTablesSection();
+    });
+  }
+  const tableFormCloseBtn = document.getElementById('tableFormCloseBtn');
+  if (tableFormCloseBtn) {
+    tableFormCloseBtn.addEventListener('click', () => {
+      state.editingTableId = null;
+      state.tableFormOpen = false;
       renderTablesSection();
     });
   }
@@ -23988,6 +24174,7 @@ function renderTablesSection() {
       tbody.querySelectorAll('[data-action="edit"]').forEach((btn) => {
         btn.addEventListener('click', () => {
           state.editingTableId = btn.dataset.id;
+          state.tableFormOpen = true;
           renderTablesSection();
         });
       });

@@ -8308,6 +8308,9 @@ function renderProductsSection() {
     entries.sort((a, b) => (salesMap[a.id] || 0) - (salesMap[b.id] || 0));
   } else if (state.productFilters.sortBy === 'incompleteInfo') {
     entries = entries.filter((item) => item.incompleteInfo || item.missingInfo);
+    entries.sort((a, b) => getCreatedAtSortValue(b.id, b) - getCreatedAtSortValue(a.id, a));
+  } else {
+    entries.sort((a, b) => getCreatedAtSortValue(b.id, b) - getCreatedAtSortValue(a.id, a));
   }
 
   const pagination = paginateEntries(entries, state.productFilters);
@@ -10442,7 +10445,7 @@ function getProductInfoRows() {
       ].join(' '));
       return text.includes(query);
     })
-    .sort((a, b) => (getLocalizedName(a.product) || a.info.productName || '').localeCompare(getLocalizedName(b.product) || b.info.productName || '', 'ar'));
+    .sort((a, b) => getCreatedAtSortValue(b.id, b.info) - getCreatedAtSortValue(a.id, a.info));
 }
 
 function renderProductInfoSection() {
@@ -10555,7 +10558,7 @@ function getProductInfoPickerRows() {
     .map(([id, product]) => ({ id, product }))
     .filter((row) => !existing.has(row.id))
     .filter((row) => normalizeSearchValue([row.product.nameAr, row.product.nameEn, row.product.name, row.product.barcode, row.product.code].join(' ')).includes(query))
-    .sort((a, b) => (getLocalizedName(a.product) || '').localeCompare(getLocalizedName(b.product) || '', 'ar'))
+    .sort((a, b) => getCreatedAtSortValue(b.id, b.product) - getCreatedAtSortValue(a.id, a.product))
     .slice(0, 80);
 }
 
@@ -12472,6 +12475,18 @@ function getOrderTimestamp(order) {
   const value = order?.createdAt ?? order?.timestamp ?? order?.date ?? order?.createdAtMs;
   const time = typeof value === 'number' ? value : new Date(value || 0).getTime();
   return Number.isFinite(time) ? time : 0;
+}
+
+function getCreatedAtSortValue(id, item = {}) {
+  const value = item?.createdAt ?? item?.timestamp ?? item?.dateCreated ?? item?.createdAtMs ?? 0;
+  const time = typeof value === 'number' ? value : new Date(value || 0).getTime();
+  if (Number.isFinite(time) && time > 0) return time;
+  const key = String(id || item?.id || '');
+  if (key.length >= 8) {
+    const parsed = parseInt(key.slice(0, 8), 36);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 0;
 }
 
 function getOrderInvoiceNumber(order) {
@@ -21141,6 +21156,18 @@ function printOrderInvoice(order) {
 }
 
 function downloadOrderInvoicePdf(order) {
+  const html = buildOrderInvoiceHtml(order);
+  const invoiceNumber = String(getOrderInvoiceNumber(order) || 'invoice').replace(/[\\/:*?"<>|]/g, '-');
+  if (window.figsDesktop?.isDesktopApp && typeof window.figsDesktop.savePdf === 'function') {
+    window.figsDesktop.savePdf({
+      html,
+      fileName: `فاتورة-${invoiceNumber}.pdf`
+    }).catch((error) => {
+      console.error('Desktop PDF save failed:', error);
+      alert('تعذر حفظ ملف PDF.');
+    });
+    return;
+  }
   openOrderInvoiceWindow(order, true);
 }
 
@@ -24584,6 +24611,19 @@ function exportToExcel(rows, filename) {
   const worksheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
+  if (window.figsDesktop?.isDesktopApp && typeof window.figsDesktop.saveFile === 'function') {
+    const data = XLSX.write(workbook, { bookType: 'xlsx', type: 'base64' });
+    window.figsDesktop.saveFile({
+      data,
+      fileName: filename || 'report.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      encoding: 'base64'
+    }).catch((error) => {
+      console.error('Desktop Excel save failed:', error);
+      alert('تعذر حفظ ملف Excel.');
+    });
+    return;
+  }
   XLSX.writeFile(workbook, filename);
 }
 

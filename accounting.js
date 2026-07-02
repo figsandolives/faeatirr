@@ -262,7 +262,8 @@ const state = {
     fromDate: '',
     toDate: '',
     invoiceId: null
-  }
+  },
+  selectedDeliveryPriceGroup: 'mainYarmouk'
 };
 
 function getLocalizedName(item) {
@@ -272,6 +273,17 @@ function getLocalizedName(item) {
     return item.nameEn || item.name || item.nameAr || '-';
   }
   return item.nameAr || item.name || item.nameEn || '-';
+}
+
+function convertToEnglishNumbers(value) {
+  return String(value || '')
+    .replace(/[٠-٩]/g, (digit) => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit))
+    .replace(/[۰-۹]/g, (digit) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit));
+}
+
+function formatNumberWithThreeDecimals(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number.toFixed(3) : '0.000';
 }
 
 function getStaffLabel(staff, fallbackId = '-') {
@@ -524,14 +536,21 @@ function debounce(fn, wait = 280) {
   };
 }
 
-function bindDebouncedQueryInput(input, handler, wait = 280) {
+function bindDebouncedQueryInput(input, handler, wait = 500) {
   if (!input || typeof handler !== 'function') return;
-  const run = debounce(() => handler(input.value || ''), wait);
+  let lastValue = input.value || '';
+  const run = debounce(() => {
+    const nextValue = input.value || '';
+    if (nextValue === lastValue) return;
+    lastValue = nextValue;
+    handler(nextValue);
+  }, wait);
   input.addEventListener('input', run);
   input.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    handler(input.value || '');
+    lastValue = input.value || '';
+    handler(lastValue);
   });
 }
 
@@ -907,6 +926,18 @@ const DEFAULT_MANAGER_USER = {
   active: true
 };
 
+const legacyDeliveryAreas = [
+  'السرة', 'الزهراء', 'السلام', 'حطين', 'الفيحاء', 'القادسية', 'مشرف', 'كيفان', 'الروضة', 'العديلية',
+  'الخالدية', 'النزهة', 'الدعية', 'المنصورية', 'قرطبة', 'الشامية', 'الرميثية', 'عبدالله السالم', 'الجابرية',
+  'بيان', 'الصديق', 'الشهداء', 'اليرموك', 'الفروانية', 'خيطان', 'بنيد القار', 'الدسمة', 'حولي', 'ميدان حولي',
+  'مبارك الكبير', 'القصور', 'الرابية', 'العمرية', 'الرقعي', 'غرناطة', 'القرين', 'الشويخ', 'المسيلة', 'الكويت',
+  'اشبيليا', 'السالمية', 'شرق', 'الرحاب', 'المرقاب', 'صباح السالم', 'الفردوس', 'صباح الناصر', 'المسايل',
+  'الاندلس', 'العارضية', 'سلوى', 'العدان', 'الشعب', 'هدية', 'الصليبيخات', 'الجهراء', 'الفنطاس', 'سعد العبدالله',
+  'الفنيطيس', 'الدوحة', 'العقيلة', 'جابر العلي', 'جابر الاحمد', 'عبدالله مبارك', 'المهبولة', 'المنقف', 'الاحمدي',
+  'الصليبية', 'الصباحية', 'فهد الاحمد', 'صبحان', 'ابو فطيرة', 'ابو الحصانية', 'الظهر', 'ابو حليفة', 'الفحيحيل',
+  'جليب الشيوخ', 'ام الهيمان', 'المطلاع', 'صباح الاحمد', 'الوفرة'
+];
+
 const sectionGroups = {
   itemCards: 'inventory',
   countryOrigins: 'inventory',
@@ -1146,19 +1177,43 @@ function bindOrderEditForm() {
       const productId = els.orderAddProduct.value;
       const qty = Number(els.orderAddQty.value || 1);
       const product = state.cache.products?.[productId];
-      if (!product) return;
+      if (!product) {
+        const results = document.getElementById('orderProductSearchResults');
+        if (results) {
+          results.innerHTML = '<div style="background: #fee2e2; color: #b91c1c; padding: 10px; border-radius: 8px; font-weight: 700;">اختر منتج من نتائج البحث أولاً</div>';
+        }
+        return;
+      }
       const existing = state.editingOrder.items.find((item) => item.productId === productId);
       if (existing) {
-        existing.qty += qty;
+        const nextQty = Number(existing.quantity || existing.qty || 0) + (qty > 0 ? qty : 1);
+        existing.quantity = nextQty;
+        existing.qty = nextQty;
+        existing.total = Number((nextQty * Number(existing.price || 0)).toFixed(3));
       } else {
         state.editingOrder.items.push({
           productId,
-          name: getLocalizedName(product),
+          productName: product.nameAr || product.name || getLocalizedName(product),
+          productNameEn: product.nameEn || '',
+          name: product.nameAr || product.name || getLocalizedName(product),
           price: Number(product.price || 0),
-          qty: qty > 0 ? qty : 1
+          quantity: qty > 0 ? qty : 1,
+          qty: qty > 0 ? qty : 1,
+          unit: product.unit || 'حبة',
+          total: Number((Number(product.price || 0) * (qty > 0 ? qty : 1)).toFixed(3))
         });
       }
       els.orderAddQty.value = 1;
+      els.orderAddProduct.value = '';
+      const searchInput = document.getElementById('orderProductSearchInput');
+      const selectedInfo = document.getElementById('orderSelectedProductInfo');
+      const results = document.getElementById('orderProductSearchResults');
+      if (searchInput) searchInput.value = '';
+      if (selectedInfo) {
+        selectedInfo.style.display = 'none';
+        selectedInfo.textContent = '';
+      }
+      if (results) results.innerHTML = '';
       renderOrderItemsEditor();
     });
   }
@@ -1582,6 +1637,10 @@ function initListSections() {
 function buildListSection(config) {
   const section = document.getElementById(`section-${config.sectionId}`);
   if (!section) return;
+  if (config.sectionId === 'deliveryPrices') {
+    renderDeliveryPricesSection();
+    return;
+  }
   const paginationState = ensureTablePaginationState(config.sectionId);
 
   const fieldHtml = config.fields
@@ -1840,6 +1899,10 @@ function resetListForm(form, cancelBtn) {
 function renderListSection(config) {
   const section = document.getElementById(`section-${config.sectionId}`);
   if (!section) return;
+  if (config.sectionId === 'deliveryPrices') {
+    renderDeliveryPricesSection();
+    return;
+  }
   const form = section.querySelector('form');
   const tbody = section.querySelector('tbody');
   const cancelBtn = section.querySelector('[data-action="cancel"]');
@@ -2085,6 +2148,168 @@ function renderDeliveryPricesZonePicker(section) {
     });
     optionsWrap.appendChild(label);
   });
+}
+
+function getDeliveryPriceGroupLabel(groupKey) {
+  if (groupKey === 'abuHasaniya') return 'فرع أبو الحصانية';
+  return 'الفرع الرئيسي واليرموك';
+}
+
+function getOrderDeliveryArea(order) {
+  const zoneName = getOrderZoneName(order);
+  if (zoneName && zoneName !== '-') return zoneName;
+  const address = String(order?.deliveryAddress || order?.address || '').trim();
+  if (!address) return '';
+  return address.split(/[-،,]/)[0].trim();
+}
+
+function getDeliveryPriceAreas() {
+  return legacyDeliveryAreas.slice();
+}
+
+function getSavedDeliveryPriceForArea(area, groupKey = state.selectedDeliveryPriceGroup || 'mainYarmouk') {
+  const prices = state.cache.deliveryPrices || {};
+  const groupedRow = prices[groupKey]?.[area];
+  if (groupedRow && groupedRow.price !== undefined) return Number(groupedRow.price);
+  const legacyRow = prices[area];
+  if (legacyRow && legacyRow.price !== undefined) return Number(legacyRow.price);
+  return '';
+}
+
+function getInferredDeliveryPrices(groupKey = state.selectedDeliveryPriceGroup || 'mainYarmouk') {
+  const inferred = {};
+  Object.values(state.cache.orders || {}).forEach((order) => {
+    const area = getOrderDeliveryArea(order);
+    const price = getOrderDeliveryFee(order);
+    if (!area || !Number.isFinite(price) || price <= 0) return;
+    inferred[area] = price;
+  });
+  return inferred;
+}
+
+function getResolvedDeliveryPriceForArea(area, groupKey = state.selectedDeliveryPriceGroup || 'mainYarmouk') {
+  const saved = getSavedDeliveryPriceForArea(area, groupKey);
+  if (saved !== '' && !Number.isNaN(saved)) return saved;
+  const inferred = getInferredDeliveryPrices(groupKey);
+  return inferred[area] ?? '';
+}
+
+function renderDeliveryPricesSection() {
+  const section = document.getElementById('section-deliveryPrices');
+  if (!section) return;
+  const groupKey = state.selectedDeliveryPriceGroup || 'mainYarmouk';
+  const inferredPrices = getInferredDeliveryPrices(groupKey);
+  const deliveryAreas = getDeliveryPriceAreas();
+  const filledCount = deliveryAreas.filter((area) => getResolvedDeliveryPriceForArea(area, groupKey) !== '').length;
+
+  section.innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h2>أسعار التوصيل</h2>
+          <p class="helper">يتم استخدام هذه الأسعار تلقائياً حسب فرع الكاشير ومنطقة العميل.</p>
+        </div>
+        <button id="deliveryPricesSaveTop" class="btn primary">حفظ الأسعار</button>
+      </div>
+      <div class="grid two" style="margin-top: 12px;">
+        <button data-delivery-group="mainYarmouk" class="btn ${groupKey === 'mainYarmouk' ? 'primary' : 'ghost'}">الفرع الرئيسي واليرموك</button>
+        <button data-delivery-group="abuHasaniya" class="btn ${groupKey === 'abuHasaniya' ? 'primary' : 'ghost'}">فرع أبو الحصانية</button>
+      </div>
+      <div class="grid four" style="margin-top: 12px;">
+        <div class="card light"><strong>القسم الحالي</strong><div class="report-total-value">${getDeliveryPriceGroupLabel(groupKey)}</div></div>
+        <div class="card light"><strong>عدد المناطق</strong><div class="report-total-value">${deliveryAreas.length}</div></div>
+        <div class="card light"><strong>أسعار معروفة</strong><div class="report-total-value">${filledCount}</div></div>
+        <div class="card light"><strong>بدون سعر</strong><div class="report-total-value">${deliveryAreas.length - filledCount}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>المنطقة</th>
+            <th>سعر التوصيل (د.ك)</th>
+            <th>المصدر</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${deliveryAreas.length ? deliveryAreas.map((area) => {
+            const saved = getSavedDeliveryPriceForArea(area, groupKey);
+            const inferred = inferredPrices[area];
+            const value = saved !== '' && !Number.isNaN(saved) ? saved : (inferred ?? '');
+            const source = saved !== '' && !Number.isNaN(saved)
+              ? 'محفوظ'
+              : (inferred !== undefined ? 'من الفواتير السابقة' : 'غير معروف');
+            return `
+              <tr>
+                <td><strong>${escapeHtml(area)}</strong></td>
+                <td>
+                  <input
+                    class="input delivery-price-area-input"
+                    type="text"
+                    inputmode="decimal"
+                    data-area="${escapeHtml(area)}"
+                    value="${value === '' ? '' : formatNumberWithThreeDecimals(value)}"
+                    placeholder="اكتب السعر"
+                  />
+                </td>
+                <td>${source}</td>
+              </tr>
+            `;
+          }).join('') : `<tr><td colspan="3">${window.i18n.t('no_data')}</td></tr>`}
+        </tbody>
+      </table>
+      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+        <button id="deliveryPricesSaveBottom" class="btn primary">حفظ الأسعار</button>
+      </div>
+    </div>
+  `;
+
+  section.querySelectorAll('[data-delivery-group]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.selectedDeliveryPriceGroup = button.getAttribute('data-delivery-group') || 'mainYarmouk';
+      renderDeliveryPricesSection();
+    });
+  });
+  section.querySelectorAll('.delivery-price-area-input').forEach((input) => {
+    input.addEventListener('input', () => {
+      input.value = convertToEnglishNumbers(input.value).replace(/[^0-9.]/g, '');
+    });
+  });
+  section.querySelector('#deliveryPricesSaveTop')?.addEventListener('click', saveDeliveryPrices);
+  section.querySelector('#deliveryPricesSaveBottom')?.addEventListener('click', saveDeliveryPrices);
+}
+
+async function saveDeliveryPrices() {
+  const groupKey = state.selectedDeliveryPriceGroup || 'mainYarmouk';
+  const inputs = Array.from(document.querySelectorAll('#section-deliveryPrices .delivery-price-area-input'));
+  const nextGroupPrices = {};
+  inputs.forEach((input) => {
+    const area = input.getAttribute('data-area') || '';
+    const rawValue = convertToEnglishNumbers(input.value || '').trim();
+    if (!area || rawValue === '') return;
+    const price = Number(rawValue);
+    if (Number.isFinite(price) && price >= 0) {
+      nextGroupPrices[area] = {
+        area,
+        price: Number(price.toFixed(3)),
+        groupKey,
+        groupLabel: getDeliveryPriceGroupLabel(groupKey),
+        updatedAt: Date.now()
+      };
+    }
+  });
+  try {
+    await db.ref(`deliveryPrices/${groupKey}`).set(nextGroupPrices);
+    state.cache.deliveryPrices = {
+      ...(state.cache.deliveryPrices || {}),
+      [groupKey]: nextGroupPrices
+    };
+    showCopyNotice('تم حفظ أسعار التوصيل');
+    renderDeliveryPricesSection();
+  } catch (error) {
+    console.error('Error saving delivery prices:', error);
+    showCopyNotice('تعذر حفظ أسعار التوصيل');
+  }
 }
 
 function renderSelectOptions(select, field) {
@@ -2630,9 +2855,9 @@ function getReportBucketIndex(timestamp, range) {
 function getOrdersInRange(start, end, branchId = 'all') {
   const orders = state.cache.orders || {};
   return Object.entries(orders)
-    .map(([id, order]) => ({ id, ...order }))
+    .map(([id, order]) => ({ id, ...order, createdAt: getOrderTimestamp(order) }))
     .filter((order) => {
-      const createdAt = Number(order.createdAt || 0);
+      const createdAt = getOrderTimestamp(order);
       if (!createdAt || createdAt < start || createdAt > end) return false;
       if (branchId !== 'all' && order.branchId !== branchId) return false;
       return true;
@@ -2647,7 +2872,7 @@ function getOrderItemCost(item) {
 }
 
 function calcOrderItemsCost(order) {
-  return normalizeItems(order.items).reduce((sum, item) => {
+  return getOrderItems(order).reduce((sum, item) => {
     const qty = Number(item.qty || 0);
     const cost = getOrderItemCost(item);
     return sum + (qty * cost);
@@ -3749,6 +3974,7 @@ function buildSalesReportRows(filters) {
   const categorySet = categoryId && categoryId !== 'all'
     ? getDescendantCategoryIds(categoryId, categories)
     : null;
+  const shouldShowZeroProducts = Boolean(query || categorySet);
   const rowsMap = {};
   let totalRevenue = 0;
 
@@ -3756,7 +3982,7 @@ function buildSalesReportRows(filters) {
   orders.forEach((order) => {
     const branchId = order.branchId || 'unknown';
     const branchName = getLocalizedName(branches[branchId]) || order.branchName || '-';
-    normalizeItems(order.items).forEach((item) => {
+    getOrderItems(order).forEach((item) => {
       const productId = item.productId || item.itemId || item.id;
       if (!productId) return;
       const product = products[productId];
@@ -3769,7 +3995,7 @@ function buildSalesReportRows(filters) {
       if (query && !searchable.includes(query)) return;
 
       const qty = Number(item.qty || 0);
-      const lineRevenue = qty * Number(item.price || 0);
+      const lineRevenue = Number(item.total ?? (qty * Number(item.price || 0))) || 0;
       const key = `${productId}:${branchId}`;
       if (!rowsMap[key]) {
         rowsMap[key] = {
@@ -3791,28 +4017,30 @@ function buildSalesReportRows(filters) {
     });
   });
 
-  Object.entries(products).forEach(([productId, product]) => {
-    if (categorySet && !categorySet.has(product?.categoryId || '')) return;
-    const nameAr = product?.nameAr || '-';
-    const nameEn = product?.nameEn || '-';
-    const searchable = normalizeSearchValue(`${nameAr} ${nameEn} ${product?.code || ''} ${productId}`);
-    if (query && !searchable.includes(query)) return;
-    const hasRows = Object.keys(rowsMap).some((key) => key.startsWith(`${productId}:`));
-    if (hasRows) return;
-    const key = `${productId}:all`;
-    rowsMap[key] = {
-      rowKey: key,
-      productId: String(productId),
-      productCode: product?.code || '-',
-      nameAr,
-      nameEn,
-      categoryName: getCategoryBreadcrumb(product?.categoryId, categories),
-      branchId: 'all',
-      branchName: window.i18n.t('all_branches'),
-      qty: 0,
-      revenue: 0
-    };
-  });
+  if (shouldShowZeroProducts) {
+    Object.entries(products).forEach(([productId, product]) => {
+      if (categorySet && !categorySet.has(product?.categoryId || '')) return;
+      const nameAr = product?.nameAr || '-';
+      const nameEn = product?.nameEn || '-';
+      const searchable = normalizeSearchValue(`${nameAr} ${nameEn} ${product?.code || ''} ${productId}`);
+      if (query && !searchable.includes(query)) return;
+      const hasRows = Object.keys(rowsMap).some((key) => key.startsWith(`${productId}:`));
+      if (hasRows) return;
+      const key = `${productId}:all`;
+      rowsMap[key] = {
+        rowKey: key,
+        productId: String(productId),
+        productCode: product?.code || '-',
+        nameAr,
+        nameEn,
+        categoryName: getCategoryBreadcrumb(product?.categoryId, categories),
+        branchId: 'all',
+        branchName: window.i18n.t('all_branches'),
+        qty: 0,
+        revenue: 0
+      };
+    });
+  }
 
   const rows = Object.values(rowsMap).sort((a, b) => b.revenue - a.revenue);
   return { rows, totalRevenue };
@@ -3825,11 +4053,11 @@ function buildProductSalesDetails(fromDate, toDate, productId, branchId) {
   orders.forEach((order) => {
     let qty = 0;
     let revenue = 0;
-    normalizeItems(order.items).forEach((item) => {
+    getOrderItems(order).forEach((item) => {
       const currentProductId = String(item.productId || item.itemId || item.id || '');
       if (currentProductId !== String(productId || '')) return;
       const lineQty = Number(item.qty || 0);
-      const lineRevenue = lineQty * Number(item.price || 0);
+      const lineRevenue = Number(item.total ?? (lineQty * Number(item.price || 0))) || 0;
       qty += lineQty;
       revenue += lineRevenue;
     });
@@ -4330,9 +4558,9 @@ function getReportRangeFromDates(fromDate, toDate) {
 function getOrdersForCashierReport(fromDate, toDate, branchId = 'all') {
   const { start, end } = getReportRangeFromDates(fromDate, toDate);
   return Object.entries(state.cache.orders || {})
-    .map(([id, order]) => ({ id, ...order }))
+    .map(([id, order]) => ({ id, ...order, createdAt: getOrderTimestamp(order) }))
     .filter((order) => {
-      const createdAt = Number(order.createdAt || 0);
+      const createdAt = getOrderTimestamp(order);
       if (!createdAt) return false;
       if (start !== null && createdAt < start) return false;
       if (end !== null && createdAt > end) return false;
@@ -5003,6 +5231,28 @@ function getTopProductsBranchColumns() {
   ];
 }
 
+function resolveTopProductsBranchKey(order, branchColumns) {
+  const branchId = String(order?.branchId || '').trim();
+  const directColumn = branchColumns.find((column) => column.id && String(column.id) === branchId);
+  if (directColumn) return directColumn.key;
+
+  const branchText = normalizeSearchValue([
+    order?.branchName,
+    order?.branch,
+    getOrderBranchName(order)
+  ].filter(Boolean).join(' '));
+
+  const byColumnName = branchColumns.find((column) => {
+    const columnText = normalizeSearchValue(`${column.branchName || ''} ${column.label || ''}`);
+    return columnText && branchText && (branchText.includes(columnText) || columnText.includes(branchText));
+  });
+  if (byColumnName) return byColumnName.key;
+
+  if (branchText.includes(normalizeSearchValue('يرموك')) || branchText.includes('yarmouk')) return 'yarmouk';
+  if (branchText.includes(normalizeSearchValue('الحصانية')) || branchText.includes('hasaniya')) return 'abuHasaniya';
+  return 'main';
+}
+
 function renderTopProductsCreativeChart(rows, branchColumns) {
   if (!rows.length) {
     return `<div class="top-products-chart-empty">${window.i18n.t('no_data')}</div>`;
@@ -5020,7 +5270,7 @@ function renderTopProductsCreativeChart(rows, branchColumns) {
     const totalPercent = maxTotal > 0 ? Math.min(100, (totalValue / maxTotal) * 100) : 0;
     const visiblePercent = totalValue > 0 ? Math.max(totalPercent, 4) : 0;
     const segments = branchColumns.map((column, colorIndex) => {
-      const branchValue = column.id ? Number(row.branchSales?.[column.id] || 0) : 0;
+      const branchValue = Number(row.branchSales?.[column.key] || 0);
       const width = totalValue > 0 ? Math.max(0, Math.min(100, (branchValue / totalValue) * 100)) : 0;
       return `<span class="top-products-segment tone-${colorIndex + 1}" style="width:${width.toFixed(2)}%"></span>`;
     }).join('');
@@ -5062,12 +5312,13 @@ function buildTopProductsReportRows(filters) {
   const limit = [10, 50, 100].includes(Number(filters.limit)) ? Number(filters.limit) : 10;
 
   orders.forEach((order) => {
-    const branchId = order.branchId || 'unknown';
-    normalizeItems(order.items).forEach((item) => {
+    const branchKey = resolveTopProductsBranchKey(order, branchColumns);
+    getOrderItems(order).forEach((item) => {
       const productId = String(item.productId || item.itemId || item.id || '');
       if (!productId) return;
       const product = products[productId] || {};
-      const lineRevenue = Number(item.qty || 0) * Number(item.price || 0);
+      const qty = Number(item.qty || 0);
+      const lineRevenue = Number(item.total ?? (qty * Number(item.price || 0))) || 0;
       if (!rowsMap[productId]) {
         rowsMap[productId] = {
           productId,
@@ -5078,7 +5329,7 @@ function buildTopProductsReportRows(filters) {
           totalSales: 0
         };
       }
-      rowsMap[productId].branchSales[branchId] = Number(rowsMap[productId].branchSales[branchId] || 0) + lineRevenue;
+      rowsMap[productId].branchSales[branchKey] = Number(rowsMap[productId].branchSales[branchKey] || 0) + lineRevenue;
       rowsMap[productId].totalSales += lineRevenue;
     });
   });
@@ -5211,9 +5462,9 @@ function renderTopProductsReportView(section) {
     } else {
       tbody.innerHTML = rows.map((row) => {
         const branchCells = branchColumns.map((column) => {
-          const value = column.id ? Number(row.branchSales?.[column.id] || 0) : 0;
-          if (!value || !column.id) return `<td>${formatMoney(0)}</td>`;
-          return `<td><button class="btn ghost small" data-action="open-top-product-details" data-product-id="${row.productId}" data-branch-id="${column.id}">${formatMoney(value)}</button></td>`;
+          const value = Number(row.branchSales?.[column.key] || 0);
+          if (!value) return `<td>${formatMoney(0)}</td>`;
+          return `<td><button class="btn ghost small" data-action="open-top-product-details" data-product-id="${row.productId}" data-branch-id="${column.id || column.key}">${formatMoney(value)}</button></td>`;
         }).join('');
         return `
           <tr>
@@ -5259,7 +5510,7 @@ function renderTopProductsReportView(section) {
           [window.i18n.t('item_name_en')]: row.nameEn || '-'
         };
         branchColumns.forEach((column) => {
-          payload[column.label] = formatMoney(column.id ? Number(row.branchSales?.[column.id] || 0) : 0);
+          payload[column.label] = formatMoney(Number(row.branchSales?.[column.key] || 0));
         });
         return payload;
       });
@@ -5278,7 +5529,7 @@ function renderTopProductsReportView(section) {
       const bodyRows = rows.map((row) => ([
         row.nameAr || '-',
         row.nameEn || '-',
-        ...branchColumns.map((column) => formatMoney(column.id ? Number(row.branchSales?.[column.id] || 0) : 0))
+        ...branchColumns.map((column) => formatMoney(Number(row.branchSales?.[column.key] || 0)))
       ]));
       printA4Report(
         window.i18n.t('reports_top_products'),
@@ -5304,13 +5555,23 @@ function buildTopProductDetailsRows(filters) {
   const query = normalizeSearchValue(filters.query || '');
 
   orders.forEach((order) => {
-    if (filters.branchId !== 'all' && String(order.branchId || '') !== String(filters.branchId || '')) return;
+    const branchColumns = getTopProductsBranchColumns();
+    const filterBranchId = String(filters.branchId || 'all');
+    const filterIsBranchKey = ['main', 'yarmouk', 'abuHasaniya'].includes(filterBranchId);
+    if (filterBranchId !== 'all') {
+      if (filterIsBranchKey) {
+        if (resolveTopProductsBranchKey(order, branchColumns) !== filterBranchId) return;
+      } else if (String(order.branchId || '') !== filterBranchId) {
+        return;
+      }
+    }
     if (filters.cashierId !== 'all' && String(order.cashierId || '') !== String(filters.cashierId || '')) return;
     let productValue = 0;
-    normalizeItems(order.items).forEach((item) => {
+    getOrderItems(order).forEach((item) => {
       const itemProductId = String(item.productId || item.itemId || item.id || '');
       if (itemProductId !== productId) return;
-      productValue += Number(item.qty || 0) * Number(item.price || 0);
+      const qty = Number(item.qty || 0);
+      productValue += Number(item.total ?? (qty * Number(item.price || 0))) || 0;
     });
     if (!productValue) return;
     const row = {
@@ -5990,7 +6251,7 @@ function setupOrdersSection() {
             <div id="orderZoneFilterOptions" class="multi-select-options" style="margin-top: 8px;"></div>
           </div>
         </details>
-        <input id="orderSearch" class="input" style="max-width: 240px;" placeholder="${window.i18n.t('search_orders')}" />
+        <input id="orderSearch" class="input" autocomplete="off" style="max-width: 240px;" placeholder="${window.i18n.t('search_orders')}" />
         <button id="ordersDownloadBtn" class="btn ghost small">${window.i18n.t('orders_download')}</button>
         <button id="ordersPrintBtn" class="btn ghost small">${window.i18n.t('print_report')}</button>
       </div>
@@ -6050,8 +6311,8 @@ function setupOrdersSection() {
     renderOrders();
   });
 
-  section.querySelector('#orderSearch').addEventListener('input', (e) => {
-    state.orderFilters.query = e.target.value.trim().toLowerCase();
+  bindDebouncedQueryInput(section.querySelector('#orderSearch'), (value) => {
+    state.orderFilters.query = String(value || '').trim().toLowerCase();
     resetPaginationPage(state.orderFilters);
     renderOrders();
   });
@@ -7762,7 +8023,7 @@ function setupProductsSection() {
           <option value="salesAsc">${window.i18n.t('sort_sales_asc')}</option>
           <option value="incompleteInfo">${window.i18n.t('sort_incomplete_info')}</option>
         </select>
-        <input id="productSearch" class="input" style="max-width: 220px;" placeholder="${window.i18n.t('search')}" />
+        <input id="productSearch" class="input" autocomplete="off" style="max-width: 220px;" placeholder="${window.i18n.t('search')}" value="${escapeHtml(state.productFilters.query || '')}" />
         <div class="row" style="gap: 8px;">
           <span class="helper">${window.i18n.t('items_per_page')}</span>
           <select id="productsPageSize" class="input" style="max-width: 110px;">
@@ -7862,8 +8123,8 @@ function bindProductsSection() {
     state.productFilters.currentPage = 1;
     renderProductsSection();
   });
-  document.getElementById('productSearch').addEventListener('input', (e) => {
-    state.productFilters.query = e.target.value.trim();
+  bindDebouncedQueryInput(document.getElementById('productSearch'), (value) => {
+    state.productFilters.query = String(value || '').trim();
     state.productFilters.currentPage = 1;
     renderProductsSection();
   });
@@ -8182,7 +8443,7 @@ function setupStockMaterialsSection() {
         <select id="materialCategoryFilter" class="input" style="max-width: 200px;"></select>
         <select id="materialStorageFilter" class="input" style="max-width: 200px;"></select>
         <select id="materialCountryFilter" class="input" style="max-width: 200px;"></select>
-        <input id="materialSearch" class="input" style="max-width: 220px;" placeholder="${window.i18n.t('search')}" />
+        <input id="materialSearch" class="input" autocomplete="off" style="max-width: 220px;" placeholder="${window.i18n.t('search')}" value="${escapeHtml(state.materialFilters.query || '')}" />
         <div class="row" style="gap: 8px;">
           <span class="helper">${window.i18n.t('items_per_page')}</span>
           <select id="materialsPageSize" class="input" style="max-width: 110px;">
@@ -8269,8 +8530,8 @@ function bindStockMaterialsSection() {
     state.materialFilters.currentPage = 1;
     renderStockMaterialsSection();
   });
-  document.getElementById('materialSearch').addEventListener('input', (e) => {
-    state.materialFilters.query = e.target.value.trim();
+  bindDebouncedQueryInput(document.getElementById('materialSearch'), (value) => {
+    state.materialFilters.query = String(value || '').trim();
     state.materialFilters.currentPage = 1;
     renderStockMaterialsSection();
   });
@@ -12147,6 +12408,137 @@ function renderItemSearchResults(container, entries, onSelect) {
 function normalizeItems(list) {
   if (!list) return [];
   return Array.isArray(list) ? list : Object.values(list);
+}
+
+function getOrderTimestamp(order) {
+  const value = order?.createdAt ?? order?.timestamp ?? order?.date ?? order?.createdAtMs;
+  const time = typeof value === 'number' ? value : new Date(value || 0).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function getOrderInvoiceNumber(order) {
+  return order?.orderNumber || order?.invoiceNumber || order?.invoiceNo || order?.number || '-';
+}
+
+function getOrderCustomer(order) {
+  const customers = state.cache.customers || {};
+  return order?.customerId ? customers[order.customerId] : null;
+}
+
+function getOrderCustomerName(order) {
+  const customer = getOrderCustomer(order);
+  return order?.customerName || order?.name || getLocalizedName(customer) || '-';
+}
+
+function getOrderCustomerPhone(order) {
+  const customer = getOrderCustomer(order);
+  return order?.customerPhone || order?.phoneNumber || order?.phone || customer?.phone || '-';
+}
+
+function getOrderBranchName(order) {
+  const branches = state.cache.branches || {};
+  return order?.branchName || order?.branch || getLocalizedName(branches[order?.branchId]) || '-';
+}
+
+function getOrderCashierName(order) {
+  const cashiers = state.cache.cashiers || {};
+  return order?.cashierName || order?.cashier || cashiers[order?.cashierId]?.name || cashiers[order?.cashierId]?.code || '-';
+}
+
+function getOrderZoneName(order) {
+  const zones = state.cache.deliveryZones || {};
+  const direct = order?.deliveryZoneName || order?.deliveryArea || order?.area || order?.zoneName;
+  if (direct) return direct;
+  const zoneName = getLocalizedName(zones[order?.deliveryZoneId]);
+  if (zoneName && zoneName !== '-') return zoneName;
+  const address = String(order?.address || '').trim();
+  return address ? address.split(/[-،,]/)[0].trim() : '-';
+}
+
+function getOrderTypeLabel(order) {
+  const orderTypes = state.cache.orderTypes || {};
+  const direct = getLocalizedName(orderTypes[order?.orderTypeId]);
+  if (direct && direct !== '-') return direct;
+  const raw = String(order?.orderTypeName || order?.orderType || order?.type || '').toLowerCase();
+  if (['delivery', 'توصيل'].includes(raw)) return 'توصيل';
+  if (['pickup', 'takeaway', 'استلام'].includes(raw)) return 'استلام';
+  return order?.orderTypeName || order?.orderType || '-';
+}
+
+function getOrderPaymentValue(order) {
+  return order?.paymentMethod || order?.paymentMethodId || order?.payment || '';
+}
+
+function getOrderPaymentLabel(order) {
+  const paymentMethods = state.cache.paymentMethods || {};
+  const direct = getLocalizedName(paymentMethods[order?.paymentMethodId]);
+  if (direct && direct !== '-') return direct;
+  const raw = String(getOrderPaymentValue(order)).toLowerCase();
+  if (['cash', 'كاش'].includes(raw)) return 'كاش';
+  if (['online', 'أونلاين', 'اونلاين'].includes(raw)) return 'أونلاين';
+  if (['knet', 'k-net', 'كي-نت', 'كي نت'].includes(raw)) return 'كي-نت';
+  return order?.paymentMethodName || order?.paymentMethod || order?.paymentMethodId || '-';
+}
+
+function getOrderDeliveryFee(order) {
+  return Number(order?.deliveryFee ?? order?.deliveryPrice ?? order?.deliveryCharge ?? 0) || 0;
+}
+
+function getOrderItems(order) {
+  const products = state.cache.products || {};
+  const sourceItems = Array.isArray(order?.items)
+    ? order.items
+    : Object.entries(order?.items || {}).map(([key, value]) => ({ productId: key, ...(value || {}) }));
+  return sourceItems.map((item) => {
+    const productId = item.productId || item.itemId || item.id || '';
+    const product = productId ? products[productId] : null;
+    const quantity = Number(item.quantity ?? item.qty ?? item.count ?? 1) || 1;
+    const price = Number(item.price ?? item.unitPrice ?? 0) || 0;
+    const productLabel = getLocalizedName(product);
+    const productName = item.productName || item.name || item.nameAr || (productLabel && productLabel !== '-' ? productLabel : '') || productId || '-';
+    const productNameEn = item.productNameEn || item.nameEn || product?.nameEn || '';
+    const total = Number(item.total ?? item.lineTotal ?? (quantity * price)) || 0;
+    return {
+      ...item,
+      productId,
+      productName,
+      productNameEn,
+      name: productName,
+      quantity,
+      qty: quantity,
+      price,
+      unit: item.unit || item.unitName || product?.unit || 'حبة',
+      total
+    };
+  });
+}
+
+function getOrderItemsSubtotal(order) {
+  const items = getOrderItems(order);
+  const itemsTotal = items.reduce((sum, item) => sum + Number(item.total || (item.quantity * item.price) || 0), 0);
+  return Number(order?.subTotal ?? order?.subtotal ?? order?.itemsNetTotal ?? order?.netTotal ?? itemsTotal) || 0;
+}
+
+function getOrderGrandTotal(order) {
+  const fallback = getOrderItemsSubtotal(order) + getOrderDeliveryFee(order);
+  return Number(order?.total ?? order?.grandTotal ?? fallback) || 0;
+}
+
+function getOrderDiscountAmount(order) {
+  return Number(order?.discountAmount ?? order?.discountTotal ?? order?.discount ?? 0) || 0;
+}
+
+function orderMatchesText(order, query) {
+  const target = [
+    getOrderInvoiceNumber(order),
+    getOrderCustomerName(order),
+    getOrderCustomerPhone(order),
+    getOrderBranchName(order),
+    getOrderCashierName(order),
+    getOrderPaymentLabel(order),
+    getOrderZoneName(order)
+  ].join(' ').toLowerCase();
+  return target.includes(query);
 }
 
 function generateCounter(path) {
@@ -20222,12 +20614,12 @@ function renderDiscountInvoiceDetailsView(section) {
     return;
   }
 
-  const items = normalizeItems(order.items);
+  const items = getOrderItems(order);
   const rows = items.map((item) => ({
     name: item.name || item.productId || item.itemId || '-',
     qty: Number(item.qty || 0),
     price: Number(item.price || 0),
-    total: Number(item.qty || 0) * Number(item.price || 0)
+    total: Number(item.total ?? (Number(item.qty || 0) * Number(item.price || 0))) || 0
   }));
 
   section.innerHTML = `
@@ -20367,7 +20759,7 @@ function renderOrders() {
 
   const entries = Object.entries(orders)
     .map(([id, data]) => ({ id, ...data }))
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    .sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
 
   const filtered = entries.filter((order) => orderMatchesFilters(order, customers));
   const pagination = paginateEntries(filtered, state.orderFilters);
@@ -20397,26 +20789,22 @@ function renderOrders() {
 
   pagedOrders.forEach((order) => {
     const row = document.createElement('tr');
-    const customer = customers[order.customerId];
-    const customerName = order.customerName || getLocalizedName(customer);
-    const zoneName = getLocalizedName(zones[order.deliveryZoneId]);
-    const orderTypeName = getLocalizedName(orderTypes[order.orderTypeId]) || order.orderTypeName || '-';
-    const paymentName = getLocalizedName(paymentMethods[order.paymentMethodId]) || order.paymentMethodId || '-';
-    const netTotal = order.netTotal ?? (order.total ?? 0) - (order.deliveryFee || 0);
+    const customerName = getOrderCustomerName(order);
+    const netTotal = getOrderItemsSubtotal(order);
     row.innerHTML = `
       <td><input type="checkbox" data-id="${order.id}" ${state.selectedOrders.has(order.id) ? 'checked' : ''} /></td>
-      <td>${order.orderNumber || '-'}</td>
-      <td><button class="btn ghost small" data-action="customer">${customerName || '-'}</button></td>
-      <td>${zoneName || '-'}</td>
-      <td>${order.customerPhone || customer?.phone || '-'}</td>
-      <td>${formatDate(order.createdAt)}</td>
-      <td>${order.cashierName || cashiers[order.cashierId]?.name || '-'}</td>
-      <td>${getLocalizedName(branches[order.branchId]) || order.branchName || '-'}</td>
-      <td>${orderTypeName}</td>
+      <td>${getOrderInvoiceNumber(order)}</td>
+      <td><button class="btn ghost small" data-action="customer">${escapeHtml(customerName || '-')}</button></td>
+      <td>${escapeHtml(getOrderZoneName(order) || '-')}</td>
+      <td>${escapeHtml(getOrderCustomerPhone(order) || '-')}</td>
+      <td>${formatDate(getOrderTimestamp(order))}</td>
+      <td>${escapeHtml(getOrderCashierName(order) || '-')}</td>
+      <td>${escapeHtml(getOrderBranchName(order) || '-')}</td>
+      <td>${escapeHtml(getOrderTypeLabel(order))}</td>
       <td>${formatMoney(netTotal)}</td>
-      <td>${formatMoney(order.deliveryFee || 0)}</td>
-      <td>${formatMoney(order.total)}</td>
-      <td>${paymentName}</td>
+      <td>${formatMoney(getOrderDeliveryFee(order))}</td>
+      <td>${formatMoney(getOrderGrandTotal(order))}</td>
+      <td>${escapeHtml(getOrderPaymentLabel(order))}</td>
       <td><button class="btn ghost small" data-action="edit">${window.i18n.t('edit')}</button></td>
     `;
     row.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
@@ -20438,32 +20826,30 @@ function renderOrders() {
 }
 
 function orderMatchesFilters(order, customers = state.cache.customers || {}) {
-  if (state.orderFilters.branchId !== 'all' && order.branchId !== state.orderFilters.branchId) {
+  if (state.orderFilters.branchId !== 'all' && order.branchId !== state.orderFilters.branchId && getOrderBranchName(order) !== getLocalizedName(state.cache.branches?.[state.orderFilters.branchId])) {
     return false;
   }
-  if (state.orderFilters.cashierId !== 'all' && order.cashierId !== state.orderFilters.cashierId) {
+  if (state.orderFilters.cashierId !== 'all' && order.cashierId !== state.orderFilters.cashierId && getOrderCashierName(order) !== (state.cache.cashiers?.[state.orderFilters.cashierId]?.name || state.cache.cashiers?.[state.orderFilters.cashierId]?.code)) {
     return false;
   }
   const selectedZoneIds = Array.isArray(state.orderFilters.zoneIds) ? state.orderFilters.zoneIds : [];
   if (selectedZoneIds.length && !selectedZoneIds.includes(order.deliveryZoneId || '')) {
     return false;
   }
-  if (state.orderFilters.orderTypeId !== 'all' && (order.orderTypeId || '') !== state.orderFilters.orderTypeId) {
+  if (state.orderFilters.orderTypeId !== 'all' && (order.orderTypeId || '') !== state.orderFilters.orderTypeId && getOrderTypeLabel(order) !== getLocalizedName(state.cache.orderTypes?.[state.orderFilters.orderTypeId])) {
     return false;
   }
+  const timestamp = getOrderTimestamp(order);
   if (state.orderFilters.dateFrom) {
     const start = new Date(`${state.orderFilters.dateFrom}T00:00:00`).getTime();
-    if ((order.createdAt || 0) < start) return false;
+    if (timestamp < start) return false;
   }
   if (state.orderFilters.dateTo) {
     const end = new Date(`${state.orderFilters.dateTo}T23:59:59`).getTime();
-    if ((order.createdAt || 0) > end) return false;
+    if (timestamp > end) return false;
   }
   if (state.orderFilters.query) {
-    const customerName = order.customerName || customers[order.customerId]?.nameAr || '';
-    const customerPhone = order.customerPhone || customers[order.customerId]?.phone || '';
-    const target = `${order.orderNumber || ''} ${order.cashierName || ''} ${order.branchName || ''} ${customerName} ${customerPhone}`.toLowerCase();
-    if (!target.includes(state.orderFilters.query)) {
+    if (!orderMatchesText(order, state.orderFilters.query)) {
       return false;
     }
   }
@@ -20475,7 +20861,7 @@ function getFilteredOrders() {
   const customers = state.cache.customers || {};
   const entries = Object.entries(orders)
     .map(([id, data]) => ({ id, ...data }))
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    .sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
 
   return entries.filter((order) => orderMatchesFilters(order, customers));
 }
@@ -20498,7 +20884,7 @@ function toggleSelectAllOrders(checked) {
 }
 
 function exportOrders() {
-  const orders = getSelectedOrders();
+  const orders = getSelectedOrders().slice().sort((a, b) => getOrderTimestamp(a) - getOrderTimestamp(b));
   if (orders.length === 0) return;
   const branches = state.cache.branches || {};
   const cashiers = state.cache.cashiers || {};
@@ -20508,25 +20894,19 @@ function exportOrders() {
   const customers = state.cache.customers || {};
 
   const rows = orders.map((order) => {
-    const customer = customers[order.customerId];
-    const customerName = order.customerName || getLocalizedName(customer);
-    const zoneName = getLocalizedName(zones[order.deliveryZoneId]);
-    const orderTypeName = getLocalizedName(orderTypes[order.orderTypeId]) || order.orderTypeName || '-';
-    const paymentName = getLocalizedName(paymentMethods[order.paymentMethodId]) || order.paymentMethodId || '-';
-    const netTotal = order.netTotal ?? (order.total ?? 0) - (order.deliveryFee || 0);
     return {
-      [window.i18n.t('invoice_number')]: order.orderNumber || '',
-      [window.i18n.t('customer_name')]: customerName || '',
-      [window.i18n.t('delivery_zone')]: zoneName || '',
-      [window.i18n.t('customer_phone')]: order.customerPhone || customer?.phone || '',
-      [window.i18n.t('date_time')]: formatDate(order.createdAt),
-      [window.i18n.t('cashier')]: order.cashierName || cashiers[order.cashierId]?.name || '',
-      [window.i18n.t('branch')]: getLocalizedName(branches[order.branchId]) || order.branchName || '',
-      [window.i18n.t('order_type')]: orderTypeName,
-      [window.i18n.t('net_total')]: formatMoney(netTotal),
-      [window.i18n.t('delivery_fee')]: formatMoney(order.deliveryFee || 0),
-      [window.i18n.t('grand_total')]: formatMoney(order.total || 0),
-      [window.i18n.t('payment_method')]: paymentName
+      [window.i18n.t('invoice_number')]: getOrderInvoiceNumber(order),
+      [window.i18n.t('customer_name')]: getOrderCustomerName(order),
+      [window.i18n.t('delivery_zone')]: getOrderZoneName(order),
+      [window.i18n.t('customer_phone')]: getOrderCustomerPhone(order),
+      [window.i18n.t('date_time')]: formatDate(getOrderTimestamp(order)),
+      [window.i18n.t('cashier')]: getOrderCashierName(order),
+      [window.i18n.t('branch')]: getOrderBranchName(order),
+      [window.i18n.t('order_type')]: getOrderTypeLabel(order),
+      [window.i18n.t('net_total')]: formatMoney(getOrderItemsSubtotal(order)),
+      [window.i18n.t('delivery_fee')]: formatMoney(getOrderDeliveryFee(order)),
+      [window.i18n.t('grand_total')]: formatMoney(getOrderGrandTotal(order)),
+      [window.i18n.t('payment_method')]: getOrderPaymentLabel(order)
     };
   });
 
@@ -20534,7 +20914,7 @@ function exportOrders() {
 }
 
 function printOrders() {
-  const orders = getSelectedOrders();
+  const orders = getSelectedOrders().slice().sort((a, b) => getOrderTimestamp(a) - getOrderTimestamp(b));
   if (orders.length === 0) return;
   const branches = state.cache.branches || {};
   const zones = state.cache.deliveryZones || {};
@@ -20543,10 +20923,10 @@ function printOrders() {
   const customers = state.cache.customers || {};
   const paymentMethods = state.cache.paymentMethods || {};
   const totals = orders.reduce((acc, order) => {
-    const netTotal = Number(order.netTotal ?? (order.total ?? 0) - (order.deliveryFee || 0));
+    const netTotal = getOrderItemsSubtotal(order);
     acc.net += netTotal;
-    acc.delivery += Number(order.deliveryFee || 0);
-    acc.total += Number(order.total || 0);
+    acc.delivery += getOrderDeliveryFee(order);
+    acc.total += getOrderGrandTotal(order);
     return acc;
   }, { net: 0, delivery: 0, total: 0 });
 
@@ -20565,19 +20945,18 @@ function printOrders() {
   ];
 
   const rows = orders.map((order) => {
-    const customer = customers[order.customerId];
     return [
-      order.orderNumber || '-',
-      order.customerName || getLocalizedName(customer) || '-',
-      order.customerPhone || customer?.phone || '-',
-      getLocalizedName(zones[order.deliveryZoneId]) || '-',
-      getLocalizedName(branches[order.branchId]) || order.branchName || '-',
-      order.cashierName || cashiers[order.cashierId]?.name || '-',
-      getLocalizedName(orderTypes[order.orderTypeId]) || order.orderTypeName || '-',
-      formatMoney(order.netTotal ?? (order.total ?? 0) - (order.deliveryFee || 0)),
-      formatMoney(order.deliveryFee || 0),
-      formatMoney(order.total || 0),
-      formatDate(order.createdAt)
+      getOrderInvoiceNumber(order),
+      getOrderCustomerName(order),
+      getOrderCustomerPhone(order),
+      getOrderZoneName(order),
+      getOrderBranchName(order),
+      getOrderCashierName(order),
+      getOrderTypeLabel(order),
+      formatMoney(getOrderItemsSubtotal(order)),
+      formatMoney(getOrderDeliveryFee(order)),
+      formatMoney(getOrderGrandTotal(order)),
+      formatDate(getOrderTimestamp(order))
     ];
   });
 
@@ -20601,7 +20980,7 @@ function openOrderEditModal(order) {
   if (!els.orderEditOverlay) return;
   state.editingOrder = {
     ...order,
-    items: Array.isArray(order.items) ? order.items.map((item) => ({ ...item })) : []
+    items: getOrderItems(order).map((item) => ({ ...item }))
   };
 
   const customers = state.cache.customers || {};
@@ -20614,34 +20993,17 @@ function openOrderEditModal(order) {
   const zoneSelect = document.getElementById('orderZone');
   const paymentSelect = document.getElementById('orderPayment');
   const branchSelect = document.getElementById('orderBranch');
-  const addProductSelect = document.getElementById('orderAddProduct');
 
   if (customerSelect) {
-    customerSelect.innerHTML = '';
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = window.i18n.t('select_customer');
-    customerSelect.appendChild(placeholder);
-    Object.entries(customers).forEach(([id, customer]) => {
-      const option = document.createElement('option');
-      option.value = id;
-      option.textContent = getLocalizedName(customer);
-      customerSelect.appendChild(option);
-    });
-    customerSelect.value = order.customerId || '';
-    customerSelect.onchange = () => {
-      const selected = customers[customerSelect.value];
-      if (selected) {
-        document.getElementById('orderCustomerPhone').value = selected.phone || '';
-        if (selected.zoneId && zoneSelect) {
-          zoneSelect.value = selected.zoneId;
-        }
-      }
-    };
+    customerSelect.value = getOrderCustomerName(order) === '-' ? '' : getOrderCustomerName(order);
   }
 
   if (zoneSelect) {
     zoneSelect.innerHTML = '';
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = getOrderZoneName(order) === '-' ? '' : getOrderZoneName(order);
+    zoneSelect.appendChild(emptyOption);
     Object.entries(zones).forEach(([id, zone]) => {
       const option = document.createElement('option');
       option.value = id;
@@ -20653,17 +21015,33 @@ function openOrderEditModal(order) {
 
   if (paymentSelect) {
     paymentSelect.innerHTML = '';
+    const legacyOptions = [
+      ['cash', 'كاش'],
+      ['online', 'أونلاين'],
+      ['knet', 'كي-نت']
+    ];
+    legacyOptions.forEach(([value, label]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      paymentSelect.appendChild(option);
+    });
     Object.entries(paymentMethods).forEach(([id, method]) => {
       const option = document.createElement('option');
       option.value = id;
       option.textContent = getLocalizedName(method);
       paymentSelect.appendChild(option);
     });
-    paymentSelect.value = order.paymentMethodId || '';
+    paymentSelect.value = order.paymentMethodId || order.paymentMethod || 'cash';
   }
 
   if (branchSelect) {
     branchSelect.innerHTML = '';
+    const currentBranchName = getOrderBranchName(order);
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = currentBranchName === '-' ? '' : currentBranchName;
+    branchSelect.appendChild(emptyOption);
     Object.entries(branches).forEach(([id, branch]) => {
       const option = document.createElement('option');
       option.value = id;
@@ -20673,18 +21051,26 @@ function openOrderEditModal(order) {
     branchSelect.value = order.branchId || '';
   }
 
-  if (addProductSelect) {
-    addProductSelect.innerHTML = '';
-    Object.entries(products).forEach(([id, product]) => {
-      const option = document.createElement('option');
-      option.value = id;
-      option.textContent = getLocalizedName(product);
-      addProductSelect.appendChild(option);
-    });
+  const addProductInput = document.getElementById('orderAddProduct');
+  const searchInput = document.getElementById('orderProductSearchInput');
+  const searchResults = document.getElementById('orderProductSearchResults');
+  const selectedInfo = document.getElementById('orderSelectedProductInfo');
+  if (addProductInput) addProductInput.value = '';
+  if (searchInput) searchInput.value = '';
+  if (searchResults) searchResults.innerHTML = '';
+  if (selectedInfo) {
+    selectedInfo.style.display = 'none';
+    selectedInfo.textContent = '';
   }
 
-  document.getElementById('orderCustomerPhone').value = order.customerPhone || '';
-  document.getElementById('orderDeliveryFee').value = order.deliveryFee || 0;
+  document.getElementById('orderCustomerPhone').value = getOrderCustomerPhone(order) === '-' ? '' : getOrderCustomerPhone(order);
+  const addressInput = document.getElementById('orderAddress');
+  if (addressInput) addressInput.value = order.address || '';
+  document.getElementById('orderDeliveryFee').value = getOrderDeliveryFee(order).toFixed(3);
+  const discountTypeInput = document.getElementById('orderDiscountType');
+  if (discountTypeInput) discountTypeInput.value = order.discountType || (getOrderDiscountAmount(order) > 0 ? 'fixed' : 'none');
+  const discountValueInput = document.getElementById('orderDiscountValue');
+  if (discountValueInput) discountValueInput.value = order.discountValue || getOrderDiscountAmount(order) || '';
 
   renderOrderItemsEditor();
   els.orderEditError.textContent = '';
@@ -20693,36 +21079,175 @@ function openOrderEditModal(order) {
 
 function renderOrderItemsEditor() {
   if (!els.orderItemsList) return;
-  els.orderItemsList.innerHTML = '';
   const items = state.editingOrder?.items || [];
-  items.forEach((item, index) => {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'card light';
-    wrapper.style.padding = '12px';
-    wrapper.innerHTML = `
-      <strong>${item.name || item.productId || '-'}</strong>
-      <div class="row" style="margin-top: 6px;">
-        <label class="tag">${window.i18n.t('quantity')}</label>
-        <input class="input" type="number" min="1" value="${item.qty || 1}" style="max-width: 90px;" data-field="qty" />
-        <label class="tag">${window.i18n.t('price')}</label>
-        <input class="input" type="number" min="0" value="${item.price || 0}" style="max-width: 110px;" data-field="price" />
-        <button type="button" class="btn danger small" data-action="remove">${window.i18n.t('remove_item')}</button>
+  const rows = items.map((item, index) => {
+    const qty = Number(item.quantity ?? item.qty ?? 1) || 1;
+    const price = Number(item.price || 0) || 0;
+    const total = Number(item.total ?? (qty * price)) || 0;
+    return `
+      <div class="order-edit-row" data-index="${index}" style="display: flex; gap: 10px; align-items: center; background: ${index % 2 ? '#f8fafc' : '#f1f5f9'}; padding: 12px; border-radius: 10px; margin-bottom: 10px;">
+        <div style="flex: 1; min-width: 180px; font-weight: 800; color: #111827;">
+          ${escapeHtml(item.productName || item.name || item.productId || '-')}
+          ${item.productNameEn ? `<div style="font-size: 12px; color: #6b7280; font-weight: 600;">${escapeHtml(item.productNameEn)}</div>` : ''}
+        </div>
+        <input type="number" min="0.001" step="0.001" value="${qty}" style="width: 90px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; text-align: center;" data-field="qty" />
+        <input value="${escapeHtml(item.unit || 'حبة')}" style="width: 90px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; text-align: center;" data-field="unit" />
+        <input type="number" min="0" step="0.001" value="${price}" style="width: 100px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; text-align: center;" data-field="price" />
+        <span style="width: 100px; color: #2563eb; font-weight: 800; text-align: center;">${formatMoney(total)}</span>
+        <button type="button" data-action="remove" style="background: #dc2626; color: white; border: none; padding: 10px 14px; border-radius: 8px; font-weight: 800; cursor: pointer;">حذف</button>
       </div>
     `;
-    wrapper.querySelector('[data-field="qty"]').addEventListener('input', (e) => {
+  }).join('');
+
+  const subtotal = Number(items.reduce((sum, item) => {
+    const qty = Number(item.quantity ?? item.qty ?? 0) || 0;
+    const price = Number(item.price || 0) || 0;
+    return sum + (qty * price);
+  }, 0).toFixed(3));
+  const discountType = document.getElementById('orderDiscountType')?.value || 'none';
+  const discountValue = Number(normalizeDigits(document.getElementById('orderDiscountValue')?.value || '0')) || 0;
+  const discountAmount = discountType === 'percent'
+    ? Number((subtotal * (discountValue / 100)).toFixed(3))
+    : (discountType === 'fixed' ? Number(discountValue.toFixed(3)) : 0);
+  const netTotal = Math.max(subtotal - discountAmount, 0);
+  const deliveryFee = Number(document.getElementById('orderDeliveryFee')?.value || 0) || 0;
+  const grandTotal = Number((netTotal + deliveryFee).toFixed(3));
+
+  els.orderItemsList.innerHTML = `
+    <div style="display: flex; gap: 10px; align-items: center; color: #64748b; font-weight: 800; padding: 0 12px 8px;">
+      <div style="flex: 1; min-width: 180px;">اسم المنتج</div>
+      <div style="width: 90px; text-align: center;">الكمية</div>
+      <div style="width: 90px; text-align: center;">الوحدة</div>
+      <div style="width: 100px; text-align: center;">السعر</div>
+      <div style="width: 100px; text-align: center;">المجموع</div>
+      <div style="width: 62px;"></div>
+    </div>
+    ${rows || '<div style="background: #f8fafc; padding: 18px; border-radius: 10px; text-align: center; color: #6b7280; font-weight: 700;">لا توجد منتجات</div>'}
+    <div style="margin-top: 18px; padding: 18px; background: #eff6ff; border-radius: 12px;">
+      <div style="display: flex; justify-content: space-between; font-weight: 800; margin-bottom: 8px;">
+        <span>مجموع الأصناف قبل الخصم:</span>
+        <span>${formatMoney(subtotal)}</span>
+      </div>
+      ${discountAmount > 0 ? `
+        <div style="display: flex; justify-content: space-between; font-weight: 800; color: #dc2626; margin-bottom: 8px;">
+          <span>الخصم:</span>
+          <span>-${formatMoney(discountAmount)}</span>
+        </div>
+      ` : ''}
+      ${deliveryFee > 0 ? `
+        <div style="display: flex; justify-content: space-between; font-weight: 800; margin-bottom: 8px;">
+          <span>رسوم التوصيل:</span>
+          <span>${formatMoney(deliveryFee)}</span>
+        </div>
+      ` : ''}
+      <div style="display: flex; justify-content: space-between; font-size: 20px; font-weight: 900;">
+        <span>الإجمالي:</span>
+        <span style="color: #2563eb;">${formatMoney(grandTotal)}</span>
+      </div>
+    </div>
+  `;
+
+  els.orderItemsList.querySelectorAll('.order-edit-row').forEach((wrapper) => {
+    const index = Number(wrapper.dataset.index);
+    wrapper.querySelector('[data-field="qty"]').addEventListener('change', (e) => {
       const value = Number(e.target.value || 1);
-      state.editingOrder.items[index].qty = value < 1 ? 1 : value;
+      const next = value <= 0 ? 1 : value;
+      state.editingOrder.items[index].quantity = next;
+      state.editingOrder.items[index].qty = next;
+      state.editingOrder.items[index].total = Number((next * Number(state.editingOrder.items[index].price || 0)).toFixed(3));
+      renderOrderItemsEditor();
     });
-    wrapper.querySelector('[data-field="price"]').addEventListener('input', (e) => {
+    wrapper.querySelector('[data-field="price"]').addEventListener('change', (e) => {
       const value = Number(e.target.value || 0);
-      state.editingOrder.items[index].price = value < 0 ? 0 : value;
+      const next = value < 0 ? 0 : value;
+      state.editingOrder.items[index].price = next;
+      state.editingOrder.items[index].total = Number((Number(state.editingOrder.items[index].quantity || state.editingOrder.items[index].qty || 0) * next).toFixed(3));
+      renderOrderItemsEditor();
+    });
+    wrapper.querySelector('[data-field="unit"]').addEventListener('change', (e) => {
+      state.editingOrder.items[index].unit = e.target.value;
     });
     wrapper.querySelector('[data-action="remove"]').addEventListener('click', () => {
       state.editingOrder.items.splice(index, 1);
       renderOrderItemsEditor();
     });
-    els.orderItemsList.appendChild(wrapper);
   });
+}
+
+function getOrderEditProductSearchText(product) {
+  return [
+    product.nameAr,
+    product.nameEn,
+    product.name,
+    product.code,
+    product.barcode
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function searchProductsForOrderEdit(value) {
+  const results = document.getElementById('orderProductSearchResults');
+  const selectedInput = document.getElementById('orderAddProduct');
+  const selectedInfo = document.getElementById('orderSelectedProductInfo');
+  if (!results) return;
+
+  const query = normalizeDigits(String(value || '')).trim().toLowerCase();
+  if (selectedInput) selectedInput.value = '';
+  if (selectedInfo) {
+    selectedInfo.style.display = 'none';
+    selectedInfo.textContent = '';
+  }
+
+  if (!query) {
+    results.innerHTML = '';
+    return;
+  }
+
+  const matches = Object.entries(state.cache.products || {})
+    .filter(([, product]) => getOrderEditProductSearchText(product).includes(query))
+    .slice(0, 30);
+
+  if (!matches.length) {
+    results.innerHTML = '<div style="background:#fff7ed; color:#9a3412; padding:12px; border-radius:10px; font-weight:800;">لا توجد نتائج</div>';
+    return;
+  }
+
+  results.innerHTML = matches.map(([id, product]) => {
+    const safeId = String(id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const name = product.nameAr || product.name || getLocalizedName(product) || '-';
+    const nameEn = product.nameEn || '';
+    const code = product.code || product.barcode || '';
+    const price = Number(product.price || 0);
+    return `
+      <button type="button" onclick="selectProductForOrderEdit('${safeId}')" style="width:100%; display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px; margin-bottom:8px; background:white; border:1px solid #d1fae5; border-radius:10px; cursor:pointer; text-align:right;">
+        <span style="font-weight:900; color:#111827;">
+          ${escapeHtml(name)}
+          ${nameEn ? `<span style="display:block; color:#6b7280; font-size:12px; font-weight:700;">${escapeHtml(nameEn)}</span>` : ''}
+          ${code ? `<span style="display:block; color:#059669; font-size:12px; font-weight:800;">${escapeHtml(code)}</span>` : ''}
+        </span>
+        <span style="color:#2563eb; font-weight:900; white-space:nowrap;">${formatMoney(price)}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function selectProductForOrderEdit(productId) {
+  const product = state.cache.products?.[productId];
+  if (!product) return;
+
+  const selectedInput = document.getElementById('orderAddProduct');
+  const searchInput = document.getElementById('orderProductSearchInput');
+  const results = document.getElementById('orderProductSearchResults');
+  const selectedInfo = document.getElementById('orderSelectedProductInfo');
+  const name = product.nameAr || product.name || getLocalizedName(product) || '-';
+  const nameEn = product.nameEn || '';
+
+  if (selectedInput) selectedInput.value = productId;
+  if (searchInput) searchInput.value = name;
+  if (results) results.innerHTML = '';
+  if (selectedInfo) {
+    selectedInfo.style.display = 'block';
+    selectedInfo.innerHTML = `المنتج المختار: <strong>${escapeHtml(name)}</strong>${nameEn ? ` <span style="color:#6b7280;">${escapeHtml(nameEn)}</span>` : ''}`;
+  }
 }
 
 function closeOrderEditModal() {
@@ -20733,44 +21258,86 @@ function closeOrderEditModal() {
 
 function saveOrderEdits() {
   if (!state.editingOrder) return;
-  const customerId = document.getElementById('orderCustomer').value || null;
+  const customerNameInput = document.getElementById('orderCustomer').value.trim();
   const customerPhone = document.getElementById('orderCustomerPhone').value.trim();
+  const address = document.getElementById('orderAddress')?.value.trim() || '';
   const deliveryZoneId = document.getElementById('orderZone').value || null;
   const deliveryFee = Number(document.getElementById('orderDeliveryFee').value || 0);
   const paymentMethodId = document.getElementById('orderPayment').value || null;
   const branchId = document.getElementById('orderBranch').value || null;
+  const branchSelect = document.getElementById('orderBranch');
+  const zoneSelect = document.getElementById('orderZone');
+  const paymentSelect = document.getElementById('orderPayment');
+  const discountType = document.getElementById('orderDiscountType')?.value || 'none';
+  const discountValue = Number(normalizeDigits(document.getElementById('orderDiscountValue')?.value || '0')) || 0;
   const customers = state.cache.customers || {};
   const branches = state.cache.branches || {};
 
-  const items = (state.editingOrder.items || []).filter((item) => item.qty > 0);
+  const items = getOrderItems(state.editingOrder).filter((item) => Number(item.quantity || item.qty || 0) > 0).map((item) => {
+    const quantity = Number(item.quantity || item.qty || 0);
+    const price = Number(item.price || 0);
+    const total = Number((quantity * price).toFixed(3));
+    return {
+      ...item,
+      productName: item.productName || item.name || item.productId || '-',
+      productNameEn: item.productNameEn || '',
+      name: item.productName || item.name || item.productId || '-',
+      quantity,
+      qty: quantity,
+      price,
+      unit: item.unit || 'حبة',
+      grossTotal: total,
+      total
+    };
+  });
   if (items.length === 0) {
     els.orderEditError.textContent = window.i18n.t('empty_cart');
     return;
   }
 
-  const subtotal = items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.qty || 0)), 0);
-  const discount = Number(state.editingOrder.discount || 0);
+  const subtotal = Number(items.reduce((sum, item) => sum + Number(item.total || 0), 0).toFixed(3));
+  const discount = discountType === 'percent'
+    ? Number((subtotal * (discountValue / 100)).toFixed(3))
+    : (discountType === 'fixed' ? Number(discountValue.toFixed(3)) : 0);
   const netTotal = Math.max(subtotal - discount, 0);
-  const total = netTotal + deliveryFee;
+  const total = Number((netTotal + deliveryFee).toFixed(3));
 
-  const selectedCustomer = customerId ? customers[customerId] : null;
-  const customerName = selectedCustomer ? getLocalizedName(selectedCustomer) : state.editingOrder.customerName || null;
-  const branchName = branchId ? getLocalizedName(branches[branchId]) : state.editingOrder.branchName || null;
+  const customerName = customerNameInput || state.editingOrder.customerName || state.editingOrder.name || null;
+  const branchName = branchId ? getLocalizedName(branches[branchId]) : (branchSelect?.selectedOptions?.[0]?.textContent || state.editingOrder.branchName || state.editingOrder.branch || null);
+  const deliveryZoneName = deliveryZoneId ? (zoneSelect?.selectedOptions?.[0]?.textContent || null) : getOrderZoneName(state.editingOrder);
+  const paymentMethod = paymentMethodId || getOrderPaymentValue(state.editingOrder) || null;
+  const paymentMethodName = paymentSelect?.selectedOptions?.[0]?.textContent || getOrderPaymentLabel(state.editingOrder);
 
   const updatePayload = {
     items,
+    subTotal: netTotal,
     subtotal,
     discount,
+    discountType,
+    discountValue,
+    discountAmount: discount,
+    discountTotal: discount,
+    itemsGrossTotal: subtotal,
+    itemsNetTotal: netTotal,
     netTotal,
+    deliveryPrice: deliveryFee,
     deliveryFee,
     total,
-    customerId,
     customerName,
+    name: customerName,
     customerPhone: customerPhone || null,
+    phoneNumber: customerPhone || null,
+    phone: customerPhone || null,
+    address,
     deliveryZoneId,
+    deliveryZoneName,
     paymentMethodId,
+    paymentMethod,
+    paymentMethodName,
     branchId,
-    branchName
+    branchName,
+    branch: branchName,
+    updatedAt: Date.now()
   };
 
   db.ref(`orders/${state.editingOrder.id}`).update(updatePayload)
@@ -21189,9 +21756,9 @@ function deriveCustomerLevel(stat) {
 
 function getCustomerOrdersForDetails(customerId, fromDate = '', toDate = '') {
   return Object.entries(state.cache.orders || {})
-    .map(([id, order]) => ({ id, ...order }))
+    .map(([id, order]) => ({ id, ...order, createdAt: getOrderTimestamp(order) }))
     .filter((order) => order.customerId === customerId)
-    .filter((order) => isTimestampInDateRange(order.createdAt, fromDate, toDate))
+    .filter((order) => isTimestampInDateRange(getOrderTimestamp(order), fromDate, toDate))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
 
@@ -21213,7 +21780,7 @@ function getOrderDeliveryAddressLabel(order) {
 function getCustomerFavoriteProduct(rows) {
   const counts = {};
   rows.forEach((order) => {
-    normalizeItems(order.items).forEach((item) => {
+    getOrderItems(order).forEach((item) => {
       const productId = item.productId || item.itemId || item.id || '';
       const itemId = productId || item.name;
       if (!itemId) return;
@@ -21455,7 +22022,7 @@ function renderCustomerFavoriteProductDetailsView(section, customerId, productId
   const fromDate = state.customerFilters.dateFrom || '';
   const toDate = state.customerFilters.dateTo || '';
   const orders = getCustomerOrdersForDetails(customerId, fromDate, toDate).filter((order) => {
-    return normalizeItems(order.items).some((item) => String(item.productId || item.itemId || item.id || '') === String(productId));
+    return getOrderItems(order).some((item) => String(item.productId || item.itemId || item.id || '') === String(productId));
   });
   const rows = orders.map((order) => {
     const net = Number(order.netTotal ?? order.subtotal ?? ((order.total || 0) - (order.deliveryFee || 0)));
@@ -21702,7 +22269,7 @@ function renderCustomersSection() {
         </div>
       ` : ''}
       <div class="row" style="margin-top: 12px; flex-wrap: wrap;">
-        <input id="customerSearch" class="input" style="max-width: 240px;" placeholder="${window.i18n.t('search_customer')}" value="${state.customerFilters.query || ''}" />
+        <input id="customerSearch" class="input" autocomplete="off" style="max-width: 240px;" placeholder="${window.i18n.t('search_customer')}" value="${escapeHtml(state.customerFilters.query || '')}" />
         <details id="customerZoneFilter" class="multi-select-filter" style="max-width: 240px;">
           <summary id="customerZoneFilterSummary" class="input">${window.i18n.t('all_zones')}</summary>
           <div class="multi-select-panel">
@@ -21847,7 +22414,7 @@ function renderCustomersSection() {
     bindDebouncedQueryInput(queryInput, (value) => {
       state.customerFilters.query = String(value || '').trim();
       resetPaginationPage(state.customerFilters);
-      renderCustomersSection();
+      renderCustomersTableOnly();
     });
   }
 
@@ -22106,6 +22673,122 @@ function toggleSelectAllCustomers(checked) {
     if (checked) state.selectedCustomers.add(id);
     else state.selectedCustomers.delete(id);
   });
+}
+
+function getFilteredCustomerEntriesForView() {
+  ensureCustomerFiltersState();
+  const customers = state.cache.customers || {};
+  const zones = state.cache.deliveryZones || {};
+  const allOrders = Object.entries(state.cache.orders || {}).map(([id, data]) => ({ id, ...data }));
+  const useDateRange = Boolean(state.customerFilters.dateFrom || state.customerFilters.dateTo);
+  const rangeOrders = allOrders.filter((order) => isTimestampInDateRange(
+    getOrderTimestamp(order),
+    state.customerFilters.dateFrom,
+    state.customerFilters.dateTo
+  ));
+  const allStats = buildCustomerStatsMap(allOrders);
+  const rangeStats = buildCustomerStatsMap(rangeOrders);
+  const selectedZoneIds = Array.isArray(state.customerFilters.zoneIds) ? state.customerFilters.zoneIds : [];
+  const query = normalizeSearchValue(state.customerFilters.query || '');
+
+  return Object.entries(customers).map(([id, customer]) => {
+    const stat = useDateRange ? (rangeStats[id] || { total: 0, count: 0, first: null, last: null }) : (allStats[id] || { total: 0, count: 0, first: null, last: null });
+    const avgValue = stat.count ? stat.total / stat.count : 0;
+    const avgInterval = stat.count > 1 ? (stat.last - stat.first) / (stat.count - 1) / (1000 * 60 * 60 * 24) : null;
+    const level = customer.level || deriveCustomerLevel(allStats[id]);
+    const customerZoneIds = getCustomerZoneIds(customer);
+    const zoneName = getLocalizedName(zones[customerZoneIds[0] || customer.zoneId]) || '-';
+    const addressText = getCustomerAddressDisplay(customer, zones);
+    return { id, customer, zoneName, addressText, lastOrder: stat.last, count: stat.count, avgValue, avgInterval, level };
+  }).filter((entry) => {
+    const customerZoneIds = getCustomerZoneIds(entry.customer);
+    if (selectedZoneIds.length && !customerZoneIds.some((zoneId) => selectedZoneIds.includes(zoneId))) return false;
+    if (state.customerFilters.level !== 'all' && entry.level !== state.customerFilters.level) return false;
+    if (state.customerFilters.blockedOnly && !entry.customer.isBlocked) return false;
+    if (useDateRange && entry.count === 0) return false;
+    if (query) {
+      const target = normalizeSearchValue(`${getLocalizedName(entry.customer)} ${entry.customer.phone || ''} ${entry.zoneName} ${entry.addressText}`);
+      if (!target.includes(query)) return false;
+    }
+    return true;
+  }).sort((a, b) => {
+    const sortDirection = state.customerFilters.ordersSort === 'asc' ? 1 : -1;
+    const countDiff = (Number(b.count || 0) - Number(a.count || 0)) * sortDirection;
+    if (countDiff !== 0) return countDiff;
+    return Number(b.lastOrder || 0) - Number(a.lastOrder || 0);
+  });
+}
+
+function renderCustomersTableOnly() {
+  const table = document.getElementById('customersTable');
+  if (!table) return;
+  const filteredEntries = getFilteredCustomerEntriesForView();
+  const pagedEntries = paginateEntries(filteredEntries, state.customerFilters).items;
+  updatePaginationControls({
+    infoId: 'customersPageInfo',
+    containerId: 'customersPagination',
+    filters: state.customerFilters,
+    totalItems: filteredEntries.length,
+    onPageChange: (page) => {
+      state.customerFilters.currentPage = page;
+      renderCustomersTableOnly();
+    }
+  });
+
+  table.innerHTML = '';
+  if (!filteredEntries.length) {
+    table.innerHTML = `<tr><td colspan="12">${window.i18n.t('no_data')}</td></tr>`;
+  } else {
+    pagedEntries.forEach((entry) => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td><input type="checkbox" data-id="${entry.id}" ${state.selectedCustomers.has(entry.id) ? 'checked' : ''} /></td>
+        <td><button class="btn ghost small" data-action="details">${getLocalizedName(entry.customer)}</button></td>
+        <td>${entry.customer.phone || '-'}</td>
+        <td>${entry.zoneName}</td>
+        <td>${entry.addressText}</td>
+        <td>${entry.lastOrder ? formatDate(entry.lastOrder) : '-'}</td>
+        <td>${entry.count}</td>
+        <td>${formatNumber(entry.avgValue)}</td>
+        <td>${entry.avgInterval === null ? '-' : entry.avgInterval.toFixed(1)}</td>
+        <td>${getCustomerLevelLabel(entry.level)}</td>
+        <td>${entry.customer.isBlocked ? window.i18n.t('blocked') : window.i18n.t('active')}</td>
+        <td>
+          <div class="row" style="gap: 6px;">
+            <button class="btn ghost small" data-action="edit">${window.i18n.t('edit')}</button>
+            <button class="btn ghost small" data-action="toggle">${entry.customer.isBlocked ? window.i18n.t('unblock_customer') : window.i18n.t('block_customer')}</button>
+            <button class="btn danger small" data-action="delete">${window.i18n.t('delete')}</button>
+          </div>
+        </td>
+      `;
+      row.querySelector('input[type="checkbox"]').addEventListener('change', (event) => {
+        if (event.target.checked) state.selectedCustomers.add(entry.id);
+        else state.selectedCustomers.delete(entry.id);
+      });
+      row.querySelector('[data-action="details"]').addEventListener('click', () => openCustomerDetails(entry.id));
+      row.querySelector('[data-action="edit"]').addEventListener('click', () => openCustomerEditModal(entry.id));
+      row.querySelector('[data-action="toggle"]').addEventListener('click', () => {
+        if (entry.customer.isBlocked) {
+          db.ref(`customers/${entry.id}`).update({ isBlocked: false, blockReason: '' });
+        } else {
+          const reason = prompt(window.i18n.t('block_reason'));
+          if (!reason) return;
+          db.ref(`customers/${entry.id}`).update({ isBlocked: true, blockReason: reason });
+        }
+      });
+      row.querySelector('[data-action="delete"]').addEventListener('click', () => {
+        if (!confirm(window.i18n.t('confirm_delete'))) return;
+        state.selectedCustomers.delete(entry.id);
+        db.ref(`customers/${entry.id}`).remove();
+      });
+      table.appendChild(row);
+    });
+  }
+
+  const selectAll = document.getElementById('selectAllCustomers');
+  if (selectAll) {
+    selectAll.checked = pagedEntries.length > 0 && pagedEntries.every((entry) => state.selectedCustomers.has(entry.id));
+  }
 }
 
 function exportCustomers() {

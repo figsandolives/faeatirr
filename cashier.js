@@ -131,6 +131,7 @@
     let shortageSearchTerm = '';
     let shortageSearchMode = 'products';
     let shortageRequestsPage = 1;
+    let cashierLanguage = localStorage.getItem('cashierLanguage') || 'ar';
     let currentShortageDraft = {
       items: []
     };
@@ -166,6 +167,233 @@
 
     // Units
     const units = ['كيلو', 'لتر', 'جرام', 'حبة', 'ربطة', 'كرتون', 'تنكة', 'بطل', 'ماعون'];
+
+    const cashierTranslations = {
+      ar: {
+        balance: 'موازنة',
+        logout: '🚪 خروج',
+        orders: 'الطلبات',
+        newInvoice: '➕ فاتورة جديدة',
+        shortageRequest: 'طلب نواقص',
+        dailyOpened: 'اليومية مفتوحة من',
+        openingAmount: 'مبلغ البداية',
+        searchInvoiceNumber: 'بحث برقم الفاتورة',
+        invoiceNumberPlaceholder: 'اكتب رقم الفاتورة',
+        search: 'بحث',
+        clear: 'مسح',
+        invoiceNumber: 'رقم الفاتورة',
+        customer: 'العميل',
+        date: 'التاريخ',
+        total: 'المجموع',
+        courier: 'المندوب',
+        actions: 'الإجراءات',
+        handedToCourier: 'تم تسليمه للمندوب',
+        courierName: 'اسم المندوب',
+        edit: 'تعديل',
+        print: '🖨️ طباعة',
+        previous: 'السابق',
+        next: 'التالي',
+        page: 'صفحة',
+        from: 'من',
+        shown: 'المعروض',
+        newInvoiceTitle: 'فاتورة جديدة',
+        addedProducts: 'المنتجات المضافة',
+        noProducts: 'لا توجد منتجات',
+        productsSearch: '🔍 بحث عن منتج...',
+        categories: 'الأقسام الفرعية والمنتجات',
+        searchResults: 'نتائج البحث',
+        back: '← رجوع',
+        subCategoriesProducts: 'الأقسام الفرعية والمنتجات',
+        productNotFound: 'المنتج غير موجود',
+        switchLanguage: 'English',
+        kd: 'د.ك',
+        unit: 'الوحدة',
+        noResults: 'لا توجد نتائج',
+        shortageTitle: 'طلب نواقص',
+        newShortage: 'طلب نواقص جديد',
+        shortages: 'طلبات النواقص',
+        productsSearchMode: 'بحث منتجات',
+        materialsSearchMode: 'بحث مواد مخزون',
+        product: 'منتج',
+        material: 'مواد مخزون',
+        noMaterialCategories: 'لا توجد أقسام مواد مخزون',
+        noProductCategories: 'لا توجد أقسام منتجات',
+        shortageItems: 'العناصر المطلوبة',
+        submitShortage: 'طلب النواقص',
+        transferRequestNo: 'رقم طلب التحويل',
+        branch: 'الفرع',
+        cashier: 'الكاشير',
+        dateTime: 'التاريخ والوقت',
+        items: 'العناصر',
+        status: 'الحالة',
+        receive: 'استلام',
+        noShortageRequests: 'لا توجد طلبات نواقص',
+        qty: 'الكمية',
+        noItems: 'لا توجد عناصر',
+        itemNotFound: 'الصنف غير موجود',
+        itemAdded: 'تمت إضافة الصنف',
+        shortageOnlyBranches: 'طلب النواقص متاح فقط لفرعي أبو الحصانية واليرموك',
+        statusSent: 'تم الارسال',
+        statusReceived: 'تم الاستلام',
+        statusAccepted: 'قيد التنفيذ',
+        statusRejected: 'مرفوض',
+        statusPending: 'بانتظار تنفيذ الطلب',
+        searchPlaceholder: '🔍 بحث...',
+        orderType: 'نوع الطلب',
+        delivery: '🚚 توصيل',
+        pickup: '🛍️ استلام',
+        withinTwoHours: 'خلال ساعتين',
+        specificTime: 'وقت محدد',
+        deliveryDate: 'تاريخ التوصيل',
+        fromTime: 'من',
+        toTime: 'إلى',
+        deliveryFee: 'رسوم التوصيل',
+        pickupBranch: 'فرع الاستلام',
+        choosePickupBranch: 'اختر فرع الاستلام',
+        cancel: 'إلغاء',
+        paymentMethod: 'طريقة الدفع',
+        invoiceValue: 'قيمة الفاتورة',
+        grandTotal: 'الإجمالي',
+        cash: '💵 كاش',
+        online: '💳 أونلاين',
+        knet: '💳 كي-نت',
+        cashReceived: 'المبلغ المستلم',
+        savePrintInvoice: 'حفظ وطباعة الفاتورة',
+        choosePaymentMethod: 'الرجاء اختيار طريقة الدفع',
+        customerSelection: 'اختر العميل',
+        addCustomer: '➕ إضافة عميل',
+        chooseProductsFirst: 'اختيار المنتجات أولاً',
+        customerPhoneSearch: '🔍 بحث عن رقم العميل...',
+        customerAddresses: 'بيانات العميل والعناوين',
+        address: 'العنوان',
+        noAddressNow: 'بدون عنوان حالياً',
+        addNewAddress: '➕ إضافة عنوان جديد',
+        confirm: 'تأكيد'
+      },
+      en: {
+        balance: 'Balance',
+        logout: '🚪 Logout',
+        orders: 'Orders',
+        newInvoice: '➕ New Invoice',
+        shortageRequest: 'Shortage Request',
+        dailyOpened: 'Daily session opened at',
+        openingAmount: 'Opening amount',
+        searchInvoiceNumber: 'Search by invoice number',
+        invoiceNumberPlaceholder: 'Enter invoice number',
+        search: 'Search',
+        clear: 'Clear',
+        invoiceNumber: 'Invoice No.',
+        customer: 'Customer',
+        date: 'Date',
+        total: 'Total',
+        courier: 'Courier',
+        actions: 'Actions',
+        handedToCourier: 'Handed to courier',
+        courierName: 'Courier name',
+        edit: 'Edit',
+        print: '🖨️ Print',
+        previous: 'Previous',
+        next: 'Next',
+        page: 'Page',
+        from: 'of',
+        shown: 'Shown',
+        newInvoiceTitle: 'New Invoice',
+        addedProducts: 'Added Products',
+        noProducts: 'No products',
+        productsSearch: '🔍 Search for a product...',
+        categories: 'Subcategories and Products',
+        searchResults: 'Search Results',
+        back: '← Back',
+        subCategoriesProducts: 'Subcategories and Products',
+        productNotFound: 'Product not found',
+        switchLanguage: 'عربي',
+        kd: 'KD',
+        unit: 'Unit',
+        noResults: 'No results',
+        shortageTitle: 'Shortage Request',
+        newShortage: 'New Shortage Request',
+        shortages: 'Shortage Requests',
+        productsSearchMode: 'Search Products',
+        materialsSearchMode: 'Search Stock Materials',
+        product: 'Product',
+        material: 'Stock Material',
+        noMaterialCategories: 'No stock material categories',
+        noProductCategories: 'No product categories',
+        shortageItems: 'Requested Items',
+        submitShortage: 'Submit Shortage Request',
+        transferRequestNo: 'Transfer Request No.',
+        branch: 'Branch',
+        cashier: 'Cashier',
+        dateTime: 'Date & Time',
+        items: 'Items',
+        status: 'Status',
+        receive: 'Receive',
+        noShortageRequests: 'No shortage requests',
+        qty: 'Quantity',
+        noItems: 'No items',
+        itemNotFound: 'Item not found',
+        itemAdded: 'Item added',
+        shortageOnlyBranches: 'Shortage requests are available only for Abu Hasaniya and Yarmouk branches',
+        statusSent: 'Sent',
+        statusReceived: 'Received',
+        statusAccepted: 'In Progress',
+        statusRejected: 'Rejected',
+        statusPending: 'Pending',
+        searchPlaceholder: '🔍 Search...',
+        orderType: 'Order Type',
+        delivery: '🚚 Delivery',
+        pickup: '🛍️ Pickup',
+        withinTwoHours: 'Within 2 hours',
+        specificTime: 'Specific time',
+        deliveryDate: 'Delivery Date',
+        fromTime: 'From',
+        toTime: 'To',
+        deliveryFee: 'Delivery Fee',
+        pickupBranch: 'Pickup Branch',
+        choosePickupBranch: 'Choose pickup branch',
+        cancel: 'Cancel',
+        paymentMethod: 'Payment Method',
+        invoiceValue: 'Invoice Value',
+        grandTotal: 'Total',
+        cash: '💵 Cash',
+        online: '💳 Online',
+        knet: '💳 K-Net',
+        cashReceived: 'Cash Received',
+        savePrintInvoice: 'Save and Print Invoice',
+        choosePaymentMethod: 'Please choose a payment method',
+        customerSelection: 'Choose Customer',
+        addCustomer: '➕ Add Customer',
+        chooseProductsFirst: 'Choose Products First',
+        customerPhoneSearch: '🔍 Search by customer phone...',
+        customerAddresses: 'Customer Details and Addresses',
+        address: 'Address',
+        noAddressNow: 'No address for now',
+        addNewAddress: '➕ Add new address',
+        confirm: 'Confirm'
+      }
+    };
+
+    function cashierT(key) {
+      return cashierTranslations[cashierLanguage]?.[key] || cashierTranslations.ar[key] || key;
+    }
+
+    function cashierDisplayName(item) {
+      if (!item) return '-';
+      if (cashierLanguage === 'en') {
+        return item.nameEn || item.name || item.nameAr || '-';
+      }
+      return item.nameAr || item.name || item.nameEn || '-';
+    }
+
+    function toggleCashierLanguage() {
+      cashierLanguage = cashierLanguage === 'en' ? 'ar' : 'en';
+      localStorage.setItem('cashierLanguage', cashierLanguage);
+      if (currentScreen === 'cashier') renderCashier();
+      const invoicePage = document.getElementById('invoicePage');
+      if (invoicePage) showInvoiceProductsPage();
+      const shortagePage = document.getElementById('shortageDraftPage');
+      if (shortagePage) renderShortageDraftPage();
+    }
 	    const INVENTORY_BRANCHES = [
 	      { id: 'main', name: 'الفرع الرئيسي' },
 	      { id: 'yarmouk', name: 'فرع اليرموك' },
@@ -177,6 +405,18 @@
     // Helper Functions
     function generateId() {
       return Date.now().toString(36) + Math.random().toString(36).substr(2);
+    }
+
+    function getCustomerCreatedValue(customer) {
+      const directValue = Number(customer?.createdAt || customer?.timestamp || customer?.created || customer?.dateCreated || 0);
+      if (directValue) return directValue;
+      const idPrefix = String(customer?.id || '').slice(0, 8);
+      const parsedIdTime = parseInt(idPrefix, 36);
+      return Number.isFinite(parsedIdTime) ? parsedIdTime : 0;
+    }
+
+    function sortCustomersNewestFirst(customers) {
+      return [...(customers || [])].sort((a, b) => getCustomerCreatedValue(b) - getCustomerCreatedValue(a));
     }
 
     const APP_DATA_CACHE_KEY = 'figs_old_site_accounting_cache_v2';
@@ -468,7 +708,7 @@
         allDeliveryPrices = deliveryPricesSnapshot.val() || {};
         allDailySessions = toArray(dailySessionsSnapshot).sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0));
         allRegisteredDevices = toArray(registeredDevicesSnapshot);
-        allCustomers = toArray(customersSnapshot);
+        allCustomers = sortCustomersNewestFirst(toArray(customersSnapshot));
         allCategories = toArray(categoriesSnapshot);
         allInventoryCategories = toArray(inventoryCategoriesSnapshot).map(category => ({
           ...category,
@@ -1104,7 +1344,7 @@ function setupRealtimeListeners() {
 
   // 4. مراقبة العملاء
   db.ref('customers').on('value', (snapshot) => {
-    allCustomers = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
+    allCustomers = sortCustomersNewestFirst(snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : []);
     refreshUI();
   });
 
@@ -1761,13 +2001,16 @@ function refreshUI() {
           <div class="no-print bg-blue-600 text-white p-4 flex justify-between items-center">
            <div class="text-xl font-bold">${currentCashier.name} (${currentBranch})</div>
             <div class="flex gap-3">
+              <button onclick="toggleCashierLanguage()" class="bg-white text-blue-700 px-4 py-2 rounded-lg font-bold hover:bg-blue-50 transition">
+                ${cashierT('switchLanguage')}
+              </button>
 	              ${currentBranch === 'اليرموك' && hasOpenDailySession() ? `
-	                <button onclick="showDailyBalanceStart()" class="bg-amber-500 px-4 py-2 rounded-lg font-bold hover:bg-amber-600 transition">
-	                  موازنة
+	                <button onclick="showDailyBalanceStart()" class="bg-amber-500 px-4 py-2 rounded-lg font-bold hover:bg-amber-600 transition border-4 border-white shadow-lg ring-2 ring-amber-200">
+	                  ${cashierT('balance')}
 	                </button>
 	              ` : ''}
               <button onclick="logoutCashier()" class="bg-red-600 px-4 py-2 rounded-lg font-bold hover:bg-red-700 transition">
-                🚪 خروج
+                ${cashierT('logout')}
               </button>
             </div>
           </div>
@@ -1775,23 +2018,25 @@ function refreshUI() {
           <!-- Main Content -->
           <div class="flex-1 p-6 overflow-y-auto">
             <div class="max-w-6xl mx-auto">
-              <div class="flex justify-between items-center mb-6">
-                <h2 class="text-3xl font-bold text-gray-800">الطلبات</h2>
-	              <button onclick="startNewInvoiceFromCashier()" class="bg-green-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-green-700 transition">
-	                ➕ فاتورة جديدة
-	              </button>
-	              ${isShortageRequestBranch() ? `
-	                <button onclick="showShortageRequestsPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
-	                  طلب نواقص
+              <div class="flex justify-between items-start mb-6 gap-4">
+                <h2 class="text-3xl font-bold text-gray-800">${cashierT('orders')}</h2>
+                <div class="flex flex-col gap-3 items-stretch">
+	                <button onclick="startNewInvoiceFromCashier()" class="bg-green-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-green-700 transition">
+	                  ${cashierT('newInvoice')}
 	                </button>
-	              ` : ''}
+	                ${isShortageRequestBranch() ? `
+	                  <button onclick="showShortageRequestsPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
+	                    ${cashierT('shortageRequest')}
+	                  </button>
+	                ` : ''}
+                </div>
 	            </div>
               ${currentBranch === 'اليرموك' && hasOpenDailySession() ? `
                 <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-5 text-blue-800 font-bold">
-                  اليومية مفتوحة من ${formatTime(currentDailySession.openedAt)} | مبلغ البداية: ${formatNumberWithThreeDecimals(currentDailySession.openingAmount)} د.ك
+                  ${cashierT('dailyOpened')} ${formatTime(currentDailySession.openedAt)} | ${cashierT('openingAmount')}: ${formatNumberWithThreeDecimals(currentDailySession.openingAmount)} ${cashierT('kd')}
                 </div>
                 <div class="bg-white rounded-xl shadow-lg p-4 mb-5">
-                  <label class="block mb-2 font-bold text-gray-700">بحث برقم الفاتورة</label>
+                  <label class="block mb-2 font-bold text-gray-700">${cashierT('searchInvoiceNumber')}</label>
                   <div class="flex gap-3">
                     <input
                       type="text"
@@ -1799,11 +2044,11 @@ function refreshUI() {
                       value="${escapeHtml(dailyInvoiceSearchTerm)}"
                       oninput="this.value = convertToEnglishNumbers(this.value).replace(/[^\\d]/g, '')"
                       onkeydown="if(event.key === 'Enter') setDailyInvoiceSearchTerm(this.value)"
-                      placeholder="اكتب رقم الفاتورة"
+                      placeholder="${cashierT('invoiceNumberPlaceholder')}"
                       class="flex-1 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none"
                     >
-                    <button onclick="setDailyInvoiceSearchTerm(document.getElementById('dailyInvoiceSearchInput')?.value || '')" class="bg-blue-600 text-white px-5 py-3 rounded-lg font-bold hover:bg-blue-700 transition">بحث</button>
-                    <button onclick="setDailyInvoiceSearchTerm('')" class="bg-gray-200 text-gray-700 px-5 py-3 rounded-lg font-bold hover:bg-gray-300 transition">مسح</button>
+                    <button onclick="setDailyInvoiceSearchTerm(document.getElementById('dailyInvoiceSearchInput')?.value || '')" class="bg-blue-600 text-white px-5 py-3 rounded-lg font-bold hover:bg-blue-700 transition">${cashierT('search')}</button>
+                    <button onclick="setDailyInvoiceSearchTerm('')" class="bg-gray-200 text-gray-700 px-5 py-3 rounded-lg font-bold hover:bg-gray-300 transition">${cashierT('clear')}</button>
                   </div>
                 </div>
               ` : ''}
@@ -1813,12 +2058,12 @@ function refreshUI() {
                   <table>
                     <thead>
                       <tr>
-                        <th>رقم الفاتورة</th>
-                        <th>العميل</th>
-                        <th>التاريخ</th>
-                        <th>المجموع</th>
-                        ${currentBranch === 'اليرموك' ? '<th>المندوب</th>' : ''}
-                        <th>الإجراءات</th>
+                        <th>${cashierT('invoiceNumber')}</th>
+                        <th>${cashierT('customer')}</th>
+                        <th>${cashierT('date')}</th>
+                        <th>${cashierT('total')}</th>
+                        ${currentBranch === 'اليرموك' ? `<th>${cashierT('courier')}</th>` : ''}
+                        <th>${cashierT('actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1827,7 +2072,7 @@ function refreshUI() {
       <td>${order.invoiceNumber}</td>
       <td>${order.customerName}</td>
       <td>${formatDate(order.timestamp)} ${formatTime(order.timestamp)}</td>
-      <td>${order.total.toFixed(3)} د.ك</td>
+      <td>${order.total.toFixed(3)} ${cashierT('kd')}</td>
       ${currentBranch === 'اليرموك' ? `
         <td>
           ${order.orderType === 'delivery' && hasOpenDailySession() && order.dailySessionId === currentDailySession?.id ? `
@@ -1836,12 +2081,12 @@ function refreshUI() {
                 type="text"
                 value="${escapeHtml(order.courierName || '')}"
                 onchange="updateOrderCourierName('${order.id}', this.value)"
-                placeholder="اسم المندوب"
+                placeholder="${cashierT('courierName')}"
                 class="w-36 p-2 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none"
               >
             ` : `
               <button onclick="markOrderHandedToCourier('${order.id}')" class="bg-green-600 text-white px-3 py-2 rounded-lg font-bold hover:bg-green-700 transition">
-                تم تسليمه للمندوب
+                ${cashierT('handedToCourier')}
               </button>
             `}
           ` : '-'}
@@ -1849,10 +2094,10 @@ function refreshUI() {
       ` : ''}
       <td>
         <button onclick="openCashierQuickEditOrder('${order.id}')" class="bg-amber-500 text-white px-4 py-2 rounded hover:bg-amber-600 transition ml-2">
-          تعديل
+          ${cashierT('edit')}
         </button>
         <button onclick="reprintInvoice('${order.id}')" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
-          🖨️ طباعة
+          ${cashierT('print')}
         </button>
       </td>
     </tr>
@@ -1861,9 +2106,9 @@ function refreshUI() {
                   </table>
                 </div>
                 <div class="flex items-center justify-between mt-4">
-                  <button onclick="changeCashierOrdersPage(-1)" ${cashierOrdersPage <= 1 ? 'disabled' : ''} class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-bold hover:bg-gray-300 transition disabled:opacity-50 disabled:cursor-not-allowed">السابق</button>
-                  <div class="font-bold text-gray-700">صفحة ${cashierOrdersPage} من ${cashierTotalPages} | المعروض ${cashierPagedOrders.length} من ${visibleOrders.length}</div>
-                  <button onclick="changeCashierOrdersPage(1)" ${cashierOrdersPage >= cashierTotalPages ? 'disabled' : ''} class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-bold hover:bg-gray-300 transition disabled:opacity-50 disabled:cursor-not-allowed">التالي</button>
+                  <button onclick="changeCashierOrdersPage(-1)" ${cashierOrdersPage <= 1 ? 'disabled' : ''} class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-bold hover:bg-gray-300 transition disabled:opacity-50 disabled:cursor-not-allowed">${cashierT('previous')}</button>
+                  <div class="font-bold text-gray-700">${cashierT('page')} ${cashierOrdersPage} ${cashierT('from')} ${cashierTotalPages} | ${cashierT('shown')} ${cashierPagedOrders.length} ${cashierT('from')} ${visibleOrders.length}</div>
+                  <button onclick="changeCashierOrdersPage(1)" ${cashierOrdersPage >= cashierTotalPages ? 'disabled' : ''} class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-bold hover:bg-gray-300 transition disabled:opacity-50 disabled:cursor-not-allowed">${cashierT('next')}</button>
                 </div>
               </div>
             </div>
@@ -1892,11 +2137,11 @@ function refreshUI() {
 	    }
 
 	    function getShortageStatusLabel(status) {
-	      if (status === 'sent') return 'تم الارسال';
-	      if (status === 'received') return 'تم الاستلام';
-	      if (status === 'accepted') return 'قيد التنفيذ';
-	      if (status === 'rejected') return 'مرفوض';
-	      return 'بانتظار تنفيذ الطلب';
+	      if (status === 'sent') return cashierT('statusSent');
+	      if (status === 'received') return cashierT('statusReceived');
+	      if (status === 'accepted') return cashierT('statusAccepted');
+	      if (status === 'rejected') return cashierT('statusRejected');
+	      return cashierT('statusPending');
 	    }
 
 	    function getCashierBranchShortageRequests() {
@@ -1912,7 +2157,7 @@ function refreshUI() {
 
 	    function showShortageRequestsPage() {
 	      if (!isShortageRequestBranch()) {
-	        showToast('طلب النواقص متاح فقط لفرعي أبو الحصانية واليرموك', true);
+	        showToast(cashierT('shortageOnlyBranches'), true);
 	        return;
 	      }
 	      const existingPage = document.getElementById('shortageRequestsPage');
@@ -1925,15 +2170,15 @@ function refreshUI() {
 	      page.innerHTML = `
 	        <div class="h-full flex flex-col bg-gray-100">
 	          <div class="no-print bg-purple-900 text-white p-4 flex justify-between items-center">
-	            <h2 class="text-2xl font-bold">طلب نواقص</h2>
+	            <h2 class="text-2xl font-bold">${cashierT('shortageTitle')}</h2>
 	            <button onclick="closeShortageRequestsPage()" class="text-3xl font-bold hover:text-red-300">✕</button>
 	          </div>
 	          <div class="flex-1 overflow-y-auto p-6">
 	            <div class="max-w-6xl mx-auto">
 	              <div class="flex justify-between items-center mb-6">
-	                <h3 class="text-3xl font-bold text-gray-800">طلبات النواقص</h3>
+	                <h3 class="text-3xl font-bold text-gray-800">${cashierT('shortages')}</h3>
 	                <button onclick="showNewShortageRequestPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
-	                  طلب نواقص جديد
+	                  ${cashierT('newShortage')}
 	                </button>
 	              </div>
 	              <div class="bg-white rounded-xl shadow-lg p-6">
@@ -1941,13 +2186,13 @@ function refreshUI() {
 	                  <table>
 	                    <thead>
 	                      <tr>
-	                        <th>رقم طلب التحويل</th>
-	                        <th>الفرع</th>
-	                        <th>اسم الكاشير</th>
-	                        <th>التاريخ والوقت</th>
-	                        <th>العناصر</th>
-	                        <th>الحالة</th>
-	                        <th>الإجراءات</th>
+	                        <th>${cashierT('transferRequestNo')}</th>
+	                        <th>${cashierT('branch')}</th>
+	                        <th>${cashierT('cashier')}</th>
+	                        <th>${cashierT('dateTime')}</th>
+	                        <th>${cashierT('items')}</th>
+	                        <th>${cashierT('status')}</th>
+	                        <th>${cashierT('actions')}</th>
 	                      </tr>
 	                    </thead>
 	                    <tbody>
@@ -1961,11 +2206,11 @@ function refreshUI() {
 	                          <td>${getShortageStatusLabel(request.status)}</td>
 	                          <td>
 	                            ${request.status === 'sent' ? `
-	                              <button onclick="openCashierReceiveShortage('${request.id}')" class="bg-green-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-green-700 transition">استلام</button>
+	                              <button onclick="openCashierReceiveShortage('${request.id}')" class="bg-green-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-green-700 transition">${cashierT('receive')}</button>
 	                            ` : ''}
 	                          </td>
 	                        </tr>
-	                      `).join('') : '<tr><td colspan="7" class="text-center text-gray-500 py-8">لا توجد طلبات نواقص</td></tr>'}
+	                      `).join('') : `<tr><td colspan="7" class="text-center text-gray-500 py-8">${cashierT('noShortageRequests')}</td></tr>`}
 	                    </tbody>
 	                  </table>
 	                </div>
@@ -2001,26 +2246,26 @@ function refreshUI() {
 	      page.innerHTML = `
 	        <div class="h-full flex flex-col">
 	          <div class="no-print bg-purple-900 text-white p-4 flex justify-between items-center">
-	            <h2 class="text-2xl font-bold">طلب نواقص جديد</h2>
+	            <h2 class="text-2xl font-bold">${cashierT('newShortage')}</h2>
 	            <button onclick="closeShortageDraftPage()" class="text-3xl font-bold hover:text-red-300">✕</button>
 	          </div>
 	          <div class="flex-1 flex overflow-hidden">
 	            <div class="w-96 bg-white border-l-2 border-purple-200 flex flex-col">
 	              <div class="p-4 border-b border-purple-200">
-	                <h3 class="text-lg font-bold text-gray-800">العناصر المطلوبة</h3>
+	                <h3 class="text-lg font-bold text-gray-800">${cashierT('shortageItems')}</h3>
 	              </div>
 	              <div id="shortageItemsContainer" class="flex-1 overflow-y-auto p-4"></div>
 	              <div class="p-4 border-t border-purple-200">
 	                <button id="submitShortageBtn" onclick="submitShortageRequest()" class="w-full bg-purple-800 text-white px-6 py-3 rounded-lg font-bold hover:bg-purple-900 transition">
-	                  طلب النواقص
+	                  ${cashierT('submitShortage')}
 	                </button>
 	              </div>
 	            </div>
 	            <div class="flex-1 p-6 overflow-y-auto bg-purple-50">
 	              <div class="invoice-product-toolbar" style="direction: rtl;">
-	                <button onclick="setShortageSearchMode('products')" class="${shortageSearchMode === 'products' ? 'bg-purple-800 text-white' : 'bg-white text-purple-800'} px-5 py-3 rounded-lg font-bold border-2 border-purple-700">بحث منتجات</button>
-	                <button onclick="setShortageSearchMode('materials')" class="${shortageSearchMode === 'materials' ? 'bg-purple-800 text-white' : 'bg-white text-purple-800'} px-5 py-3 rounded-lg font-bold border-2 border-purple-700">بحث مواد مخزون</button>
-	                <input type="text" id="shortageSearchBox" value="${escapeHtml(shortageSearchTerm)}" oninput="setShortageSearchTerm(this.value)" placeholder="🔍 بحث..." class="invoice-product-search w-full p-3 border-2 border-purple-300 rounded-lg focus:border-purple-800 focus:outline-none text-lg">
+	                <button onclick="setShortageSearchMode('products')" class="${shortageSearchMode === 'products' ? 'bg-purple-800 text-white' : 'bg-white text-purple-800'} px-5 py-3 rounded-lg font-bold border-2 border-purple-700">${cashierT('productsSearchMode')}</button>
+	                <button onclick="setShortageSearchMode('materials')" class="${shortageSearchMode === 'materials' ? 'bg-purple-800 text-white' : 'bg-white text-purple-800'} px-5 py-3 rounded-lg font-bold border-2 border-purple-700">${cashierT('materialsSearchMode')}</button>
+	                <input type="text" id="shortageSearchBox" value="${escapeHtml(shortageSearchTerm)}" oninput="setShortageSearchTerm(this.value)" placeholder="${cashierT('searchPlaceholder')}" class="invoice-product-search w-full p-3 border-2 border-purple-300 rounded-lg focus:border-purple-800 focus:outline-none text-lg">
 	              </div>
 	              <div id="shortageSearchResults">${renderShortageSearchResultsHtml()}</div>
 	            </div>
@@ -2064,15 +2309,15 @@ function refreshUI() {
 	        return renderShortageCategoryGridHtml();
 	      }
 	      if (!rows.length) {
-	        return '<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">لا توجد نتائج</div>';
+	        return `<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">${cashierT('noResults')}</div>`;
 	      }
 	      return `
 	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 	          ${rows.map(item => `
 	            <div class="product-card" onclick="addItemToShortage('${item.itemType}', '${item.id}')">
 	              <div class="text-4xl mb-2">${item.itemType === 'material' ? '🧱' : '📦'}</div>
-	              <div class="font-bold mb-1">${escapeHtml(item.nameAr || item.name || item.nameEn || '-')}</div>
-	              <div class="text-purple-700 font-bold text-sm">${item.itemType === 'material' ? 'مواد مخزون' : 'منتج'}</div>
+	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(item))}</div>
+	              <div class="text-purple-700 font-bold text-sm">${item.itemType === 'material' ? cashierT('material') : cashierT('product')}</div>
 	              <div class="text-gray-500 text-xs" dir="ltr">${escapeHtml(item.barcode || item.code || '')}</div>
 	            </div>
 	          `).join('')}
@@ -2088,9 +2333,9 @@ function refreshUI() {
 	            ${rootCategories.length ? rootCategories.map(category => `
 	              <div class="category-card" onclick="showShortageMaterialCategory('${category.id}')">
 	                <div class="text-4xl mb-2">📁</div>
-	                <div class="font-bold text-lg">${escapeHtml(category.nameAr || category.name || category.nameEn || '-')}</div>
+	                <div class="font-bold text-lg">${escapeHtml(cashierDisplayName(category))}</div>
 	              </div>
-	            `).join('') : '<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">لا توجد أقسام مواد مخزون</div>'}
+	            `).join('') : `<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">${cashierT('noMaterialCategories')}</div>`}
 	          </div>
 	        `;
 	      }
@@ -2100,9 +2345,9 @@ function refreshUI() {
 	          ${rootCategories.length ? rootCategories.map(category => `
 	            <div class="category-card" onclick="showShortageProductCategory('${category.id}')">
 	              <div class="text-4xl mb-2">📁</div>
-	              <div class="font-bold text-lg">${escapeHtml(category.nameAr || category.name || category.nameEn || '-')}</div>
+	              <div class="font-bold text-lg">${escapeHtml(cashierDisplayName(category))}</div>
 	            </div>
-	          `).join('') : '<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">لا توجد أقسام منتجات</div>'}
+	          `).join('') : `<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">${cashierT('noProductCategories')}</div>`}
 	        </div>
 	      `;
 	    }
@@ -2115,20 +2360,20 @@ function refreshUI() {
 	      const results = document.getElementById('shortageSearchResults');
 	      if (!results) return;
 	      results.innerHTML = `
-	        <button onclick="setShortageSearchTerm('')" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">← رجوع</button>
-	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(category?.nameAr || category?.name || '-')}</h3>
+	        <button onclick="setShortageSearchTerm('')" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">${cashierT('back')}</button>
+	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(cashierDisplayName(category))}</h3>
 	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 	          ${subCategories.map(subCat => `
 	            <div class="category-card" onclick="showShortageProductCategory('${subCat.id}')">
 	              <div class="text-3xl mb-2">📁</div>
-	              <div class="font-bold">${escapeHtml(subCat.nameAr || subCat.name || '-')}</div>
+	              <div class="font-bold">${escapeHtml(cashierDisplayName(subCat))}</div>
 	            </div>
 	          `).join('')}
 	          ${products.map(prod => `
 	            <div class="product-card" onclick="addItemToShortage('product', '${prod.id}')">
 	              <div class="text-4xl mb-2">📦</div>
-	              <div class="font-bold mb-1">${escapeHtml(prod.nameAr || prod.name || prod.nameEn || '-')}</div>
-	              <div class="text-purple-700 font-bold text-sm">منتج</div>
+	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(prod))}</div>
+	              <div class="text-purple-700 font-bold text-sm">${cashierT('product')}</div>
 	            </div>
 	          `).join('')}
 	        </div>
@@ -2146,20 +2391,20 @@ function refreshUI() {
 	      const results = document.getElementById('shortageSearchResults');
 	      if (!results) return;
 	      results.innerHTML = `
-	        <button onclick="setShortageSearchTerm('')" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">← رجوع</button>
-	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(category?.nameAr || category?.name || '-')}</h3>
+	        <button onclick="setShortageSearchTerm('')" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">${cashierT('back')}</button>
+	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(cashierDisplayName(category))}</h3>
 	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 	          ${subCategories.map(subCat => `
 	            <div class="category-card" onclick="showShortageMaterialCategory('${subCat.id}')">
 	              <div class="text-3xl mb-2">📁</div>
-	              <div class="font-bold">${escapeHtml(subCat.nameAr || subCat.name || '-')}</div>
+	              <div class="font-bold">${escapeHtml(cashierDisplayName(subCat))}</div>
 	            </div>
 	          `).join('')}
 	          ${materials.map(item => `
 	            <div class="product-card" onclick="addItemToShortage('material', '${item.id}')">
 	              <div class="text-4xl mb-2">🧱</div>
-	              <div class="font-bold mb-1">${escapeHtml(item.nameAr || item.name || item.nameEn || '-')}</div>
-	              <div class="text-purple-700 font-bold text-sm">مواد مخزون</div>
+	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(item))}</div>
+	              <div class="text-purple-700 font-bold text-sm">${cashierT('material')}</div>
 	            </div>
 	          `).join('')}
 	        </div>
@@ -2175,7 +2420,7 @@ function refreshUI() {
 	    function addItemToShortage(itemType, itemId, qty = 1) {
 	      const source = getShortageItemSource(itemType, itemId);
 	      if (!source) {
-	        showToast('الصنف غير موجود', true);
+	        showToast(cashierT('itemNotFound'), true);
 	        return;
 	      }
 	      const existing = currentShortageDraft.items.find(item => item.itemType === itemType && item.itemId === itemId);
@@ -2194,7 +2439,7 @@ function refreshUI() {
 	        });
 	      }
 	      renderShortageItems();
-	      showToast('تمت إضافة الصنف');
+	      showToast(cashierT('itemAdded'));
 	    }
 
 	    function renderShortageItems() {
@@ -2202,7 +2447,7 @@ function refreshUI() {
 	      const submitBtn = document.getElementById('submitShortageBtn');
 	      if (!container) return;
 	      if (!currentShortageDraft.items.length) {
-	        container.innerHTML = '<div class="text-center text-gray-400 py-8">لا توجد عناصر</div>';
+	        container.innerHTML = `<div class="text-center text-gray-400 py-8">${cashierT('noItems')}</div>`;
 	        if (submitBtn) submitBtn.disabled = true;
 	        return;
 	      }
@@ -2211,14 +2456,14 @@ function refreshUI() {
 	        <div class="bg-purple-50 border border-purple-100 p-3 rounded-lg mb-2">
 	          <div class="flex justify-between items-start mb-2">
 	            <div>
-	              <div class="font-bold">${escapeHtml(item.nameAr || item.name || '-')}</div>
-	              <div class="text-xs text-purple-700 font-bold">${item.itemType === 'material' ? 'مواد مخزون' : 'منتج'}</div>
+	              <div class="font-bold">${escapeHtml(cashierLanguage === 'en' ? (item.nameEn || item.name || item.nameAr || '-') : (item.nameAr || item.name || item.nameEn || '-'))}</div>
+	              <div class="text-xs text-purple-700 font-bold">${item.itemType === 'material' ? cashierT('material') : cashierT('product')}</div>
 	            </div>
 	            <button onclick="removeShortageItem(${index})" class="text-red-600 hover:text-red-800 font-bold text-lg">✕</button>
 	          </div>
 	          <div class="flex items-center gap-2">
 	            <input type="number" min="1" step="1" value="${item.qty}" onchange="updateShortageItemQty(${index}, this.value)" class="quantity-input bg-white">
-	            <span class="text-sm text-gray-600">الكمية</span>
+	            <span class="text-sm text-gray-600">${cashierT('qty')}</span>
 	          </div>
 	        </div>
 	      `).join('');
@@ -2429,7 +2674,7 @@ function refreshUI() {
         <div class="h-full flex flex-col">
           <!-- Header with close button -->
           <div class="no-print bg-blue-600 text-white p-4 flex justify-between items-center">
-  <h2 class="text-2xl font-bold">فاتورة جديدة</h2>
+  <h2 class="text-2xl font-bold">${cashierT('newInvoiceTitle')}</h2>
             <button onclick="closeInvoicePage()" class="text-3xl font-bold hover:text-red-300">✕</button>
           </div>
           
@@ -2437,16 +2682,16 @@ function refreshUI() {
             <!-- Right side - Items list -->
             <div class="w-96 bg-white border-l-2 border-gray-300 flex flex-col">
               <div class="p-4 border-b border-gray-300">
-                <h3 class="text-lg font-bold text-gray-800">المنتجات المضافة</h3>
+                <h3 class="text-lg font-bold text-gray-800">${cashierT('addedProducts')}</h3>
               </div>
               
               <div id="selectedItemsContainer" class="flex-1 overflow-y-auto p-4">
-                <div class="text-center text-gray-400 py-8">لا توجد منتجات</div>
+                <div class="text-center text-gray-400 py-8">${cashierT('noProducts')}</div>
               </div>
               
               <div class="p-4 border-t border-gray-300">
                 <button id="nextButton" onclick="goNextFromProducts()" disabled class="w-full bg-gray-400 text-white px-6 py-3 rounded-lg font-bold cursor-not-allowed">
-                  التالي
+                  ${cashierT('next')}
                 </button>
               </div>
             </div>
@@ -2458,7 +2703,7 @@ function refreshUI() {
                   <span id="invoiceTotalValue" class="invoice-total-value">0.000</span>
                   <span class="invoice-total-currency">KD</span>
                 </div>
-                <input type="text" id="productSearchBox" oninput="searchProductsInInvoice()" placeholder="🔍 بحث عن منتج..." class="invoice-product-search w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none text-lg">
+                <input type="text" id="productSearchBox" oninput="searchProductsInInvoice()" placeholder="${cashierT('productsSearch')}" class="invoice-product-search w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none text-lg">
               </div>
               
               <div id="categoriesAndProductsContainer">
@@ -2539,7 +2784,7 @@ function refreshUI() {
           ${rootCategories.map(cat => `
             <div class="category-card" onclick="showCategoryProductsInvoice('${cat.id}')">
               <div class="text-4xl mb-2">📁</div>
-              <div class="font-bold text-lg">${cat.nameAr}</div>
+              <div class="font-bold text-lg">${escapeHtml(cashierDisplayName(cat))}</div>
             </div>
           `).join('')}
         </div>
@@ -2555,25 +2800,25 @@ function refreshUI() {
   const container = document.getElementById('categoriesAndProductsContainer');
   container.innerHTML = `
     <button onclick="renderCategoriesForInvoice(); document.getElementById('categoriesAndProductsContainer').innerHTML = renderCategoriesForInvoice();" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">
-      ← رجوع
+      ${cashierT('back')}
     </button>
     
-    <h3 class="text-2xl font-bold text-gray-800 mb-4">${category.nameAr}</h3>
+    <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(cashierDisplayName(category))}</h3>
     
-    <h4 class="text-lg font-bold text-gray-700 mb-3">الأقسام الفرعية والمنتجات</h4>
+    <h4 class="text-lg font-bold text-gray-700 mb-3">${cashierT('subCategoriesProducts')}</h4>
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
       ${subCategories.map(subCat => `
         <div class="category-card" onclick="showCategoryProductsInvoice('${subCat.id}')">
           <div class="text-3xl mb-2">📁</div>
-          <div class="font-bold">${subCat.nameAr}</div>
+          <div class="font-bold">${escapeHtml(cashierDisplayName(subCat))}</div>
         </div>
       `).join('')}
       
       ${products.map(prod => `
         <div class="product-card" onclick="addProductToInvoice('${prod.id}')">
           <div class="text-4xl mb-2">📦</div>
-          <div class="font-bold mb-1">${prod.nameAr}</div>
-          <div class="text-blue-600 font-bold text-lg">${prod.price.toFixed(3)} د.ك</div>
+          <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(prod))}</div>
+          <div class="text-blue-600 font-bold text-lg">${prod.price.toFixed(3)} ${cashierT('kd')}</div>
         </div>
       `).join('')}
     </div>
@@ -2589,18 +2834,18 @@ function refreshUI() {
       }
       
       const filteredProducts = allProducts.filter(p => 
-        p.nameAr.toLowerCase().includes(searchTerm) || 
-        p.nameEn.toLowerCase().includes(searchTerm)
+        (p.nameAr || '').toLowerCase().includes(searchTerm) || 
+        (p.nameEn || '').toLowerCase().includes(searchTerm)
       );
       
       document.getElementById('categoriesAndProductsContainer').innerHTML = `
-        <h4 class="text-lg font-bold text-gray-700 mb-3">نتائج البحث</h4>
+        <h4 class="text-lg font-bold text-gray-700 mb-3">${cashierT('searchResults')}</h4>
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           ${filteredProducts.map(prod => `
             <div class="product-card" onclick="addProductToInvoice('${prod.id}')">
               <div class="text-4xl mb-2">📦</div>
-              <div class="font-bold mb-1">${prod.nameAr}</div>
-              <div class="text-blue-600 font-bold text-lg">${prod.price.toFixed(3)} د.ك</div>
+              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(prod))}</div>
+              <div class="text-blue-600 font-bold text-lg">${prod.price.toFixed(3)} ${cashierT('kd')}</div>
               <div class="text-sm text-gray-600">${prod.unit}</div>
             </div>
           `).join('')}
@@ -2721,7 +2966,7 @@ function refreshUI() {
     function addProductToInvoice(productId) {
       const product = allProducts.find(p => p.id === productId);
       if (!product) {
-        showToast('المنتج غير موجود', true);
+        showToast(cashierT('productNotFound'), true);
         return;
       }
       const existingItem = currentOrder.items.find(item => item.productId === productId);
@@ -2759,11 +3004,9 @@ function refreshUI() {
 	      const searchBox = document.getElementById('productSearchBox');
       const scanned = normalizeBarcodeValue(value);
       if (searchBox) {
-        const typed = normalizeBarcodeValue(searchBox.value);
-        if (!scanned || typed.includes(scanned) || scanned.includes(typed) || /^\d{4,}$/.test(typed)) {
-          searchBox.value = '';
-          searchProductsInInvoice();
-        }
+        searchBox.value = '';
+        const productsContainer = document.getElementById('categoriesAndProductsContainer');
+        if (productsContainer) productsContainer.innerHTML = renderCategoriesForInvoice();
       }
 	      const dailySearchBox = document.getElementById('dailyInvoiceSearchInput');
 	      if (dailySearchBox) {
@@ -2778,7 +3021,8 @@ function refreshUI() {
 	        if (!scanned || typed.includes(scanned) || scanned.includes(typed) || /^\d{4,}$/.test(typed)) {
 	          shortageSearchBox.value = '';
 	          shortageSearchTerm = '';
-	          document.getElementById('shortageSearchResults')?.replaceChildren();
+	          const shortageResults = document.getElementById('shortageSearchResults');
+	          if (shortageResults) shortageResults.innerHTML = renderShortageSearchResultsHtml();
 	        }
 	      }
 	    }
@@ -2833,7 +3077,9 @@ function refreshUI() {
 
       addProductToInvoice(product.id);
       clearProductSearchBoxAfterScan(barcode);
-      showToast(`تمت إضافة المنتج: ${product.nameAr || product.nameEn || ''}`);
+      const productsContainer = document.getElementById('categoriesAndProductsContainer');
+      if (productsContainer) productsContainer.innerHTML = renderCategoriesForInvoice();
+      showToast(`${cashierLanguage === 'en' ? 'Added product' : 'تمت إضافة المنتج'}: ${cashierDisplayName(product)}`);
       document.getElementById('productSearchBox')?.focus();
     }
 
@@ -2867,6 +3113,7 @@ function refreshUI() {
 	        barcodeScanLastTime = now;
 	        return;
 	      }
+	      if (isBarcodeFriendlyInput) event.preventDefault();
 	      barcodeScanBuffer += normalizedKey || event.key;
 	      barcodeScanLastTime = now;
 	      clearTimeout(barcodeScanTimer);
@@ -2888,22 +3135,22 @@ function refreshUI() {
       updateInvoicePricingBox();
       
       if (currentOrder.items.length === 0) {
-        container.innerHTML = '<div class="text-center text-gray-400 py-8">لا توجد منتجات</div>';
+        container.innerHTML = `<div class="text-center text-gray-400 py-8">${cashierT('noProducts')}</div>`;
         nextButton.disabled = true;
         nextButton.className = 'w-full bg-gray-400 text-white px-6 py-3 rounded-lg font-bold cursor-not-allowed';
       } else {
         container.innerHTML = currentOrder.items.map((item, index) => `
           <div class="bg-gray-50 p-3 rounded-lg mb-2">
             <div class="flex justify-between items-start mb-2">
-              <div class="font-bold">${item.productName}</div>
+              <div class="font-bold">${escapeHtml(cashierLanguage === 'en' ? (item.productNameEn || item.productName || '-') : (item.productName || item.productNameEn || '-'))}</div>
               <button onclick="removeItemFromInvoice(${index})" class="text-red-600 hover:text-red-800 font-bold text-lg">✕</button>
             </div>
             <div class="flex items-center gap-2">
               <input type="text" value="${item.quantity}" readonly onclick="showNumericKeypadForInvoice(${index}, this)" class="quantity-input bg-white cursor-pointer">
               <span class="text-sm text-gray-600">× ${item.price.toFixed(3)}</span>
-              <span class="font-bold text-blue-600 mr-auto">${item.total.toFixed(3)} د.ك</span>
+              <span class="font-bold text-blue-600 mr-auto">${item.total.toFixed(3)} ${cashierT('kd')}</span>
             </div>
-            <textarea rows="2" oninput="updateItemNote(${index}, this.value)" placeholder="ملاحظة على هذا الصنف..." class="mt-2 w-full p-2 border border-gray-300 rounded-lg text-sm focus:border-blue-600 focus:outline-none">${escapeHtml(item.notes || '')}</textarea>
+            <textarea rows="2" oninput="updateItemNote(${index}, this.value)" placeholder="${cashierLanguage === 'en' ? 'Note for this item...' : 'ملاحظة على هذا الصنف...'}" class="mt-2 w-full p-2 border border-gray-300 rounded-lg text-sm focus:border-blue-600 focus:outline-none">${escapeHtml(item.notes || '')}</textarea>
           </div>
         `).join('');
         
@@ -3038,7 +3285,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       modal.className = 'modal-overlay';
       modal.innerHTML = `
         <div class="modal-content p-8 w-full max-w-2xl">
-          <h2 class="text-2xl font-bold text-blue-600 mb-6 text-center">نوع الطلب</h2>
+          <h2 class="text-2xl font-bold text-blue-600 mb-6 text-center">${cashierT('orderType')}</h2>
 
           <div class="bg-blue-50 p-4 rounded-lg mb-5">
             <div class="font-bold">${currentOrder.customer.name || ''}</div>
@@ -3047,36 +3294,36 @@ function showNumericKeypadForInvoice(index, inputField) {
           
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <button onclick="selectOrderType('delivery')" id="deliveryBtn" class="w-full bg-green-600 text-white px-6 py-4 rounded-lg font-bold text-xl hover:bg-green-700 transition">
-              🚚 توصيل
+              ${cashierT('delivery')}
             </button>
             <button onclick="selectOrderType('pickup')" id="pickupBtn" class="w-full bg-blue-600 text-white px-6 py-4 rounded-lg font-bold text-xl hover:bg-blue-700 transition">
-              🛍️ استلام
+              ${cashierT('pickup')}
             </button>
           </div>
 
           <div class="mt-4">
             <div id="deliveryOptionsBox" class="hidden bg-green-50 border border-green-200 rounded-lg p-4">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                <button onclick="selectDeliveryTiming('within2')" id="within2Btn" class="bg-green-600 text-white px-4 py-3 rounded-lg font-bold transition">خلال ساعتين</button>
-                <button onclick="selectDeliveryTiming('specific')" id="specificTimeBtn" class="bg-gray-200 text-gray-700 px-4 py-3 rounded-lg font-bold hover:bg-gray-300 transition">وقت محدد</button>
+                <button onclick="selectDeliveryTiming('within2')" id="within2Btn" class="bg-green-600 text-white px-4 py-3 rounded-lg font-bold transition">${cashierT('withinTwoHours')}</button>
+                <button onclick="selectDeliveryTiming('specific')" id="specificTimeBtn" class="bg-gray-200 text-gray-700 px-4 py-3 rounded-lg font-bold hover:bg-gray-300 transition">${cashierT('specificTime')}</button>
               </div>
               <div id="deliverySpecificTimeFields" class="hidden grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <label class="block mb-1 text-xs font-bold text-gray-600">تاريخ التوصيل</label>
+                  <label class="block mb-1 text-xs font-bold text-gray-600">${cashierT('deliveryDate')}</label>
                   <input type="date" id="deliveryDateInput" value="${scheduleDate}" class="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-green-600 focus:outline-none">
                 </div>
                 <div>
-                  <label class="block mb-1 text-xs font-bold text-gray-600">من</label>
+                  <label class="block mb-1 text-xs font-bold text-gray-600">${cashierT('fromTime')}</label>
                   <input type="time" id="deliveryFromInput" value="${scheduleFrom}" class="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-green-600 focus:outline-none">
                 </div>
                 <div>
-                  <label class="block mb-1 text-xs font-bold text-gray-600">إلى</label>
+                  <label class="block mb-1 text-xs font-bold text-gray-600">${cashierT('toTime')}</label>
                   <input type="time" id="deliveryToInput" value="${scheduleTo}" class="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-green-600 focus:outline-none">
                 </div>
               </div>
               <div id="deliveryScheduleText" class="text-xs text-green-800 mt-3 font-semibold"></div>
               <div class="mt-4">
-                <label class="block mb-2 font-bold text-gray-700">رسوم التوصيل (د.ك)</label>
+                <label class="block mb-2 font-bold text-gray-700">${cashierT('deliveryFee')} (${cashierT('kd')})</label>
                 <input type="text" id="deliveryPrice" value="${deliveryPriceValue === '' ? '' : formatNumberWithThreeDecimals(deliveryPriceValue)}" oninput="this.value = convertToEnglishNumbers(this.value); currentOrder.deliveryPrice = parseFloat(this.value) || 0" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
                 <div class="text-xs text-gray-500 mt-2">يظهر السعر تلقائياً حسب المنطقة، ويمكن تعديله هنا وسيتم حفظه كسعر أساسي للمرات القادمة.</div>
               </div>
@@ -3084,15 +3331,15 @@ function showNumericKeypadForInvoice(index, inputField) {
           </div>
 
           <div id="pickupBranchBox" class="mt-4 hidden">
-            <label class="block mb-2 font-bold text-gray-700">فرع الاستلام</label>
+            <label class="block mb-2 font-bold text-gray-700">${cashierT('pickupBranch')}</label>
             <select id="pickupBranchSelect" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
-              <option value="">اختر فرع الاستلام</option>
+              <option value="">${cashierT('choosePickupBranch')}</option>
               ${PICKUP_BRANCHES.map(branch => `<option value="${branch}" ${currentOrder.pickupBranch === branch ? 'selected' : ''}>${branch}</option>`).join('')}
             </select>
           </div>
 
-          <button onclick="finalizeOrderTypeStep()" class="w-full mt-6 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition">التالي</button>
-          <button onclick="this.closest('.modal-overlay').remove(); setInvoicePricingBoxVisible(true)" class="w-full mt-4 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">إلغاء</button>
+          <button onclick="finalizeOrderTypeStep()" class="w-full mt-6 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition">${cashierT('next')}</button>
+          <button onclick="this.closest('.modal-overlay').remove(); setInvoicePricingBoxVisible(true)" class="w-full mt-4 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">${cashierT('cancel')}</button>
         </div>
       `;
       document.body.appendChild(modal);
@@ -3284,42 +3531,42 @@ function showNumericKeypadForInvoice(index, inputField) {
       modal.className = 'modal-overlay';
       modal.innerHTML = `
         <div class="modal-content p-8 w-full max-w-2xl">
-          <h2 class="text-2xl font-bold text-blue-600 mb-6 text-center">طريقة الدفع</h2>
+          <h2 class="text-2xl font-bold text-blue-600 mb-6 text-center">${cashierT('paymentMethod')}</h2>
 
           <div class="bg-blue-50 rounded-xl p-5 mb-6 text-center">
             ${totals.deliveryFee > 0 ? `
               <div class="grid grid-cols-2 gap-3 text-gray-700 font-bold mb-3">
                 <div class="bg-white rounded-lg p-3">
-                  <div class="text-sm text-gray-500 mb-1">قيمة الفاتورة</div>
-                  <div class="text-xl">${totals.subtotal.toFixed(3)} د.ك</div>
+                  <div class="text-sm text-gray-500 mb-1">${cashierT('invoiceValue')}</div>
+                  <div class="text-xl">${totals.subtotal.toFixed(3)} ${cashierT('kd')}</div>
                 </div>
                 <div class="bg-white rounded-lg p-3">
-                  <div class="text-sm text-gray-500 mb-1">رسوم التوصيل</div>
-                  <div class="text-xl">${totals.deliveryFee.toFixed(3)} د.ك</div>
+                  <div class="text-sm text-gray-500 mb-1">${cashierT('deliveryFee')}</div>
+                  <div class="text-xl">${totals.deliveryFee.toFixed(3)} ${cashierT('kd')}</div>
                 </div>
               </div>
-              <div class="text-sm font-bold text-blue-700 mb-1">الإجمالي</div>
-              <div class="text-4xl font-black text-blue-700">${totals.total.toFixed(3)} د.ك</div>
+              <div class="text-sm font-bold text-blue-700 mb-1">${cashierT('grandTotal')}</div>
+              <div class="text-4xl font-black text-blue-700">${totals.total.toFixed(3)} ${cashierT('kd')}</div>
             ` : `
-              <div class="text-sm font-bold text-blue-700 mb-1">الإجمالي</div>
-              <div class="text-4xl font-black text-blue-700">${totals.total.toFixed(3)} د.ك</div>
+              <div class="text-sm font-bold text-blue-700 mb-1">${cashierT('grandTotal')}</div>
+              <div class="text-4xl font-black text-blue-700">${totals.total.toFixed(3)} ${cashierT('kd')}</div>
             `}
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-            <button onclick="selectPaymentMethod('cash')" id="cashBtn" class="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-green-500 hover:text-white transition">💵 كاش</button>
-            <button onclick="selectPaymentMethod('online')" id="onlineBtn" class="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-blue-500 hover:text-white transition">💳 أونلاين</button>
-            <button onclick="selectPaymentMethod('knet')" id="knetBtn" class="bg-purple-100 text-purple-800 px-6 py-3 rounded-lg font-bold hover:bg-purple-200 transition">💳 كي-نت</button>
+            <button onclick="selectPaymentMethod('cash')" id="cashBtn" class="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-green-500 hover:text-white transition">${cashierT('cash')}</button>
+            <button onclick="selectPaymentMethod('online')" id="onlineBtn" class="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-blue-500 hover:text-white transition">${cashierT('online')}</button>
+            <button onclick="selectPaymentMethod('knet')" id="knetBtn" class="bg-purple-100 text-purple-800 px-6 py-3 rounded-lg font-bold hover:bg-purple-200 transition">${cashierT('knet')}</button>
           </div>
 
           <div id="cashPaymentPanel" class="hidden bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-            <label class="block mb-2 font-bold text-gray-700">المبلغ المستلم (د.ك)</label>
+            <label class="block mb-2 font-bold text-gray-700">${cashierT('cashReceived')} (${cashierT('kd')})</label>
             <input type="text" id="cashReceivedInput" value="${currentOrder.cashReceived || ''}" oninput="this.value = convertToEnglishNumbers(this.value); updateCashChange()" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-green-600 focus:outline-none text-xl font-bold">
             <div id="cashChangeText" class="mt-3 text-lg font-bold text-green-700"></div>
           </div>
 
-          <button onclick="finalizePaymentAndPrint()" class="w-full mt-4 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition">حفظ وطباعة الفاتورة</button>
-          <button onclick="this.closest('.modal-overlay').remove(); showOrderTypeSelection()" class="w-full mt-3 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">رجوع</button>
+          <button onclick="finalizePaymentAndPrint()" class="w-full mt-4 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition">${cashierT('savePrintInvoice')}</button>
+          <button onclick="this.closest('.modal-overlay').remove(); showOrderTypeSelection()" class="w-full mt-3 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">${cashierT('back')}</button>
         </div>
       `;
       document.body.appendChild(modal);
@@ -3339,14 +3586,14 @@ function showNumericKeypadForInvoice(index, inputField) {
       currentOrder.cashReceived = received;
       currentOrder.cashChange = Math.max(change, 0);
       label.textContent = change >= 0
-        ? `الباقي: ${change.toFixed(3)} د.ك`
-        : `المتبقي: ${Math.abs(change).toFixed(3)} د.ك`;
+        ? `${cashierLanguage === 'en' ? 'Change' : 'الباقي'}: ${change.toFixed(3)} ${cashierT('kd')}`
+        : `${cashierLanguage === 'en' ? 'Remaining' : 'المتبقي'}: ${Math.abs(change).toFixed(3)} ${cashierT('kd')}`;
       label.className = `mt-3 text-lg font-bold ${change >= 0 ? 'text-green-700' : 'text-red-600'}`;
     }
 
     function finalizePaymentAndPrint() {
       if (!selectedPaymentMethod) {
-        showToast('الرجاء اختيار طريقة الدفع', true);
+        showToast(cashierT('choosePaymentMethod'), true);
         return;
       }
 
@@ -3379,22 +3626,22 @@ function showNumericKeypadForInvoice(index, inputField) {
       modal.innerHTML = `
         <div class="modal-content p-8 w-full max-w-4xl">
           <div class="flex justify-between items-center mb-6">
-            <h2 class="text-2xl font-bold text-blue-600">اختر العميل</h2>
+            <h2 class="text-2xl font-bold text-blue-600">${cashierT('customerSelection')}</h2>
             <button onclick="showAddCustomerForDelivery()" class="bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 transition">
-              ➕ إضافة عميل
+              ${cashierT('addCustomer')}
             </button>
           </div>
 
           ${allowProductsFirst ? `
             <button onclick="this.closest('.modal-overlay').remove(); showInvoiceProductsPage()" class="w-full mb-4 bg-purple-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-purple-700 transition">
-              اختيار المنتجات أولاً
+              ${cashierT('chooseProductsFirst')}
             </button>
           ` : ''}
           
-          <input type="text" id="customerSearchDelivery" oninput="filterCustomersDelivery()" placeholder="🔍 بحث عن رقم العميل..." class="w-full p-3 border-2 border-gray-300 rounded-lg mb-4 focus:border-blue-600 focus:outline-none">
+          <input type="text" id="customerSearchDelivery" oninput="filterCustomersDelivery()" placeholder="${cashierT('customerPhoneSearch')}" class="w-full p-3 border-2 border-gray-300 rounded-lg mb-4 focus:border-blue-600 focus:outline-none">
           
           <div class="max-h-96 overflow-y-auto">
-            ${allCustomers.map(customer => `
+            ${sortCustomersNewestFirst(allCustomers).map(customer => `
               <div class="customer-delivery-item bg-gray-50 p-4 rounded-lg mb-2 cursor-pointer hover:bg-blue-50 transition" data-search="${customer.name} ${customer.phone}" onclick="selectCustomerForDelivery('${customer.id}')">
                 <div class="font-bold text-lg">${customer.name}</div>
                 <div class="text-gray-600">${customer.phone}</div>
@@ -3402,7 +3649,7 @@ function showNumericKeypadForInvoice(index, inputField) {
             `).join('')}
           </div>
           
-          <button onclick="this.closest('.modal-overlay').remove()" class="w-full mt-4 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">إلغاء</button>
+          <button onclick="this.closest('.modal-overlay').remove()" class="w-full mt-4 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">${cashierT('cancel')}</button>
         </div>
       `;
       document.body.appendChild(modal);
@@ -3437,7 +3684,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       modal.className = 'modal-overlay';
       modal.innerHTML = `
         <div class="modal-content p-8 w-full max-w-2xl">
-          <h2 class="text-2xl font-bold text-blue-600 mb-6">بيانات العميل والعناوين</h2>
+          <h2 class="text-2xl font-bold text-blue-600 mb-6">${cashierT('customerAddresses')}</h2>
 
           <div class="bg-blue-50 p-4 rounded-lg mb-6">
             <div class="text-lg font-bold">${escapeHtml(customer.name || '')}</div>
@@ -3445,13 +3692,13 @@ function showNumericKeypadForInvoice(index, inputField) {
           </div>
 
           <div class="mb-4">
-            <label class="block mb-2 font-bold text-gray-700">العنوان</label>
+            <label class="block mb-2 font-bold text-gray-700">${cashierT('address')}</label>
             <select id="customerAddressChoice" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
-              <option value="" ${addresses.length ? '' : 'selected'}>بدون عنوان حالياً</option>
+              <option value="" ${addresses.length ? '' : 'selected'}>${cashierT('noAddressNow')}</option>
               ${addresses.map((addr, idx) => `
                 <option value="${idx}" ${idx === 0 ? 'selected' : ''}>${escapeHtml(addr.area || '')}${addr.details ? ` - ${escapeHtml(addr.details)}` : ''}</option>
               `).join('')}
-              <option value="new">➕ إضافة عنوان جديد</option>
+              <option value="new">${cashierT('addNewAddress')}</option>
             </select>
           </div>
 
@@ -3473,8 +3720,8 @@ function showNumericKeypadForInvoice(index, inputField) {
           </div>
 
           <div class="flex gap-3 mt-6">
-            <button onclick="confirmSelectedCustomerAddress()" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition">تأكيد</button>
-            <button onclick="this.closest('.modal-overlay').remove(); showInvoiceCustomerSelection(false)" class="flex-1 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">رجوع</button>
+            <button onclick="confirmSelectedCustomerAddress()" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition">${cashierT('confirm')}</button>
+            <button onclick="this.closest('.modal-overlay').remove(); showInvoiceCustomerSelection(false)" class="flex-1 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">${cashierT('back')}</button>
           </div>
         </div>
       `;
@@ -3837,7 +4084,7 @@ function showNumericKeypadForInvoice(index, inputField) {
           <input type="text" id="customerSearchPickup" oninput="filterCustomersPickup()" placeholder="🔍 بحث..." class="w-full p-3 border-2 border-gray-300 rounded-lg mb-4 focus:border-blue-600 focus:outline-none">
           
           <div class="max-h-96 overflow-y-auto">
-            ${allCustomers.map(customer => `
+            ${sortCustomersNewestFirst(allCustomers).map(customer => `
               <div class="customer-pickup-item bg-gray-50 p-4 rounded-lg mb-2 cursor-pointer hover:bg-blue-50 transition" data-search="${customer.name} ${customer.phone}" onclick="selectCustomerPickup('${customer.id}')">
                 <div class="font-bold text-lg">${customer.name}</div>
                 <div class="text-gray-600">${customer.phone}</div>

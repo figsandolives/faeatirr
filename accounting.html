@@ -83,7 +83,6 @@
             <button class="nav-item" data-icon="👤" data-section="users" data-group="administration" data-i18n="users"></button>
             <button class="nav-item" data-icon="🍽" data-section="tables" data-group="administration" data-i18n="tables"></button>
             <button class="nav-item" data-icon="🏬" data-section="branches" data-group="administration" data-i18n="branches"></button>
-            <button class="nav-item" data-icon="📍" data-section="deliveryZones" data-group="administration" data-i18n="delivery_zones"></button>
             <button class="nav-item" data-icon="💸" data-section="deliveryPrices" data-group="administration" data-i18n="delivery_prices"></button>
             <button class="nav-item" data-icon="🏷" data-section="discounts" data-group="administration" data-i18n="discounts"></button>
             <button class="nav-item" data-icon="🧭" data-section="orderTypes" data-group="administration" data-i18n="order_types"></button>
@@ -526,48 +525,75 @@
   </div>
 
   <div id="orderEditOverlay" class="overlay hidden">
-    <div class="modal card" style="max-width: 760px; text-align: start;">
-      <h3 data-i18n="edit_order"></h3>
-      <form id="orderEditForm" class="grid two">
-        <div>
-          <label class="tag" data-i18n="customer_name"></label>
-          <select id="orderCustomer" class="input"></select>
-        </div>
-        <div>
-          <label class="tag" data-i18n="customer_phone"></label>
-          <input id="orderCustomerPhone" class="input" />
-        </div>
-        <div>
-          <label class="tag" data-i18n="delivery_zone"></label>
-          <select id="orderZone" class="input"></select>
-        </div>
-        <div>
-          <label class="tag" data-i18n="delivery_fee"></label>
-          <input id="orderDeliveryFee" class="input" type="number" />
-        </div>
-        <div>
-          <label class="tag" data-i18n="payment_method"></label>
-          <select id="orderPayment" class="input"></select>
-        </div>
-        <div>
-          <label class="tag" data-i18n="branch"></label>
-          <select id="orderBranch" class="input"></select>
-        </div>
-        <div style="grid-column: 1 / -1;">
-          <label class="tag" data-i18n="order_items"></label>
-          <div id="orderItemsList" class="grid two"></div>
-          <div class="row" style="margin-top: 8px;">
-            <select id="orderAddProduct" class="input"></select>
-            <input id="orderAddQty" class="input" type="number" value="1" style="max-width: 120px;" />
-            <button type="button" id="orderAddBtn" class="btn ghost small" data-i18n="add_item"></button>
+    <div style="background: white; border-radius: 20px; max-width: 900px; width: 100%; max-height: 90vh; overflow-y: auto; direction: rtl; text-align: start;">
+      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 20px 20px 0 0;">
+        <h2 style="margin: 0; font-size: 24px; font-weight: bold;">✏️ تعديل الفاتورة</h2>
+      </div>
+      <form id="orderEditForm" style="padding: 30px;">
+        <div style="margin-bottom: 30px;">
+          <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #667eea;">معلومات العميل</h3>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+            <div>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">اسم العميل</label>
+              <input type="text" id="orderCustomer" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
+            </div>
+            <div>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">رقم الهاتف</label>
+              <input type="tel" id="orderCustomerPhone" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
+            </div>
+            <div>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">العنوان</label>
+              <input type="text" id="orderAddress" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
+            </div>
+            <div>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">رسوم التوصيل (د.ك)</label>
+              <input type="number" id="orderDeliveryFee" step="0.001" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;" oninput="renderOrderItemsEditor()">
+            </div>
+          </div>
+          <div style="display: none;">
+            <select id="orderZone"></select>
+            <select id="orderPayment"></select>
+            <select id="orderBranch"></select>
           </div>
         </div>
-        <div class="row" style="grid-column: 1 / -1; justify-content: flex-end;">
-          <button type="submit" class="btn primary" data-i18n="save"></button>
-          <button type="button" id="orderDeleteBtn" class="btn danger" data-i18n="delete"></button>
-          <button type="button" id="orderEditCancel" class="btn ghost" data-i18n="cancel"></button>
+        <div style="margin-bottom: 30px;">
+          <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #667eea;">الخصم</h3>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px;">
+            <div>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">نوع الخصم</label>
+              <select id="orderDiscountType" onchange="renderOrderItemsEditor()" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
+                <option value="none">بدون خصم</option>
+                <option value="percent">نسبة مئوية</option>
+                <option value="fixed">قيمة ثابتة</option>
+              </select>
+            </div>
+            <div>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">قيمة الخصم</label>
+              <input id="orderDiscountValue" type="text" oninput="this.value = normalizeDigits(this.value)" onchange="renderOrderItemsEditor()" placeholder="مثال: 30" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
+            </div>
+          </div>
+        </div>
+        <div>
+          <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #667eea;">المنتجات</h3>
+          <div id="orderItemsList"></div>
+          <div style="margin-top: 20px; padding: 20px; background: #ecfdf5; border-radius: 12px;">
+            <h4 style="font-weight: bold; font-size: 18px; margin-bottom: 12px;">إضافة منتج جديد</h4>
+            <input type="hidden" id="orderAddProduct" />
+            <input type="search" id="orderProductSearchInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="ابحث عن منتج..." oninput="searchProductsForOrderEdit(this.value)" style="width: 100%; padding: 12px; border: 2px solid #16a34a; border-radius: 10px; font-size: 16px; margin-bottom: 10px;">
+            <div id="orderProductSearchResults" style="max-height: 210px; overflow-y: auto; margin-bottom: 10px;"></div>
+            <div id="orderSelectedProductInfo" style="display: none; background: white; border-radius: 10px; padding: 12px; margin-bottom: 10px; color: #15803d; font-weight: 800;"></div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <input id="orderAddQty" type="number" value="1" style="width: 110px; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
+              <button type="button" id="orderAddBtn" style="background: #16a34a; color: white; padding: 12px 18px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">إضافة عنصر</button>
+            </div>
+          </div>
         </div>
         <p id="orderEditError" class="helper form-error"></p>
+        <div style="display: flex; gap: 10px; margin-top: 30px;">
+          <button type="submit" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;">حفظ التعديلات</button>
+          <button type="button" id="orderDeleteBtn" style="background: #dc2626; color: white; padding: 15px 24px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;">حذف</button>
+          <button type="button" id="orderEditCancel" style="flex: 1; background: #6b7280; color: white; padding: 15px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;">إلغاء</button>
+        </div>
       </form>
     </div>
   </div>

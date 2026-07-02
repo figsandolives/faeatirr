@@ -188,7 +188,7 @@
         logout: '🚪 خروج',
         orders: 'الطلبات',
         newInvoice: '➕ فاتورة جديدة',
-        tables: '🍽 الطاولات',
+        tables: 'الطاولات',
         openTable: 'فتح طاولة',
         continueTable: 'متابعة',
         tableNumber: 'رقم الطاولة',
@@ -295,7 +295,7 @@
         logout: '🚪 Logout',
         orders: 'Orders',
         newInvoice: '➕ New Invoice',
-        tables: '🍽 Tables',
+        tables: 'Tables',
         openTable: 'Open Table',
         continueTable: 'Continue',
         tableNumber: 'Table No.',
@@ -2174,17 +2174,19 @@ function refreshUI() {
               <div class="flex justify-between items-start mb-6 gap-4">
                 <h2 class="text-3xl font-bold text-gray-800">${cashierT('orders')}</h2>
                 <div class="flex flex-col gap-3 items-stretch">
-	                <button onclick="startNewInvoiceFromCashier()" class="bg-green-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-green-700 transition">
-	                  ${cashierT('newInvoice')}
-	                </button>
-	                ${getCurrentBranchTables().length ? `
-		                  <button onclick="showTablesOpenPage()" style="background:#1f2937;color:#fff;box-shadow:0 10px 22px rgba(31,41,55,.18);" class="px-8 py-3 rounded-lg font-bold text-lg transition flex items-center justify-center gap-2">
-		                    ${getTableIconSvg('w-6 h-6')} <span>${cashierT('tables')}</span>
-		                  </button>
-	                ` : ''}
-	                ${isShortageRequestBranch() ? `
-	                  <button onclick="showShortageRequestsPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
-	                    ${cashierT('shortageRequest')}
+                  <div class="flex flex-row gap-3 items-stretch justify-end">
+                    ${getCurrentBranchTables().length ? `
+                      <button onclick="showTablesOpenPage()" style="background:#1f2937;color:#fff;box-shadow:0 10px 22px rgba(31,41,55,.18);min-width:170px;" class="px-8 py-3 rounded-lg font-bold text-lg transition">
+                        ${cashierT('tables')}
+                      </button>
+                    ` : ''}
+		                <button onclick="startNewInvoiceFromCashier()" class="bg-green-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-green-700 transition" style="min-width:170px;">
+		                  ${cashierT('newInvoice')}
+		                </button>
+                  </div>
+		                ${isShortageRequestBranch() ? `
+		                  <button onclick="showShortageRequestsPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
+		                    ${cashierT('shortageRequest')}
 	                  </button>
 	                ` : ''}
                 </div>
@@ -2827,12 +2829,13 @@ function refreshUI() {
                     ></span>
                     <div class="text-gray-800 mx-auto mb-4" style="width:52px;height:52px;display:flex;align-items:center;justify-content:center;">${getTableIconSvg('w-12 h-12')}</div>
                     <div class="font-black text-gray-900" style="font-size:56px;line-height:1;">${escapeHtml(table.tableNumber)}</div>
-                    <button
-                      onclick="${draft ? `continueTableInvoice('${escapeHtml(table.id)}')` : `startTableInvoice('${escapeHtml(table.id)}')`}"
-                      class="mt-4 w-full ${draft ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'} text-white px-4 py-3 rounded-lg font-bold transition"
-                    >
-                      ${draft ? cashierT('continueTable') : cashierT('openTable')}
-                    </button>
+	                    <button
+	                      onclick="${draft ? `continueTableInvoice('${escapeHtml(table.id)}')` : `startTableInvoice('${escapeHtml(table.id)}')`}"
+	                      class="mt-4 w-full text-white px-4 py-3 rounded-lg font-bold transition"
+                        style="background:${draft ? '#d97706' : '#059669'};box-shadow:0 8px 18px ${draft ? 'rgba(217,119,6,.24)' : 'rgba(5,150,105,.22)'};"
+	                    >
+	                      ${draft ? cashierT('continueTable') : cashierT('openTable')}
+	                    </button>
                   </div>
                 `;
               }).join('') : `<div class="col-span-full bg-white rounded-xl p-8 text-center text-gray-500">${cashierT('noResults')}</div>`}

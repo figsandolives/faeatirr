@@ -432,7 +432,13 @@ function getItemSupplierIds(item) {
   if (Array.isArray(item.supplierIds)) {
     rawIds.push(...item.supplierIds);
   } else if (item.supplierIds && typeof item.supplierIds === 'object') {
-    rawIds.push(...Object.values(item.supplierIds));
+    Object.entries(item.supplierIds).forEach(([key, value]) => {
+      if (value === true) rawIds.push(key);
+      else if (typeof value === 'string' || typeof value === 'number') rawIds.push(value);
+      else if (value && typeof value === 'object') {
+        rawIds.push(value.id || value.supplierId || value.value || key);
+      }
+    });
   } else if (typeof item.supplierIds === 'string') {
     rawIds.push(item.supplierIds);
   }
@@ -6741,6 +6747,9 @@ function bindItemCardSection() {
   if (classificationSearch) {
     classificationSearch.addEventListener('input', () => {
       state.itemCard.classificationPickerQuery = classificationSearch.value || '';
+      if (classificationTarget?.value) {
+        state.itemCard.classificationPickerTargetId = classificationTarget.value;
+      }
       renderItemCardClassificationPicker();
     });
   }
@@ -7124,6 +7133,7 @@ function renderItemCardClassificationPicker() {
   const query = normalizeSearchValue(state.itemCard.classificationPickerQuery || '');
   if (type === 'suppliers') {
     if (targetLabel) targetLabel.textContent = window.i18n.t('select_supplier');
+    const selectedSupplierId = state.itemCard.classificationPickerTargetId || '';
     const suppliers = Object.entries(state.cache.suppliers || {})
       .map(([id, supplier]) => ({ id, supplier }))
       .filter(({ supplier }) => {
@@ -7132,6 +7142,9 @@ function renderItemCardClassificationPicker() {
         return text.includes(query);
       })
       .sort((a, b) => (getLocalizedName(a.supplier) || '').localeCompare(getLocalizedName(b.supplier) || ''));
+    if (selectedSupplierId && state.cache.suppliers?.[selectedSupplierId] && !suppliers.some((entry) => entry.id === selectedSupplierId)) {
+      suppliers.unshift({ id: selectedSupplierId, supplier: state.cache.suppliers[selectedSupplierId] });
+    }
     suppliers.forEach(({ id, supplier }) => {
       const option = document.createElement('option');
       option.value = id;

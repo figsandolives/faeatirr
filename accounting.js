@@ -12931,8 +12931,8 @@ function renderIssueSearchResults() {
   if (!searchInput || !results) return;
   const query = searchInput.value.trim();
   if (!query) {
-    const entries = getPurchaseSearchEntries().slice(0, 80);
-    renderItemSearchResults(results, entries, (entry) => openPurchaseQtyModal(entry));
+    const entries = getIssueSearchEntries().slice(0, 80);
+    renderItemSearchResults(results, entries, (entry) => openIssueQtyModal(entry));
     return;
   }
   const entries = filterItemEntries(getIssueSearchEntries(), query);
@@ -16541,7 +16541,7 @@ function renderPurchasesSection() {
 }
 
 function getPurchaseSearchEntries() {
-  const supplierId = state.purchaseDraft.supplierId;
+  const supplierId = state.purchaseDraft?.supplierId || '';
   if (!supplierId) return [];
   return getSupplierItems(supplierId);
 }

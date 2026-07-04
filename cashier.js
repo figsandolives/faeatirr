@@ -989,8 +989,35 @@
       `;
     }
 
+    function normalizeExcelHtmlCellText(value) {
+      const text = String(value || '').replace(/&nbsp;/g, ' ').trim();
+      if (!text || text === '-') return text;
+
+      const currencyMatch = text.match(/^(?:د\.ك\s*)?([+-]?\d+(?:,\d{3})*(?:\.\d+)?|[+-]?\d+(?:\.\d+)?)(?:\s*(?:د\.ك|KWD))?$/i);
+      if (currencyMatch && /(?:د\.ك|KWD)/i.test(text)) {
+        return currencyMatch[1].replace(/,/g, '');
+      }
+
+      const dateTimeMatch = text.match(/^(\d{1,4}[/-]\d{1,2}[/-]\d{1,4})(?:،|,)?\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|ص|م)?$/i);
+      if (dateTimeMatch) return dateTimeMatch[1];
+
+      return text;
+    }
+
+    function normalizeExcelHtmlForDownload(html) {
+      return String(html || '').replace(/<td([^>]*)>([^<>]*)<\/td>/gi, (match, attrs, value) => {
+        const normalized = normalizeExcelHtmlCellText(value);
+        if (normalized === value) return match;
+        const isNumber = /^[+-]?\d+(?:\.\d+)?$/.test(normalized);
+        const nextAttrs = isNumber && !/style=/i.test(attrs)
+          ? `${attrs} style="mso-number-format:'0.000';"`
+          : attrs;
+        return `<td${nextAttrs}>${normalized}</td>`;
+      });
+    }
+
     function downloadExcelHtml(html, fileName) {
-      const blob = new Blob(['\ufeff', html], { type: 'application/vnd.ms-excel' });
+      const blob = new Blob(['\ufeff', normalizeExcelHtmlForDownload(html)], { type: 'application/vnd.ms-excel' });
       const link = document.createElement('a');
       const objectUrl = URL.createObjectURL(blob);
       link.href = objectUrl;
@@ -6313,7 +6340,7 @@ function renderAccountingContent(section) {
   `;
   
   // تحميل كملف Excel
-  const blob = new Blob(['\ufeff', html], { 
+  const blob = new Blob(['\ufeff', normalizeExcelHtmlForDownload(html)], { 
     type: 'application/vnd.ms-excel' 
   });
   const link = document.createElement('a');
@@ -7373,7 +7400,7 @@ function renderAccountingContent(section) {
         return;
       }
 
-      const headers = ['رقم الفاتورة', 'اسم العميل', 'اسم الكاشير', 'كمية المنتج في الفاتورة', 'إجمالي قيمة المنتج في الفاتورة (د.ك)', 'تاريخ ووقت الطلب'];
+      const headers = ['رقم الفاتورة', 'اسم العميل', 'اسم الكاشير', 'كمية المنتج في الفاتورة', 'إجمالي قيمة المنتج في الفاتورة (د.ك)', 'تاريخ الطلب'];
       const rowsHtml = salesReportBranchRows.map(row => `
         <tr>
           <td>${row.invoiceNumber}</td>
@@ -7381,7 +7408,7 @@ function renderAccountingContent(section) {
           <td>${row.cashierName}</td>
           <td>${formatReportQuantity(row.quantity)}</td>
           <td>${formatNumberWithThreeDecimals(row.invoiceProductTotal)}</td>
-          <td>${formatDate(row.timestamp)} ${formatTime(row.timestamp)}</td>
+          <td>${formatDate(row.timestamp)}</td>
         </tr>
       `).join('');
 

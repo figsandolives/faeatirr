@@ -24574,15 +24574,18 @@ function normalizeExcelCellValue(value) {
   if (typeof value !== 'string') return value;
   const text = value.trim();
   if (!text || text === '-') return value;
-  const hasCurrency = /(?:د\.ك|KWD)\s*$/i.test(text);
-  if (!hasCurrency) return value;
-  const numericText = text
-    .replace(/(?:د\.ك|KWD)\s*$/i, '')
-    .replace(/,/g, '')
-    .trim();
-  if (!/^[+-]?\d+(?:\.\d+)?$/.test(numericText)) return value;
-  const numericValue = Number(numericText);
-  return Number.isFinite(numericValue) ? numericValue : value;
+  const hasCurrency = /(?:د\.ك|KWD)/i.test(text);
+  if (hasCurrency) {
+    const numericText = text
+      .replace(/(?:د\.ك|KWD)/gi, '')
+      .replace(/,/g, '')
+      .trim();
+    if (!/^[+-]?\d+(?:\.\d+)?$/.test(numericText)) return value;
+    const numericValue = Number(numericText);
+    return Number.isFinite(numericValue) ? numericValue : value;
+  }
+  const dateTimeMatch = text.match(/^(\d{1,4}[/-]\d{1,2}[/-]\d{1,4})(?:،|,)?\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|ص|م)?$/i);
+  return dateTimeMatch ? dateTimeMatch[1] : value;
 }
 
 function normalizeExcelRows(rows) {

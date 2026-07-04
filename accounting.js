@@ -20995,13 +20995,13 @@ function exportOrders() {
       [window.i18n.t('delivery_zone')]: getOrderZoneName(order),
       [window.i18n.t('customer_phone')]: getOrderCustomerPhone(order),
       [window.i18n.t('date_time')]: formatDate(getOrderTimestamp(order)),
+      [window.i18n.t('payment_method')]: getOrderPaymentLabel(order),
       [window.i18n.t('cashier')]: getOrderCashierName(order),
       [window.i18n.t('branch')]: getOrderBranchName(order),
       [window.i18n.t('order_type')]: getOrderTypeLabel(order),
       [window.i18n.t('net_total')]: formatMoney(getOrderItemsSubtotal(order)),
       [window.i18n.t('delivery_fee')]: formatMoney(getOrderDeliveryFee(order)),
-      [window.i18n.t('grand_total')]: formatMoney(getOrderGrandTotal(order)),
-      [window.i18n.t('payment_method')]: getOrderPaymentLabel(order)
+      [window.i18n.t('grand_total')]: formatMoney(getOrderGrandTotal(order))
     };
   });
 
@@ -22337,13 +22337,13 @@ function renderCustomerFavoriteProductDetailsView(section, customerId, productId
       [window.i18n.t('delivery_zone')]: row.zone,
       [window.i18n.t('customer_phone')]: row.customerPhone,
       [window.i18n.t('date_time')]: formatDate(row.createdAt),
+      [window.i18n.t('payment_method')]: row.paymentMethod,
       [window.i18n.t('cashier')]: row.cashierName,
       [window.i18n.t('branch')]: row.branchName,
       [window.i18n.t('order_type')]: row.orderType,
       [window.i18n.t('net_total')]: formatMoney(row.netAmount),
       [window.i18n.t('delivery_fee')]: formatMoney(row.deliveryFee),
-      [window.i18n.t('grand_total')]: formatMoney(row.total),
-      [window.i18n.t('payment_method')]: row.paymentMethod
+      [window.i18n.t('grand_total')]: formatMoney(row.total)
     }));
     exportToExcel(exportRows, `customer-${customerId}-favorite-product.xlsx`);
   });
@@ -23853,8 +23853,8 @@ function renderTableOrdersDetailsView(section, filters) {
         [window.i18n.t('order_type')]: row.orderType,
         [window.i18n.t('delivery_fee')]: formatMoney(row.deliveryFee),
         [window.i18n.t('grand_total')]: formatMoney(row.total),
-        [window.i18n.t('payment_method')]: row.paymentMethod,
         [window.i18n.t('date_time')]: formatDate(row.createdAt),
+        [window.i18n.t('payment_method')]: row.paymentMethod,
         [window.i18n.t('table_open_close_period')]: row.tableSession
       }));
       exportToExcel(exportRows, `table-${tableNumber}-orders.xlsx`);

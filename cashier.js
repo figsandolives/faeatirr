@@ -6262,9 +6262,9 @@ function renderAccountingContent(section) {
             'العميل': cells[1].textContent.trim(),
             'الهاتف': cells[2].textContent.trim(),
             'التاريخ': cells[3].textContent.trim(),
+            'طريقة الدفع': cells[6].textContent.trim(),
             'الكاشير': cells[4].textContent.trim(),
             'الفرع': cells[5].textContent.trim(),
-            'طريقة الدفع': cells[6].textContent.trim(),
             'صافي الفاتورة': netAmount.toFixed(3),
             'رسوم التوصيل': deliveryFee.toFixed(3),
             'الإجمالي': finalTotal.toFixed(3)

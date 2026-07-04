@@ -24570,6 +24570,30 @@ function formatMoney(value) {
   return `${formatNumber(value)}${getCurrencySuffix()}`;
 }
 
+function normalizeExcelCellValue(value) {
+  if (typeof value !== 'string') return value;
+  const text = value.trim();
+  if (!text || text === '-') return value;
+  const hasCurrency = /(?:د\.ك|KWD)\s*$/i.test(text);
+  if (!hasCurrency) return value;
+  const numericText = text
+    .replace(/(?:د\.ك|KWD)\s*$/i, '')
+    .replace(/,/g, '')
+    .trim();
+  if (!/^[+-]?\d+(?:\.\d+)?$/.test(numericText)) return value;
+  const numericValue = Number(numericText);
+  return Number.isFinite(numericValue) ? numericValue : value;
+}
+
+function normalizeExcelRows(rows) {
+  return (rows || []).map((row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+    return Object.fromEntries(
+      Object.entries(row).map(([key, value]) => [key, normalizeExcelCellValue(value)])
+    );
+  });
+}
+
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -24621,7 +24645,7 @@ async function copyTextToClipboard(value) {
 function exportToExcel(rows, filename) {
   if (!rows || rows.length === 0) return;
   if (typeof XLSX === 'undefined') return;
-  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const worksheet = XLSX.utils.json_to_sheet(normalizeExcelRows(rows));
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
   if (window.figsDesktop?.isDesktopApp && typeof window.figsDesktop.saveFile === 'function') {

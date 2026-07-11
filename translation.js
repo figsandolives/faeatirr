@@ -546,7 +546,12 @@ const translations = {
     previous_cost: "السعر السابق",
     latest_cost: "السعر الحالي",
     price_increase_warning: "تنبيه: يوجد زيادة في السعر",
-    price_decrease_warning: "تنبيه: يوجد انخفاض في السعر"
+    price_decrease_warning: "تنبيه: يوجد انخفاض في السعر",
+    product_information: "معلومات المنتجات",
+    fixed_expiry_date: "تاريخ صلاحية محدد",
+    skip_issue_voucher: "تخطي سند الصرف",
+    edit_invoice: "✏️ تعديل الفاتورة",
+    customer_information: "معلومات العميل"
   },
   en: {
     app_title: "Management & Cashier System",
@@ -1095,11 +1100,18 @@ const translations = {
     previous_cost: "Previous Cost",
     latest_cost: "Latest Cost",
     price_increase_warning: "Warning: price increased",
-    price_decrease_warning: "Warning: price decreased"
+    price_decrease_warning: "Warning: price decreased",
+    product_information: "Product Information",
+    fixed_expiry_date: "Fixed Expiry Date",
+    skip_issue_voucher: "Skip Issue Voucher",
+    edit_invoice: "✏️ Edit Invoice",
+    customer_information: "Customer Information"
   }
 };
 
 let currentLang = localStorage.getItem('lang') || 'ar';
+const legacyOriginalText = new WeakMap();
+const legacyOriginalAttributes = new WeakMap();
 
 function t(key) {
   const langPack = translations[currentLang] || translations.ar;
@@ -1126,6 +1138,37 @@ function applyTranslations(root = document) {
     if (key) {
       el.setAttribute('title', t(key));
     }
+  });
+
+  // Some legacy screens are rendered dynamically and still contain plain UI
+  // labels. Translate only exact strings that exist in the Arabic dictionary,
+  // so customer and product data are never altered.
+  const exactUiTranslations = new Map();
+  Object.keys(translations.ar).forEach((key) => {
+    const ar = String(translations.ar[key] || '').trim();
+    const en = translations.en[key];
+    if (ar && en && !exactUiTranslations.has(ar)) exactUiTranslations.set(ar, en);
+  });
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (node.parentElement?.closest('script, style, [data-i18n]')) continue;
+    if (!legacyOriginalText.has(node)) legacyOriginalText.set(node, node.nodeValue || '');
+    const original = legacyOriginalText.get(node);
+    const trimmed = original.trim();
+    const translated = exactUiTranslations.get(trimmed);
+    node.nodeValue = currentLang === 'en' && translated ? original.replace(trimmed, translated) : original;
+  }
+  root.querySelectorAll('[placeholder], [title]').forEach((el) => {
+    if (!legacyOriginalAttributes.has(el)) legacyOriginalAttributes.set(el, {});
+    const originals = legacyOriginalAttributes.get(el);
+    ['placeholder', 'title'].forEach((attr) => {
+      if (!(attr in originals)) originals[attr] = el.getAttribute(attr);
+      const original = originals[attr];
+      if (original === null) return;
+      const translated = exactUiTranslations.get(original.trim());
+      el.setAttribute(attr, currentLang === 'en' && translated ? translated : original);
+    });
   });
 }
 
@@ -1154,4 +1197,13 @@ window.i18n = { t, setLanguage, getLanguage, applyTranslations };
 
 document.addEventListener('DOMContentLoaded', () => {
   setLanguage(currentLang);
+  let pendingTranslation = false;
+  new MutationObserver(() => {
+    if (pendingTranslation) return;
+    pendingTranslation = true;
+    requestAnimationFrame(() => {
+      pendingTranslation = false;
+      applyTranslations();
+    });
+  }).observe(document.body, { childList: true, subtree: true });
 });

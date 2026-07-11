@@ -24553,7 +24553,10 @@ function renderListSections() {
 function formatDate(timestamp) {
   if (!timestamp) return '-';
   const date = new Date(timestamp);
-  return date.toLocaleString();
+  const isEnglish = window.i18n.getLanguage() === 'en';
+  return date.toLocaleString(isEnglish ? 'en-GB' : 'ar-KW-u-ca-gregory', {
+    calendar: 'gregory'
+  });
 }
 
 function formatNumber(value) {

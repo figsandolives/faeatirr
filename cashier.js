@@ -288,7 +288,12 @@
         address: 'العنوان',
         noAddressNow: 'بدون عنوان حالياً',
         addNewAddress: '➕ إضافة عنوان جديد',
-        confirm: 'تأكيد'
+        confirm: 'تأكيد',
+        printInvoice: '🖨️ طباعة الفاتورة',
+        printing: 'جاري الطباعة...',
+        saveChanges: 'حفظ التعديلات',
+        delete: 'حذف',
+        close: 'إغلاق'
       },
       en: {
         balance: 'Balance',
@@ -395,13 +400,51 @@
         address: 'Address',
         noAddressNow: 'No address for now',
         addNewAddress: '➕ Add new address',
-        confirm: 'Confirm'
+        confirm: 'Confirm',
+        printInvoice: '🖨️ Print Invoice',
+        printing: 'Printing...',
+        saveChanges: 'Save Changes',
+        delete: 'Delete',
+        close: 'Close'
       }
     };
 
     function cashierT(key) {
       return cashierTranslations[cashierLanguage]?.[key] || cashierTranslations.ar[key] || key;
     }
+
+    const cashierLegacyOriginalText = new WeakMap();
+    function applyCashierLegacyTranslations(root = document) {
+      const exact = new Map();
+      Object.keys(cashierTranslations.ar).forEach((key) => {
+        const ar = String(cashierTranslations.ar[key] || '').trim();
+        const en = cashierTranslations.en[key];
+        if (ar && en && !exact.has(ar)) exact.set(ar, en);
+      });
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.parentElement?.closest('script, style')) continue;
+        if (!cashierLegacyOriginalText.has(node)) cashierLegacyOriginalText.set(node, node.nodeValue || '');
+        const original = cashierLegacyOriginalText.get(node);
+        const trimmed = original.trim();
+        const translated = exact.get(trimmed);
+        node.nodeValue = cashierLanguage === 'en' && translated ? original.replace(trimmed, translated) : original;
+      }
+      document.documentElement.lang = cashierLanguage;
+      document.documentElement.dir = cashierLanguage === 'en' ? 'ltr' : 'rtl';
+    }
+
+    let cashierTranslationFramePending = false;
+    new MutationObserver(() => {
+      if (cashierTranslationFramePending) return;
+      cashierTranslationFramePending = true;
+      requestAnimationFrame(() => {
+        cashierTranslationFramePending = false;
+        applyCashierLegacyTranslations();
+      });
+    }).observe(document.body, { childList: true, subtree: true });
+    applyCashierLegacyTranslations();
 
     function cashierDisplayName(item) {
       if (!item) return '-';
@@ -419,6 +462,7 @@
       if (invoicePage) showInvoiceProductsPage();
       const shortagePage = document.getElementById('shortageDraftPage');
       if (shortagePage) renderShortageDraftPage();
+      applyCashierLegacyTranslations();
     }
 	    const INVENTORY_BRANCHES = [
 	      { id: 'main', name: 'الفرع الرئيسي' },
@@ -907,12 +951,21 @@
 
     function formatDate(timestamp) {
       const date = new Date(timestamp);
-      return date.toLocaleDateString('ar-SA');
+      return date.toLocaleDateString(cashierLanguage === 'en' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
+        calendar: 'gregory',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
     }
 
     function formatTime(timestamp) {
       const date = new Date(timestamp);
-      return date.toLocaleTimeString('ar-SA');
+      return date.toLocaleTimeString(cashierLanguage === 'en' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
+        calendar: 'gregory',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
     }
 
     function showToast(message, isError = false) {
@@ -4631,10 +4684,10 @@ function showNumericKeypadForInvoice(index, inputField) {
       
       <div class="flex gap-2" style="padding: 12px 16px 16px; background: #f3f4f6; border-top: 1px solid #e5e7eb; flex-shrink: 0;">
         <button onclick="printThermalInvoice(this)" style="flex: 2; background: #2563eb; color: white; padding: 12px; border-radius: 8px; font-weight: bold; border: none; cursor: pointer;">
-          🖨️ طباعة الفاتورة
+          ${cashierT('printInvoice')}
         </button>
         <button onclick="this.closest('.modal-overlay').remove();" style="flex: 1; background: #e5e7eb; color: #374151; padding: 12px; border-radius: 8px; font-weight: bold; border: none; cursor: pointer;">
-          إلغاء
+          ${cashierT('cancel')}
         </button>
       </div>
     </div>
@@ -4643,7 +4696,30 @@ function showNumericKeypadForInvoice(index, inputField) {
 }
 
 
-    function buildThermalInvoicePrintHtml(invoiceContent) {
+    let cachedInvoiceLogoDataUrl = '';
+
+    async function getInvoiceLogoDataUrl() {
+      if (cachedInvoiceLogoDataUrl) return cachedInvoiceLogoDataUrl;
+      try {
+        const response = await fetch(new URL('logo.png', window.location.href).href);
+        if (!response.ok) throw new Error(`Logo request failed: ${response.status}`);
+        const blob = await response.blob();
+        cachedInvoiceLogoDataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } catch (error) {
+        console.error('Unable to embed invoice logo:', error);
+      }
+      return cachedInvoiceLogoDataUrl;
+    }
+
+    function buildThermalInvoicePrintHtml(invoiceContent, logoDataUrl = '') {
+      const printableContent = logoDataUrl
+        ? invoiceContent.replace(/src=["']logo\.png["']/i, `src="${logoDataUrl}"`)
+        : invoiceContent;
       return `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
@@ -4725,7 +4801,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     </head>
     <body>
       <div class="thermal-invoice">
-        ${invoiceContent}
+        ${printableContent}
       </div>
     </body>
     </html>
@@ -4734,12 +4810,13 @@ function showNumericKeypadForInvoice(index, inputField) {
 
     async function printThermalInvoice(button) {
   const invoiceContent = button.closest('.modal-content').querySelector('.thermal-invoice').innerHTML;
-  const printHtml = buildThermalInvoicePrintHtml(invoiceContent);
+  const logoDataUrl = await getInvoiceLogoDataUrl();
+  const printHtml = buildThermalInvoicePrintHtml(invoiceContent, logoDataUrl);
 
   if (window.figsDesktop?.isDesktopApp) {
     const originalText = button.innerHTML;
     button.disabled = true;
-    button.innerHTML = 'جاري الطباعة...';
+    button.innerHTML = cashierT('printing');
     try {
       await window.figsDesktop.printHtml({ html: printHtml, type: 'receipt', silent: true });
       button.closest('.modal-overlay')?.remove();
@@ -5669,7 +5746,7 @@ function renderAccountingContent(section) {
         ['التاريخ', 'اسم المنتج عربي', 'اسم المنتج إنجليزي', 'سعره سابقاً', 'سعره بعد التعديل', 'القيمة المضافة'],
         htmlRows
       );
-      const today = new Date().toLocaleDateString('ar-SA').replace(/\//g, '-');
+      const today = new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-');
       downloadExcelHtml(excelHtml, `تقرير_الزيادة_والتخفيض_${today}.xls`);
       showToast('تم تحميل تقرير الزيادة والتخفيض (Excel)');
     }
@@ -6345,7 +6422,7 @@ function renderAccountingContent(section) {
   });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `تقرير_الطلبات_${new Date().toLocaleDateString('ar-SA').replace(/\//g, '-')}.xls`;
+  link.download = `تقرير_الطلبات_${new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-')}.xls`;
   link.click();
   
   showToast('تم تحميل ملف Excel بنجاح');
@@ -7389,7 +7466,7 @@ function renderAccountingContent(section) {
       }
 
       const excelHtml = buildExcelHtml(headers, rowsHtml, totalRow);
-      const today = new Date().toLocaleDateString('ar-SA').replace(/\//g, '-');
+      const today = new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-');
       downloadExcelHtml(excelHtml, `تقرير_المبيعات_${today}.xls`);
       showToast('تم تحميل تقرير المبيعات (Excel)');
     }
@@ -7413,7 +7490,7 @@ function renderAccountingContent(section) {
       `).join('');
 
       const excelHtml = buildExcelHtml(headers, rowsHtml);
-      const today = new Date().toLocaleDateString('ar-SA').replace(/\//g, '-');
+      const today = new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-');
       const productCode = salesReportCurrentDetailProduct?.nameAr || salesReportSelectedProduct?.nameAr || 'منتج';
       downloadExcelHtml(excelHtml, `تفاصيل_تقرير_المبيعات_${productCode}_${salesReportCurrentBranch}_${today}.xls`);
       showToast('تم تحميل تفاصيل التقرير (Excel)');

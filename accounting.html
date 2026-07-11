@@ -32,7 +32,7 @@
         <button class="nav-item" data-icon="🧾" data-section="orders" data-i18n="orders"></button>
         <button class="nav-item" data-icon="👥" data-section="customers" data-i18n="customers"></button>
         <button class="nav-item" data-icon="📦" data-section="products" data-i18n="products"></button>
-        <button class="nav-item" data-icon="📋" data-section="productInfo">معلومات المنتجات</button>
+        <button class="nav-item" data-icon="📋" data-section="productInfo" data-i18n="product_information"></button>
         <button class="nav-item" data-icon="🗂" data-section="productCategories" data-i18n="product_categories"></button>
         <button class="nav-item" data-icon="⚖" data-section="units" data-i18n="units"></button>
         <button class="nav-item" data-icon="🧷" data-section="itemCards" data-i18n="item_cards"></button>
@@ -218,15 +218,15 @@
         <div style="grid-column: 1 / -1;">
           <label class="row" style="justify-content: flex-start; gap: 8px; font-weight: 700;">
             <input id="productFixedExpiryEnabled" type="checkbox" />
-            <span>تاريخ صلاحية محدد</span>
+            <span data-i18n="fixed_expiry_date"></span>
           </label>
           <div id="productFixedExpiryFields" class="grid two hidden" style="margin-top: 10px;">
             <div>
-              <label class="tag" for="productFixedProductionDate">تاريخ الإنتاج</label>
+              <label class="tag" for="productFixedProductionDate" data-i18n="production_date"></label>
               <input id="productFixedProductionDate" class="input" type="date" />
             </div>
             <div>
-              <label class="tag" for="productFixedExpiryDate">تاريخ الانتهاء</label>
+              <label class="tag" for="productFixedExpiryDate" data-i18n="expiry_date"></label>
               <input id="productFixedExpiryDate" class="input" type="date" />
             </div>
           </div>
@@ -509,7 +509,7 @@
       <h3 data-i18n="link_issue"></h3>
       <div id="productionIssueList" class="grid two" style="max-height: 320px; overflow: auto;"></div>
       <div class="row" style="margin-top: 12px; justify-content: flex-end;">
-        <button id="productionLinkSkip" class="btn ghost">تخطي سند الصرف</button>
+        <button id="productionLinkSkip" class="btn ghost" data-i18n="skip_issue_voucher"></button>
         <button id="productionLinkConfirm" class="btn primary" data-i18n="confirm"></button>
         <button id="productionLinkCancel" class="btn ghost" data-i18n="cancel"></button>
       </div>
@@ -527,26 +527,26 @@
   <div id="orderEditOverlay" class="overlay hidden">
     <div style="background: white; border-radius: 20px; max-width: 900px; width: 100%; max-height: 90vh; overflow-y: auto; direction: rtl; text-align: start;">
       <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 20px 20px 0 0;">
-        <h2 style="margin: 0; font-size: 24px; font-weight: bold;">✏️ تعديل الفاتورة</h2>
+        <h2 style="margin: 0; font-size: 24px; font-weight: bold;" data-i18n="edit_invoice"></h2>
       </div>
       <form id="orderEditForm" style="padding: 30px;">
         <div style="margin-bottom: 30px;">
-          <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #667eea;">معلومات العميل</h3>
+          <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #667eea;" data-i18n="customer_information"></h3>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
             <div>
-              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">اسم العميل</label>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;" data-i18n="customer_name"></label>
               <input type="text" id="orderCustomer" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
             </div>
             <div>
-              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">رقم الهاتف</label>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;" data-i18n="phone"></label>
               <input type="tel" id="orderCustomerPhone" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
             </div>
             <div>
-              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">العنوان</label>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;" data-i18n="address"></label>
               <input type="text" id="orderAddress" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
             </div>
             <div>
-              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">رسوم التوصيل (د.ك)</label>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;" data-i18n="delivery_fee"></label>
               <input type="number" id="orderDeliveryFee" step="0.001" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;" oninput="renderOrderItemsEditor()">
             </div>
           </div>
@@ -557,10 +557,10 @@
           </div>
         </div>
         <div style="margin-bottom: 30px;">
-          <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #667eea;">الخصم</h3>
+          <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #667eea;" data-i18n="discount"></h3>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px;">
             <div>
-              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">نوع الخصم</label>
+              <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;" data-i18n="discount_type"></label>
               <select id="orderDiscountType" onchange="renderOrderItemsEditor()" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
                 <option value="none">بدون خصم</option>
                 <option value="percent">نسبة مئوية</option>
@@ -574,25 +574,25 @@
           </div>
         </div>
         <div>
-          <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #667eea;">المنتجات</h3>
+          <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #667eea;" data-i18n="products"></h3>
           <div id="orderItemsList"></div>
           <div style="margin-top: 20px; padding: 20px; background: #ecfdf5; border-radius: 12px;">
-            <h4 style="font-weight: bold; font-size: 18px; margin-bottom: 12px;">إضافة منتج جديد</h4>
+            <h4 style="font-weight: bold; font-size: 18px; margin-bottom: 12px;" data-i18n="new_product"></h4>
             <input type="hidden" id="orderAddProduct" />
             <input type="search" id="orderProductSearchInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="ابحث عن منتج..." oninput="searchProductsForOrderEdit(this.value)" style="width: 100%; padding: 12px; border: 2px solid #16a34a; border-radius: 10px; font-size: 16px; margin-bottom: 10px;">
             <div id="orderProductSearchResults" style="max-height: 210px; overflow-y: auto; margin-bottom: 10px;"></div>
             <div id="orderSelectedProductInfo" style="display: none; background: white; border-radius: 10px; padding: 12px; margin-bottom: 10px; color: #15803d; font-weight: 800;"></div>
             <div style="display: flex; gap: 10px; align-items: center;">
               <input id="orderAddQty" type="number" value="1" style="width: 110px; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px;">
-              <button type="button" id="orderAddBtn" style="background: #16a34a; color: white; padding: 12px 18px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;">إضافة عنصر</button>
+              <button type="button" id="orderAddBtn" style="background: #16a34a; color: white; padding: 12px 18px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer;" data-i18n="add_item"></button>
             </div>
           </div>
         </div>
         <p id="orderEditError" class="helper form-error"></p>
         <div style="display: flex; gap: 10px; margin-top: 30px;">
-          <button type="submit" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;">حفظ التعديلات</button>
-          <button type="button" id="orderDeleteBtn" style="background: #dc2626; color: white; padding: 15px 24px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;">حذف</button>
-          <button type="button" id="orderEditCancel" style="flex: 1; background: #6b7280; color: white; padding: 15px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;">إلغاء</button>
+          <button type="submit" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;" data-i18n="save"></button>
+          <button type="button" id="orderDeleteBtn" style="background: #dc2626; color: white; padding: 15px 24px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;" data-i18n="delete"></button>
+          <button type="button" id="orderEditCancel" style="flex: 1; background: #6b7280; color: white; padding: 15px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;" data-i18n="cancel"></button>
         </div>
       </form>
     </div>

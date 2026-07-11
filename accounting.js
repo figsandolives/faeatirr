@@ -7500,7 +7500,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
 
   const supplierReturns = state.cache.supplierReturns || {};
   Object.entries(supplierReturns).forEach(([id, ret]) => {
-    if (branchId !== mainBranchId) return;
+    if ((purchase.branchId || mainBranchId) !== branchId) return;
     normalizeItems(ret.items).forEach((item) => {
       if (!isSameItem(item)) return;
       const record = { id, ...ret };
@@ -7549,7 +7549,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
 
   const purchases = state.cache.purchases || {};
   Object.entries(purchases).forEach(([id, purchase]) => {
-    if (branchId !== mainBranchId) return;
+    if ((purchase.branchId || mainBranchId) !== branchId) return;
     const purchaseNumber = purchase.purchaseNumber || id;
     normalizeItems(purchase.items).forEach((item) => {
       if (!isSameItem(item)) return;
@@ -7575,8 +7575,8 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
 
   const receipts = state.cache.purchaseReceipts || {};
   Object.entries(receipts).forEach(([id, receipt]) => {
-    if (branchId !== mainBranchId) return;
     const purchase = state.cache.purchases?.[receipt.purchaseId];
+    if ((receipt.branchId || purchase?.branchId || mainBranchId) !== branchId) return;
     const purchaseNumber = purchase?.purchaseNumber || receipt.purchaseNumber || receipt.purchaseId || id;
     normalizeItems(receipt.items).forEach((item) => {
       if (!isSameItem(item)) return;
@@ -16317,6 +16317,7 @@ function setupPurchasesSection() {
           <tr>
             <th>${window.i18n.t('purchase_number')}</th>
             <th>${window.i18n.t('supplier')}</th>
+            <th>${window.i18n.t('branch')}</th>
             <th>${window.i18n.t('storekeeper_name')}</th>
             <th>${window.i18n.t('date_time')}</th>
             <th>${window.i18n.t('status')}</th>
@@ -16343,6 +16344,10 @@ function setupPurchasesSection() {
           <div>
             <label class="tag">${window.i18n.t('supplier')}</label>
             <select id="purchaseSupplierSelect" class="input"></select>
+          </div>
+          <div>
+            <label class="tag">${window.i18n.t('branch')}</label>
+            <select id="purchaseBranchSelect" class="input"></select>
           </div>
         </div>
         <div class="row" style="margin-top: 12px;">
@@ -16377,6 +16382,10 @@ function setupPurchasesSection() {
             <input id="purchaseReceiveSupplier" class="input" readonly />
           </div>
           <div>
+            <label class="tag">${window.i18n.t('branch')}</label>
+            <input id="purchaseReceiveBranch" class="input" readonly />
+          </div>
+          <div>
             <label class="tag">${window.i18n.t('purchase_invoice_number')}</label>
             <input id="purchaseReceiveInvoiceNumber" class="input" />
           </div>
@@ -16403,6 +16412,7 @@ function setupPurchasesSection() {
 function resetPurchaseDraft() {
   state.purchaseDraft = {
     supplierId: '',
+    branchId: getMainBranchId() || '',
     items: [],
     editingId: null,
     originalItems: [],
@@ -16415,6 +16425,7 @@ function resetPurchaseReceiveDraft() {
   state.purchaseReceiveDraft = {
     purchaseId: null,
     supplierId: '',
+    branchId: '',
     purchaseInvoiceNumber: '',
     items: []
   };
@@ -16425,6 +16436,7 @@ function bindPurchasesSection() {
   const closeBtn = document.getElementById('purchaseModalCloseBtn');
   const cancelBtn = document.getElementById('purchaseCancelBtn');
   const supplierSelect = document.getElementById('purchaseSupplierSelect');
+  const branchSelect = document.getElementById('purchaseBranchSelect');
   const searchInput = document.getElementById('purchaseSearchInput');
   const searchBtn = document.getElementById('purchaseSearchBtn');
   const submitBtn = document.getElementById('purchaseSubmitBtn');
@@ -16446,6 +16458,13 @@ function bindPurchasesSection() {
     supplierSelect.addEventListener('change', () => {
       state.purchaseDraft.supplierId = supplierSelect.value;
       renderPurchaseSearchResults();
+    });
+  }
+  if (branchSelect) {
+    branchSelect.addEventListener('change', () => {
+      state.purchaseDraft.branchId = branchSelect.value || '';
+      const errorEl = document.getElementById('purchaseError');
+      if (errorEl) errorEl.textContent = '';
     });
   }
   if (searchInput) {
@@ -16513,6 +16532,7 @@ function openPurchaseModal(record = null) {
   if (record) {
     state.purchaseDraft.editingId = record.id;
     state.purchaseDraft.supplierId = record.supplierId || '';
+    state.purchaseDraft.branchId = record.branchId || getMainBranchId() || '';
     state.purchaseDraft.originalSupplierId = record.supplierId || '';
     state.purchaseDraft.items = normalizeItems(record.items).map((item) => {
       const itemType = normalizeItemType(item);
@@ -16547,6 +16567,7 @@ function renderPurchasesSection() {
   if (!state.purchaseDraft) resetPurchaseDraft();
   const storekeeperInput = document.getElementById('purchaseStorekeeper');
   const supplierSelect = document.getElementById('purchaseSupplierSelect');
+  const branchSelect = document.getElementById('purchaseBranchSelect');
   if (storekeeperInput) storekeeperInput.value = state.user?.name || '-';
   if (supplierSelect) {
     supplierSelect.innerHTML = '';
@@ -16561,6 +16582,16 @@ function renderPurchasesSection() {
       supplierSelect.appendChild(option);
     });
     supplierSelect.value = state.purchaseDraft.supplierId || '';
+  }
+  if (branchSelect) {
+    branchSelect.innerHTML = `<option value="">${window.i18n.t('choose_branch')}</option>`;
+    Object.entries(state.cache.branches || {}).forEach(([id, branch]) => {
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = getLocalizedName(branch) || getBranchLabel(id);
+      branchSelect.appendChild(option);
+    });
+    branchSelect.value = state.purchaseDraft.branchId || '';
   }
   renderPurchaseSearchResults();
   renderPurchaseItems();
@@ -16611,8 +16642,8 @@ function renderPurchaseSearchResults() {
 function openPurchaseQtyModal(entry) {
   resolveEntryWithProductionSelection(entry).then((selectedEntry) => {
     if (!selectedEntry) return;
-    const mainBranchId = getMainBranchId();
-    const available = getItemStock(selectedEntry.item, mainBranchId);
+    const branchId = state.purchaseDraft.branchId || getMainBranchId();
+    const available = getItemStock(selectedEntry.item, branchId);
     openQtyModal({
       title: getLocalizedName(selectedEntry.item),
       available,
@@ -16736,7 +16767,7 @@ function editPurchaseItemQty(index) {
 function submitPurchaseOrder() {
   const errorEl = document.getElementById('purchaseError');
   if (errorEl) errorEl.textContent = '';
-  if (!state.purchaseDraft.supplierId || !state.purchaseDraft.items.length) {
+  if (!state.purchaseDraft.supplierId || !state.purchaseDraft.branchId || !state.purchaseDraft.items.length) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
@@ -16748,6 +16779,8 @@ function submitPurchaseOrder() {
     const payload = {
       supplierId: state.purchaseDraft.supplierId,
       supplierName,
+      branchId: state.purchaseDraft.branchId,
+      branchName: getBranchLabel(state.purchaseDraft.branchId),
       items: state.purchaseDraft.items,
       status: 'pending'
     };
@@ -16755,7 +16788,8 @@ function submitPurchaseOrder() {
       if (state.purchaseDraft.pendingMoveId) {
         const moveUpdate = {
           name: `${window.i18n.t('purchase_request')} ${state.purchaseDraft.editingId}`,
-          note: supplierName
+          note: supplierName,
+          branchId: state.purchaseDraft.branchId
         };
         db.ref(`pendingStockMoves/${state.purchaseDraft.pendingMoveId}`).update(moveUpdate);
       }
@@ -16776,6 +16810,8 @@ function submitPurchaseOrder() {
       storekeeperName: state.user?.name || null,
       supplierId: state.purchaseDraft.supplierId,
       supplierName,
+      branchId: state.purchaseDraft.branchId,
+      branchName: getBranchLabel(state.purchaseDraft.branchId),
       status: 'pending',
       items: state.purchaseDraft.items,
       receivedItems: []
@@ -16788,7 +16824,8 @@ function submitPurchaseOrder() {
         createdAt: serverTime,
         status: 'pending',
         type: 'purchase',
-        purchaseId
+        purchaseId,
+        branchId: state.purchaseDraft.branchId
       };
       moveRef.set(movePayload).then(() => {
         db.ref(`purchases/${purchaseId}`).update({ pendingMoveId: moveRef.key });
@@ -16875,7 +16912,7 @@ function renderPurchasesTable() {
   table.innerHTML = '';
   if (entries.length === 0) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td colspan="9">${window.i18n.t('no_data')}</td>`;
+    row.innerHTML = `<td colspan="10">${window.i18n.t('no_data')}</td>`;
     table.appendChild(row);
     return;
   }
@@ -16898,6 +16935,7 @@ function renderPurchasesTable() {
     row.innerHTML = `
       <td>${rec.purchaseNumber || '-'}</td>
       <td>${rec.supplierName || '-'}</td>
+      <td>${getBranchLabel(rec.branchId || getMainBranchId())}</td>
       <td>${rec.storekeeperName || '-'}</td>
       <td>${formatDate(rec.createdAt)}</td>
       <td>${statusLabel}</td>
@@ -16969,6 +17007,7 @@ function openPurchaseDetailsModal(record) {
     <div class="notice">
       <div><strong>${window.i18n.t('purchase_number')}:</strong> ${record.purchaseNumber || '-'}</div>
       <div><strong>${window.i18n.t('supplier')}:</strong> ${record.supplierName || '-'}</div>
+      <div><strong>${window.i18n.t('branch')}:</strong> ${getBranchLabel(record.branchId || getMainBranchId())}</div>
       <div><strong>${window.i18n.t('storekeeper_name')}:</strong> ${record.storekeeperName || '-'}</div>
       <div><strong>${window.i18n.t('purchase_invoice_number')}:</strong> ${record.purchaseInvoiceNumber || '-'}</div>
       <div><strong>${window.i18n.t('date_time')}:</strong> ${formatDate(record.createdAt)}</div>
@@ -17013,6 +17052,7 @@ function openPurchaseReceiveModal(record) {
   resetPurchaseReceiveDraft();
   state.purchaseReceiveDraft.purchaseId = record.id;
   state.purchaseReceiveDraft.supplierId = record.supplierId;
+  state.purchaseReceiveDraft.branchId = record.branchId || getMainBranchId() || '';
   state.purchaseReceiveDraft.purchaseInvoiceNumber = record.purchaseInvoiceNumber || '';
   const receivedMap = buildItemMap(record.receivedItems || []);
   state.purchaseReceiveDraft.items = normalizeItems(record.items).map((item) => {
@@ -17045,10 +17085,12 @@ function closePurchaseReceiveModal() {
 function renderPurchaseReceiveSection() {
   const storekeeperInput = document.getElementById('purchaseReceiveStorekeeper');
   const supplierInput = document.getElementById('purchaseReceiveSupplier');
+  const branchInput = document.getElementById('purchaseReceiveBranch');
   const invoiceInput = document.getElementById('purchaseReceiveInvoiceNumber');
   if (storekeeperInput) storekeeperInput.value = state.user?.name || '-';
   const supplier = state.cache.suppliers?.[state.purchaseReceiveDraft.supplierId];
   if (supplierInput) supplierInput.value = getLocalizedName(supplier) || '-';
+  if (branchInput) branchInput.value = getBranchLabel(state.purchaseReceiveDraft.branchId);
   if (invoiceInput) invoiceInput.value = state.purchaseReceiveDraft.purchaseInvoiceNumber || '';
   renderPurchaseReceiveItemsEditor();
 }
@@ -17127,10 +17169,14 @@ function submitPurchaseReceive() {
   const purchaseId = state.purchaseReceiveDraft.purchaseId;
   const purchase = state.cache.purchases?.[purchaseId];
   if (!purchase) return;
-  const mainBranchId = getMainBranchId();
+  const branchId = purchase.branchId || state.purchaseReceiveDraft.branchId || getMainBranchId();
+  if (!branchId) {
+    if (errorEl) errorEl.textContent = window.i18n.t('select_branch_prompt');
+    return;
+  }
   const updates = [];
   receivedNowItems.forEach((item) => {
-    updates.push(updateItemStock(item.itemType, item.itemId, mainBranchId, Number(item.qty || 0)));
+    updates.push(updateItemStock(item.itemType, item.itemId, branchId, Number(item.qty || 0)));
   });
   Promise.all(updates).then(() => {
     const receivedMap = buildItemMap(purchase.receivedItems || []);
@@ -17153,6 +17199,8 @@ function submitPurchaseReceive() {
         purchaseId,
         supplierId: purchase.supplierId,
         supplierName: purchase.supplierName,
+        branchId,
+        branchName: getBranchLabel(branchId),
         purchaseInvoiceNumber,
         receiptNumber,
         createdAt: serverTime,
@@ -17165,6 +17213,8 @@ function submitPurchaseReceive() {
           receivedItems,
           status: newStatus,
           purchaseInvoiceNumber,
+          branchId,
+          branchName: getBranchLabel(branchId),
           lastReceiptNumber: receiptNumber,
           closedAt: serverTime
         }).then(() => {
@@ -19784,6 +19834,7 @@ function printPurchaseRequestReport(record) {
       : null;
   const meta = [
     { label: window.i18n.t('supplier'), value: supplierName },
+    { label: window.i18n.t('branch'), value: getBranchLabel(record.branchId || getMainBranchId()) },
     { label: window.i18n.t('date_time'), value: formatDate(record.createdAt) },
     { label: window.i18n.t('storekeeper_name'), value: record.storekeeperName || '-' },
     { label: window.i18n.t('status'), value: statusKey ? window.i18n.t(statusKey) : '-' },
@@ -19828,6 +19879,7 @@ function printPurchaseReceiptReport(record) {
     || '-';
   const meta = [
     { label: window.i18n.t('supplier'), value: supplierName },
+    { label: window.i18n.t('branch'), value: getBranchLabel(record.branchId || purchase?.branchId || getMainBranchId()) },
     { label: window.i18n.t('purchase_number'), value: record.purchaseNumber || '-' },
     { label: window.i18n.t('purchase_invoice_number'), value: record.purchaseInvoiceNumber || '-' },
     { label: window.i18n.t('date_time'), value: formatDate(record.createdAt) },

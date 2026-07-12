@@ -266,6 +266,10 @@ const state = {
   selectedDeliveryPriceGroup: 'mainYarmouk'
 };
 
+// Temporary until the initial branch stocktake is complete. Set to false to
+// restore the stock-availability restriction for inter-branch transfers.
+const ALLOW_TRANSFERS_WITHOUT_STOCK = true;
+
 function getLocalizedName(item) {
   if (!item) return '-';
   const lang = window.i18n.getLanguage();
@@ -11991,11 +11995,12 @@ function updateQtyDisplay() {
   els.qtyModalDisplay.textContent = state.qtyModal.value || '0';
 }
 
-function openQtyModal({ title, available, onConfirm, mode = 'add', confirmLabel, unitId = null, unitName = '' }) {
+function openQtyModal({ title, available, onConfirm, mode = 'add', confirmLabel, unitId = null, unitName = '', allowOverdraft = false }) {
   if (!els.qtyModal) return;
   state.qtyModal.value = '';
   state.qtyModal.mode = mode;
   state.qtyModal.available = available;
+  state.qtyModal.allowOverdraft = Boolean(allowOverdraft);
   state.qtyModal.onConfirm = onConfirm;
   els.qtyModalTitle.textContent = title || '';
   const resolvedUnitName = String(unitName || getUnitName(unitId) || '').trim();
@@ -12039,7 +12044,7 @@ function handleQtyConfirm() {
     }
     return;
   }
-  if (state.qtyModal.mode === 'deduct' && state.qtyModal.available !== null && state.qtyModal.available !== undefined) {
+  if (state.qtyModal.mode === 'deduct' && !state.qtyModal.allowOverdraft && state.qtyModal.available !== null && state.qtyModal.available !== undefined) {
     if (qty > Number(state.qtyModal.available || 0)) {
       if (els.qtyModalError) {
         els.qtyModalError.textContent = window.i18n.t('insufficient_stock');
@@ -17854,6 +17859,7 @@ function openTransferQtyModal(entry) {
       unitId: getResolvedItemUnitId(selectedEntry.item),
       unitName: getResolvedItemUnitName(selectedEntry.item),
       mode: 'deduct',
+      allowOverdraft: ALLOW_TRANSFERS_WITHOUT_STOCK,
       onConfirm: (qty) => addTransferItem(selectedEntry, qty)
     });
   });
@@ -17930,6 +17936,7 @@ function editTransferItemQty(index) {
     unitId: getResolvedItemUnitId(item),
     unitName: getResolvedItemUnitName(item) || getResolvedItemUnitName(itemData),
     mode: 'deduct',
+    allowOverdraft: ALLOW_TRANSFERS_WITHOUT_STOCK,
     onConfirm: (qty) => {
       state.transferDraft.items[index].qty = qty;
       renderTransferItems();
@@ -18195,7 +18202,7 @@ function openCashierTransferModal(request, mode = 'transfer') {
     const available = itemData ? getItemStock(itemData, mainBranchId) : 0;
     const requestedQty = Number(item.qty || 0);
     const qty = isTransferMode
-      ? Math.min(requestedQty, Number(available || 0))
+      ? (ALLOW_TRANSFERS_WITHOUT_STOCK ? requestedQty : Math.min(requestedQty, Number(available || 0)))
       : Number(item.qty || requestedQty);
     return {
       itemId: item.itemId,
@@ -18527,6 +18534,7 @@ function editCashierTransferItemQty(index) {
     available,
     ...getQtyModalUnitMeta(item),
     mode: 'deduct',
+    allowOverdraft: ALLOW_TRANSFERS_WITHOUT_STOCK,
     onConfirm: (qty) => {
       state.cashierTransferDraft.items[index].qty = qty;
       renderCashierTransferItems();

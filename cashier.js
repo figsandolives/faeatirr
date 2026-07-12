@@ -92,6 +92,59 @@
     }
 
     let currentOrder = createEmptyCurrentOrder();
+    let whatsappOrderAlertStartedAt = 0;
+    const alertedWhatsappOrderIds = new Set();
+
+    function isPendingWhatsappOrder(order) {
+      return order?.source === 'whatsapp-ai' && order?.printStatus !== 'printed' && order?.isPrinted !== true;
+    }
+
+    function whatsappPendingBadge(order) {
+      return isPendingWhatsappOrder(order)
+        ? '<span title="طلب واتساب جديد غير مطبوع" style="display:inline-flex;align-items:center;gap:5px;margin-inline-start:7px;padding:3px 8px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:11px;font-weight:800;"><span style="width:9px;height:9px;border-radius:50%;background:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.18);"></span>جديد غير مطبوع</span>'
+        : '';
+    }
+
+    function playNewWhatsappOrderSound() {
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        const context = new AudioContextClass();
+        const playTone = (frequency, start, duration) => {
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          oscillator.type = 'sine';
+          oscillator.frequency.value = frequency;
+          gain.gain.setValueAtTime(0.001, context.currentTime + start);
+          gain.gain.exponentialRampToValueAtTime(0.28, context.currentTime + start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + start + duration);
+          oscillator.connect(gain); gain.connect(context.destination);
+          oscillator.start(context.currentTime + start); oscillator.stop(context.currentTime + start + duration + 0.03);
+        };
+        playTone(880, 0, 0.22); playTone(1175, 0.28, 0.28);
+        setTimeout(() => context.close().catch(() => {}), 1000);
+      } catch (error) {
+        console.warn('Unable to play WhatsApp order sound:', error);
+      }
+    }
+
+    function alertNewWhatsappOrder(order) {
+      if (!isPendingWhatsappOrder(order) || alertedWhatsappOrderIds.has(order.id)) return;
+      if ((Number(order.timestamp) || 0) < whatsappOrderAlertStartedAt - 5000) return;
+      alertedWhatsappOrderIds.add(order.id);
+      playNewWhatsappOrderSound();
+      showToast(`🔴 طلب واتساب جديد غير مطبوع: #${order.invoiceNumber || order.id}`);
+    }
+
+    async function markWhatsappOrderPrinted(orderId) {
+      if (!orderId) return;
+      const order = allOrders.find(item => item.id === orderId);
+      if (!isPendingWhatsappOrder(order)) return;
+      const updates = { printStatus: 'printed', isPrinted: true, needsCashierAttention: false, printedAt: Date.now() };
+      await db.ref(`orders/${orderId}`).update(updates);
+      Object.assign(order, updates);
+      refreshUI();
+    }
     let selectedProductsForCategory = [];
     let adminProductCategoryPath = [];
     let adminProductSearchTerm = '';
@@ -1475,6 +1528,7 @@
 function setupRealtimeListeners() {
   if (realtimeListenersStarted) return;
   realtimeListenersStarted = true;
+  whatsappOrderAlertStartedAt = Date.now();
 
   // 1. مراقبة الطلبات
   const latestOrderTimestamp = allOrders.reduce((max, order) => Math.max(max, order.timestamp || 0), 0);
@@ -1489,6 +1543,7 @@ function setupRealtimeListeners() {
     } else {
       allOrders.push(order);
     }
+    alertNewWhatsappOrder(order);
     refreshUI();
   });
 
@@ -2309,7 +2364,7 @@ function refreshUI() {
                     <tbody>
   ${cashierPagedOrders.map(order => `
     <tr>
-      <td>${order.invoiceNumber}</td>
+      <td>${order.invoiceNumber}${whatsappPendingBadge(order)}</td>
       <td>${order.customerName}</td>
       <td>${formatDate(order.timestamp)} ${formatTime(order.timestamp)}</td>
       <td>${order.total.toFixed(3)} ${cashierT('kd')}</td>
@@ -4550,7 +4605,7 @@ function showNumericKeypadForInvoice(index, inputField) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.innerHTML = `
-    <div class="modal-content p-0" style="background: #f3f4f6; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;">
+    <div class="modal-content p-0" data-order-id="${order.id || ''}" style="background: #f3f4f6; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;">
       <div style="overflow-y: auto; padding: 16px 16px 8px; min-height: 0;">
         <div class="thermal-invoice" style="width: 72mm; margin: 0 auto; padding: 10px; background: white; border-radius: 8px;">
         <div style="text-align: center; border-bottom: 2px dashed #000; padding-bottom: 10px; margin-bottom: 10px;">
@@ -4809,6 +4864,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     }
 
     async function printThermalInvoice(button) {
+  const orderId = button.closest('.modal-content')?.dataset.orderId || '';
   const invoiceContent = button.closest('.modal-content').querySelector('.thermal-invoice').innerHTML;
   const logoDataUrl = await getInvoiceLogoDataUrl();
   const printHtml = buildThermalInvoicePrintHtml(invoiceContent, logoDataUrl);
@@ -4819,6 +4875,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     button.innerHTML = cashierT('printing');
     try {
       await window.figsDesktop.printHtml({ html: printHtml, type: 'receipt', silent: true });
+      await markWhatsappOrderPrinted(orderId);
       button.closest('.modal-overlay')?.remove();
       showToast('تم إرسال الفاتورة للطابعة');
       return;
@@ -4845,6 +4902,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       <\/script>
     </body>`));
   printWindow.document.close();
+  await markWhatsappOrderPrinted(orderId);
 }
 
     async function updateOrderCourierName(orderId, courierName) {
@@ -5993,7 +6051,7 @@ function renderAccountingContent(section) {
     function buildOrderTableRow(order) {
       return `
         <tr class="order-row" data-order-id="${order.id || ''}" data-search="${escapeHtml(`${order.invoiceNumber || ''} ${order.customerName || ''} ${order.phoneNumber || ''}`)}" data-cashier="${escapeHtml(order.cashierCode || '')}" data-branch="${escapeHtml(order.branch || '')}" data-timestamp="${order.timestamp || 0}">
-          <td>${order.invoiceNumber || 'N/A'}</td>
+          <td>${order.invoiceNumber || 'N/A'}${whatsappPendingBadge(order)}</td>
           <td>${escapeHtml(order.customerName || 'N/A')}</td>
           <td>${escapeHtml(order.phoneNumber || 'N/A')}</td>
           <td>${formatDate(order.timestamp)}</td>

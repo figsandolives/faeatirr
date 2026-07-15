@@ -92,66 +92,6 @@
     }
 
     let currentOrder = createEmptyCurrentOrder();
-    let whatsappOrderAlertStartedAt = 0;
-    const alertedWhatsappOrderIds = new Set();
-
-    function isPendingWhatsappOrder(order) {
-      return order?.source === 'whatsapp-ai' && order?.printStatus !== 'printed' && order?.isPrinted !== true;
-    }
-
-    function whatsappPendingBadge(order) {
-      return isPendingWhatsappOrder(order)
-        ? '<span title="طلب واتساب جديد غير مطبوع" style="display:inline-flex;align-items:center;gap:5px;margin-inline-start:7px;padding:3px 8px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:11px;font-weight:800;"><span style="width:9px;height:9px;border-radius:50%;background:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.18);"></span>جديد غير مطبوع</span>'
-        : '';
-    }
-
-    function playNewWhatsappOrderSound() {
-      try {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextClass) return;
-        const context = new AudioContextClass();
-        const playTone = (frequency, start, duration) => {
-          const oscillator = context.createOscillator();
-          const gain = context.createGain();
-          oscillator.type = 'sine';
-          oscillator.frequency.value = frequency;
-          gain.gain.setValueAtTime(0.001, context.currentTime + start);
-          gain.gain.exponentialRampToValueAtTime(0.28, context.currentTime + start + 0.02);
-          gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + start + duration);
-          oscillator.connect(gain); gain.connect(context.destination);
-          oscillator.start(context.currentTime + start); oscillator.stop(context.currentTime + start + duration + 0.03);
-        };
-        playTone(880, 0, 0.22); playTone(1175, 0.28, 0.28);
-        setTimeout(() => context.close().catch(() => {}), 1000);
-      } catch (error) {
-        console.warn('Unable to play WhatsApp order sound:', error);
-      }
-    }
-
-    function alertNewWhatsappOrder(order) {
-      if (!isPendingWhatsappOrder(order) || alertedWhatsappOrderIds.has(order.id)) return;
-      if ((Number(order.timestamp) || 0) < whatsappOrderAlertStartedAt - 5000) return;
-      alertedWhatsappOrderIds.add(order.id);
-      playNewWhatsappOrderSound();
-      showToast(`🔴 طلب واتساب جديد غير مطبوع: #${order.invoiceNumber || order.id}`);
-    }
-
-    async function markWhatsappOrderPrinted(orderId) {
-      if (!orderId) return;
-      const order = allOrders.find(item => item.id === orderId);
-      if (!isPendingWhatsappOrder(order)) return;
-      const employeeName = currentCashier?.name ? `${currentCashier.name} (chatBot)` : 'chatBot';
-      const updates = {
-        printStatus: 'printed', isPrinted: true, needsCashierAttention: false, printedAt: Date.now(),
-        cashier: employeeName,
-        cashierCode: currentCashier?.code || order.cashierCode || 'WA',
-        printedByCashierId: currentCashier?.id || '',
-        printedByCashierName: currentCashier?.name || ''
-      };
-      await db.ref(`orders/${orderId}`).update(updates);
-      Object.assign(order, updates);
-      refreshUI();
-    }
     let selectedProductsForCategory = [];
     let adminProductCategoryPath = [];
     let adminProductSearchTerm = '';
@@ -348,12 +288,7 @@
         address: 'العنوان',
         noAddressNow: 'بدون عنوان حالياً',
         addNewAddress: '➕ إضافة عنوان جديد',
-        confirm: 'تأكيد',
-        printInvoice: '🖨️ طباعة الفاتورة',
-        printing: 'جاري الطباعة...',
-        saveChanges: 'حفظ التعديلات',
-        delete: 'حذف',
-        close: 'إغلاق'
+        confirm: 'تأكيد'
       },
       en: {
         balance: 'Balance',
@@ -460,51 +395,13 @@
         address: 'Address',
         noAddressNow: 'No address for now',
         addNewAddress: '➕ Add new address',
-        confirm: 'Confirm',
-        printInvoice: '🖨️ Print Invoice',
-        printing: 'Printing...',
-        saveChanges: 'Save Changes',
-        delete: 'Delete',
-        close: 'Close'
+        confirm: 'Confirm'
       }
     };
 
     function cashierT(key) {
       return cashierTranslations[cashierLanguage]?.[key] || cashierTranslations.ar[key] || key;
     }
-
-    const cashierLegacyOriginalText = new WeakMap();
-    function applyCashierLegacyTranslations(root = document) {
-      const exact = new Map();
-      Object.keys(cashierTranslations.ar).forEach((key) => {
-        const ar = String(cashierTranslations.ar[key] || '').trim();
-        const en = cashierTranslations.en[key];
-        if (ar && en && !exact.has(ar)) exact.set(ar, en);
-      });
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      let node;
-      while ((node = walker.nextNode())) {
-        if (node.parentElement?.closest('script, style')) continue;
-        if (!cashierLegacyOriginalText.has(node)) cashierLegacyOriginalText.set(node, node.nodeValue || '');
-        const original = cashierLegacyOriginalText.get(node);
-        const trimmed = original.trim();
-        const translated = exact.get(trimmed);
-        node.nodeValue = cashierLanguage === 'en' && translated ? original.replace(trimmed, translated) : original;
-      }
-      document.documentElement.lang = cashierLanguage;
-      document.documentElement.dir = cashierLanguage === 'en' ? 'ltr' : 'rtl';
-    }
-
-    let cashierTranslationFramePending = false;
-    new MutationObserver(() => {
-      if (cashierTranslationFramePending) return;
-      cashierTranslationFramePending = true;
-      requestAnimationFrame(() => {
-        cashierTranslationFramePending = false;
-        applyCashierLegacyTranslations();
-      });
-    }).observe(document.body, { childList: true, subtree: true });
-    applyCashierLegacyTranslations();
 
     function cashierDisplayName(item) {
       if (!item) return '-';
@@ -522,7 +419,6 @@
       if (invoicePage) showInvoiceProductsPage();
       const shortagePage = document.getElementById('shortageDraftPage');
       if (shortagePage) renderShortageDraftPage();
-      applyCashierLegacyTranslations();
     }
 	    const INVENTORY_BRANCHES = [
 	      { id: 'main', name: 'الفرع الرئيسي' },
@@ -1011,21 +907,12 @@
 
     function formatDate(timestamp) {
       const date = new Date(timestamp);
-      return date.toLocaleDateString(cashierLanguage === 'en' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
-        calendar: 'gregory',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      });
+      return date.toLocaleDateString('ar-SA');
     }
 
     function formatTime(timestamp) {
       const date = new Date(timestamp);
-      return date.toLocaleTimeString(cashierLanguage === 'en' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
-        calendar: 'gregory',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
+      return date.toLocaleTimeString('ar-SA');
     }
 
     function showToast(message, isError = false) {
@@ -1493,121 +1380,67 @@
       return allProducts.filter(product => product.inventoryEnabled);
     }
 
-    const INVOICE_SEQUENCE_ROOT = 'invoiceSequenceV2';
-
-    function getInvoicePaddingLength(branch) {
+    // Generate invoice number based on branch
+    async function generateInvoiceNumber(branch) {
+      // Get branch counter from Firebase
+      const counterRef = db.ref('invoiceCounters/' + encodeURIComponent(branch));
+      const snapshot = await counterRef.once('value');
+      const currentCounter = (snapshot.val() || 0) + 1;
+      
+      // Update counter in Firebase
+      await counterRef.set(currentCounter);
+      
+      // Format based on branch
+      let prefix = '';
       let paddingLength = 0;
+      
       if (branch === 'الفرع الرئيسي') {
+        prefix = '0';
         paddingLength = 3; // Total 3 digits (e.g., 025)
       } else if (branch === 'اليرموك') {
+        prefix = '00';
         paddingLength = 4; // Total 4 digits (e.g., 0025)
       } else if (branch === 'أبو الحصانية') {
+        prefix = '000';
         paddingLength = 5; // Total 5 digits (e.g., 00025)
       } else if (branch === 'المخزن الرئيسي') {
+        prefix = '0000';
         paddingLength = 6; // Total 6 digits (e.g., 000025)
       } else {
+        // Default format
+        prefix = '0';
         paddingLength = 3;
       }
-      return paddingLength;
-    }
-
-    function getInvoiceSequenceRef(branch) {
-      return db.ref(`${INVOICE_SEQUENCE_ROOT}/${encodeURIComponent(branch)}`);
-    }
-
-    // Stable, atomic numbering. Each order ID keeps the same number on retries.
-    async function generateInvoiceNumber(branch, orderId = '') {
-      const legacySnapshot = await db.ref(`invoiceCounters/${encodeURIComponent(branch)}`).once('value');
-      const legacyCounter = Number(legacySnapshot.val()) || 0;
-      const sequenceRef = getInvoiceSequenceRef(branch);
-      const result = await sequenceRef.transaction(current => {
-        const state = current && typeof current === 'object' ? current : {};
-        state.assignments = state.assignments && typeof state.assignments === 'object' ? state.assignments : {};
-        if (orderId && Number(state.assignments[orderId]) > 0) return state;
-        const baseCounter = Number(state.counter) || legacyCounter;
-        const nextCounter = baseCounter + 1;
-        state.counter = nextCounter;
-        if (orderId) state.assignments[orderId] = nextCounter;
-        state.updatedAt = Date.now();
-        return state;
-      });
-      if (!result.committed) throw new Error('تعذر حجز رقم الفاتورة');
-      const state = result.snapshot.val() || {};
-      const assignedNumber = orderId ? Number(state.assignments?.[orderId]) : Number(state.counter);
-      if (!assignedNumber) throw new Error('تعذر قراءة رقم الفاتورة المحجوز');
-      return String(assignedNumber).padStart(getInvoicePaddingLength(branch), '0');
-    }
-
-    async function normalizeWhatsappInvoiceNumber(order) {
-      if (!order?.id || order.source !== 'whatsapp-ai' || !order.branch) return order;
-      const sequenceRef = getInvoiceSequenceRef(order.branch);
-      const sequenceSnapshot = await sequenceRef.once('value');
-      const sequence = sequenceSnapshot.val() || {};
-      const currentNumber = Number(order.invoiceNumber);
-      const assignedNumber = Number(sequence.assignments?.[order.id]);
-      const stableCounter = Number(sequence.counter) || 0;
-      if (!assignedNumber && (!currentNumber || currentNumber <= stableCounter)) return order;
-      if (assignedNumber && currentNumber === assignedNumber && order.invoiceSequenceVersion === 'v2') return order;
-
-      const stableInvoiceNumber = await generateInvoiceNumber(order.branch, order.id);
-      const updates = {
-        invoiceNumber: stableInvoiceNumber,
-        invoiceSequenceVersion: 'v2',
-        invoiceNumberBeforeNormalization: String(order.invoiceNumber || ''),
-        invoiceNumberNormalizedAt: Date.now()
-      };
-      await db.ref(`orders/${order.id}`).update(updates);
-      Object.assign(order, updates);
-      return order;
-    }
-
-    async function normalizePendingWhatsappInvoiceNumbers(orders = allOrders) {
-      const whatsappOrders = (Array.isArray(orders) ? orders : [])
-        .filter(order => order?.source === 'whatsapp-ai')
-        .sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
-      for (const order of whatsappOrders) {
-        await normalizeWhatsappInvoiceNumber(order);
-      }
+      
+      // Pad the number with zeros
+      const paddedNumber = currentCounter.toString().padStart(paddingLength, '0');
+      
+      return paddedNumber;
     }
 
     // 1. نظام المراقبة اللحظية
 function setupRealtimeListeners() {
   if (realtimeListenersStarted) return;
   realtimeListenersStarted = true;
-  whatsappOrderAlertStartedAt = Date.now();
-  normalizePendingWhatsappInvoiceNumbers(allOrders).catch(error => {
-    console.error('Unable to normalize existing WhatsApp invoice numbers:', error);
-  });
 
   // 1. مراقبة الطلبات
   const latestOrderTimestamp = allOrders.reduce((max, order) => Math.max(max, order.timestamp || 0), 0);
   const todayRange = getTodayOrdersRange();
   const ordersRef = db.ref('orders').orderByChild('timestamp').startAt(Math.max(latestOrderTimestamp + 1, todayRange.start));
 
-  ordersRef.on('child_added', async (snapshot) => {
-    let order = { id: snapshot.key, ...snapshot.val() };
-    try {
-      order = await normalizeWhatsappInvoiceNumber(order);
-    } catch (error) {
-      console.error('Unable to normalize new WhatsApp invoice number:', error);
-    }
+  ordersRef.on('child_added', (snapshot) => {
+    const order = { id: snapshot.key, ...snapshot.val() };
     const index = allOrders.findIndex(item => item.id === order.id);
     if (index >= 0) {
       allOrders[index] = order;
     } else {
       allOrders.push(order);
     }
-    alertNewWhatsappOrder(order);
     refreshUI();
   });
 
-  db.ref('orders').on('child_changed', async (snapshot) => {
-    let order = { id: snapshot.key, ...snapshot.val() };
-    try {
-      order = await normalizeWhatsappInvoiceNumber(order);
-    } catch (error) {
-      console.error('Unable to normalize changed WhatsApp invoice number:', error);
-    }
+  db.ref('orders').on('child_changed', (snapshot) => {
+    const order = { id: snapshot.key, ...snapshot.val() };
     const index = allOrders.findIndex(item => item.id === order.id);
     if (index >= 0) {
       allOrders[index] = order;
@@ -2423,7 +2256,7 @@ function refreshUI() {
                     <tbody>
   ${cashierPagedOrders.map(order => `
     <tr>
-      <td>${order.invoiceNumber}${whatsappPendingBadge(order)}</td>
+      <td>${order.invoiceNumber}</td>
       <td>${order.customerName}</td>
       <td>${formatDate(order.timestamp)} ${formatTime(order.timestamp)}</td>
       <td>${order.total.toFixed(3)} ${cashierT('kd')}</td>
@@ -3799,7 +3632,6 @@ function showNumericKeypadForInvoice(index, inputField) {
       if (method === 'cash') return withIcon ? '💵 كاش' : 'كاش';
       if (method === 'online') return withIcon ? '💳 أونلاين' : 'أونلاين';
       if (method === 'knet') return withIcon ? '💳 كي-نت' : 'كي-نت';
-      if (method === 'payment_link' || method === 'subscription') return withIcon ? '🔗 رابط دفع' : 'رابط دفع';
       return 'N/A';
     }
     
@@ -4592,9 +4424,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     
     async function printAndSaveInvoice() {
       // Invoice numbering follows the cashier branch; pickup branch is saved separately.
-      await normalizePendingWhatsappInvoiceNumbers(allOrders);
-      const orderId = generateId();
-      const invoiceNumber = await generateInvoiceNumber(currentBranch, orderId);
+      const invoiceNumber = await generateInvoiceNumber(currentBranch);
       const timestamp = Date.now();
       
       // Clean items to ensure all fields have valid values
@@ -4611,7 +4441,6 @@ function showNumericKeypadForInvoice(index, inputField) {
       
       const order = {
         invoiceNumber,
-        invoiceSequenceVersion: 'v2',
         timestamp,
         createdAt: timestamp,
         cashier: currentCashier.name || '',
@@ -4645,6 +4474,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       };
       
       try {
+        const orderId = generateId();
         await db.ref(`orders/${orderId}`).set({ ...order, id: orderId });
         await clearTableDraft(currentOrder);
         await loadData();
@@ -4667,7 +4497,7 @@ function showNumericKeypadForInvoice(index, inputField) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.innerHTML = `
-    <div class="modal-content p-0" data-order-id="${order.id || ''}" style="background: #f3f4f6; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;">
+    <div class="modal-content p-0" style="background: #f3f4f6; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;">
       <div style="overflow-y: auto; padding: 16px 16px 8px; min-height: 0;">
         <div class="thermal-invoice" style="width: 72mm; margin: 0 auto; padding: 10px; background: white; border-radius: 8px;">
         <div style="text-align: center; border-bottom: 2px dashed #000; padding-bottom: 10px; margin-bottom: 10px;">
@@ -4801,10 +4631,10 @@ function showNumericKeypadForInvoice(index, inputField) {
       
       <div class="flex gap-2" style="padding: 12px 16px 16px; background: #f3f4f6; border-top: 1px solid #e5e7eb; flex-shrink: 0;">
         <button onclick="printThermalInvoice(this)" style="flex: 2; background: #2563eb; color: white; padding: 12px; border-radius: 8px; font-weight: bold; border: none; cursor: pointer;">
-          ${cashierT('printInvoice')}
+          🖨️ طباعة الفاتورة
         </button>
         <button onclick="this.closest('.modal-overlay').remove();" style="flex: 1; background: #e5e7eb; color: #374151; padding: 12px; border-radius: 8px; font-weight: bold; border: none; cursor: pointer;">
-          ${cashierT('cancel')}
+          إلغاء
         </button>
       </div>
     </div>
@@ -4813,30 +4643,7 @@ function showNumericKeypadForInvoice(index, inputField) {
 }
 
 
-    let cachedInvoiceLogoDataUrl = '';
-
-    async function getInvoiceLogoDataUrl() {
-      if (cachedInvoiceLogoDataUrl) return cachedInvoiceLogoDataUrl;
-      try {
-        const response = await fetch(new URL('logo.png', window.location.href).href);
-        if (!response.ok) throw new Error(`Logo request failed: ${response.status}`);
-        const blob = await response.blob();
-        cachedInvoiceLogoDataUrl = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result || ''));
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-      } catch (error) {
-        console.error('Unable to embed invoice logo:', error);
-      }
-      return cachedInvoiceLogoDataUrl;
-    }
-
-    function buildThermalInvoicePrintHtml(invoiceContent, logoDataUrl = '') {
-      const printableContent = logoDataUrl
-        ? invoiceContent.replace(/src=["']logo\.png["']/i, `src="${logoDataUrl}"`)
-        : invoiceContent;
+    function buildThermalInvoicePrintHtml(invoiceContent) {
       return `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
@@ -4918,7 +4725,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     </head>
     <body>
       <div class="thermal-invoice">
-        ${printableContent}
+        ${invoiceContent}
       </div>
     </body>
     </html>
@@ -4926,18 +4733,15 @@ function showNumericKeypadForInvoice(index, inputField) {
     }
 
     async function printThermalInvoice(button) {
-  const orderId = button.closest('.modal-content')?.dataset.orderId || '';
   const invoiceContent = button.closest('.modal-content').querySelector('.thermal-invoice').innerHTML;
-  const logoDataUrl = await getInvoiceLogoDataUrl();
-  const printHtml = buildThermalInvoicePrintHtml(invoiceContent, logoDataUrl);
+  const printHtml = buildThermalInvoicePrintHtml(invoiceContent);
 
   if (window.figsDesktop?.isDesktopApp) {
     const originalText = button.innerHTML;
     button.disabled = true;
-    button.innerHTML = cashierT('printing');
+    button.innerHTML = 'جاري الطباعة...';
     try {
       await window.figsDesktop.printHtml({ html: printHtml, type: 'receipt', silent: true });
-      await markWhatsappOrderPrinted(orderId);
       button.closest('.modal-overlay')?.remove();
       showToast('تم إرسال الفاتورة للطابعة');
       return;
@@ -4964,7 +4768,6 @@ function showNumericKeypadForInvoice(index, inputField) {
       <\/script>
     </body>`));
   printWindow.document.close();
-  await markWhatsappOrderPrinted(orderId);
 }
 
     async function updateOrderCourierName(orderId, courierName) {
@@ -5866,7 +5669,7 @@ function renderAccountingContent(section) {
         ['التاريخ', 'اسم المنتج عربي', 'اسم المنتج إنجليزي', 'سعره سابقاً', 'سعره بعد التعديل', 'القيمة المضافة'],
         htmlRows
       );
-      const today = new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-');
+      const today = new Date().toLocaleDateString('ar-SA').replace(/\//g, '-');
       downloadExcelHtml(excelHtml, `تقرير_الزيادة_والتخفيض_${today}.xls`);
       showToast('تم تحميل تقرير الزيادة والتخفيض (Excel)');
     }
@@ -6113,7 +5916,7 @@ function renderAccountingContent(section) {
     function buildOrderTableRow(order) {
       return `
         <tr class="order-row" data-order-id="${order.id || ''}" data-search="${escapeHtml(`${order.invoiceNumber || ''} ${order.customerName || ''} ${order.phoneNumber || ''}`)}" data-cashier="${escapeHtml(order.cashierCode || '')}" data-branch="${escapeHtml(order.branch || '')}" data-timestamp="${order.timestamp || 0}">
-          <td>${order.invoiceNumber || 'N/A'}${whatsappPendingBadge(order)}</td>
+          <td>${order.invoiceNumber || 'N/A'}</td>
           <td>${escapeHtml(order.customerName || 'N/A')}</td>
           <td>${escapeHtml(order.phoneNumber || 'N/A')}</td>
           <td>${formatDate(order.timestamp)}</td>
@@ -6542,7 +6345,7 @@ function renderAccountingContent(section) {
   });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `تقرير_الطلبات_${new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-')}.xls`;
+  link.download = `تقرير_الطلبات_${new Date().toLocaleDateString('ar-SA').replace(/\//g, '-')}.xls`;
   link.click();
   
   showToast('تم تحميل ملف Excel بنجاح');
@@ -7586,7 +7389,7 @@ function renderAccountingContent(section) {
       }
 
       const excelHtml = buildExcelHtml(headers, rowsHtml, totalRow);
-      const today = new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-');
+      const today = new Date().toLocaleDateString('ar-SA').replace(/\//g, '-');
       downloadExcelHtml(excelHtml, `تقرير_المبيعات_${today}.xls`);
       showToast('تم تحميل تقرير المبيعات (Excel)');
     }
@@ -7610,7 +7413,7 @@ function renderAccountingContent(section) {
       `).join('');
 
       const excelHtml = buildExcelHtml(headers, rowsHtml);
-      const today = new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-');
+      const today = new Date().toLocaleDateString('ar-SA').replace(/\//g, '-');
       const productCode = salesReportCurrentDetailProduct?.nameAr || salesReportSelectedProduct?.nameAr || 'منتج';
       downloadExcelHtml(excelHtml, `تفاصيل_تقرير_المبيعات_${productCode}_${salesReportCurrentBranch}_${today}.xls`);
       showToast('تم تحميل تفاصيل التقرير (Excel)');

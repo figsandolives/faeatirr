@@ -140,7 +140,14 @@
       if (!orderId) return;
       const order = allOrders.find(item => item.id === orderId);
       if (!isPendingWhatsappOrder(order)) return;
-      const updates = { printStatus: 'printed', isPrinted: true, needsCashierAttention: false, printedAt: Date.now() };
+      const employeeName = currentCashier?.name ? `${currentCashier.name} (chatBot)` : 'chatBot';
+      const updates = {
+        printStatus: 'printed', isPrinted: true, needsCashierAttention: false, printedAt: Date.now(),
+        cashier: employeeName,
+        cashierCode: currentCashier?.code || order.cashierCode || 'WA',
+        printedByCashierId: currentCashier?.id || '',
+        printedByCashierName: currentCashier?.name || ''
+      };
       await db.ref(`orders/${orderId}`).update(updates);
       Object.assign(order, updates);
       refreshUI();
@@ -1486,42 +1493,81 @@
       return allProducts.filter(product => product.inventoryEnabled);
     }
 
-    // Generate invoice number based on branch
-    async function generateInvoiceNumber(branch) {
-      // Get branch counter from Firebase
-      const counterRef = db.ref('invoiceCounters/' + encodeURIComponent(branch));
-      const snapshot = await counterRef.once('value');
-      const currentCounter = (snapshot.val() || 0) + 1;
-      
-      // Update counter in Firebase
-      await counterRef.set(currentCounter);
-      
-      // Format based on branch
-      let prefix = '';
+    const INVOICE_SEQUENCE_ROOT = 'invoiceSequenceV2';
+
+    function getInvoicePaddingLength(branch) {
       let paddingLength = 0;
-      
       if (branch === 'الفرع الرئيسي') {
-        prefix = '0';
         paddingLength = 3; // Total 3 digits (e.g., 025)
       } else if (branch === 'اليرموك') {
-        prefix = '00';
         paddingLength = 4; // Total 4 digits (e.g., 0025)
       } else if (branch === 'أبو الحصانية') {
-        prefix = '000';
         paddingLength = 5; // Total 5 digits (e.g., 00025)
       } else if (branch === 'المخزن الرئيسي') {
-        prefix = '0000';
         paddingLength = 6; // Total 6 digits (e.g., 000025)
       } else {
-        // Default format
-        prefix = '0';
         paddingLength = 3;
       }
-      
-      // Pad the number with zeros
-      const paddedNumber = currentCounter.toString().padStart(paddingLength, '0');
-      
-      return paddedNumber;
+      return paddingLength;
+    }
+
+    function getInvoiceSequenceRef(branch) {
+      return db.ref(`${INVOICE_SEQUENCE_ROOT}/${encodeURIComponent(branch)}`);
+    }
+
+    // Stable, atomic numbering. Each order ID keeps the same number on retries.
+    async function generateInvoiceNumber(branch, orderId = '') {
+      const legacySnapshot = await db.ref(`invoiceCounters/${encodeURIComponent(branch)}`).once('value');
+      const legacyCounter = Number(legacySnapshot.val()) || 0;
+      const sequenceRef = getInvoiceSequenceRef(branch);
+      const result = await sequenceRef.transaction(current => {
+        const state = current && typeof current === 'object' ? current : {};
+        state.assignments = state.assignments && typeof state.assignments === 'object' ? state.assignments : {};
+        if (orderId && Number(state.assignments[orderId]) > 0) return state;
+        const baseCounter = Number(state.counter) || legacyCounter;
+        const nextCounter = baseCounter + 1;
+        state.counter = nextCounter;
+        if (orderId) state.assignments[orderId] = nextCounter;
+        state.updatedAt = Date.now();
+        return state;
+      });
+      if (!result.committed) throw new Error('تعذر حجز رقم الفاتورة');
+      const state = result.snapshot.val() || {};
+      const assignedNumber = orderId ? Number(state.assignments?.[orderId]) : Number(state.counter);
+      if (!assignedNumber) throw new Error('تعذر قراءة رقم الفاتورة المحجوز');
+      return String(assignedNumber).padStart(getInvoicePaddingLength(branch), '0');
+    }
+
+    async function normalizeWhatsappInvoiceNumber(order) {
+      if (!order?.id || order.source !== 'whatsapp-ai' || !order.branch) return order;
+      const sequenceRef = getInvoiceSequenceRef(order.branch);
+      const sequenceSnapshot = await sequenceRef.once('value');
+      const sequence = sequenceSnapshot.val() || {};
+      const currentNumber = Number(order.invoiceNumber);
+      const assignedNumber = Number(sequence.assignments?.[order.id]);
+      const stableCounter = Number(sequence.counter) || 0;
+      if (!assignedNumber && (!currentNumber || currentNumber <= stableCounter)) return order;
+      if (assignedNumber && currentNumber === assignedNumber && order.invoiceSequenceVersion === 'v2') return order;
+
+      const stableInvoiceNumber = await generateInvoiceNumber(order.branch, order.id);
+      const updates = {
+        invoiceNumber: stableInvoiceNumber,
+        invoiceSequenceVersion: 'v2',
+        invoiceNumberBeforeNormalization: String(order.invoiceNumber || ''),
+        invoiceNumberNormalizedAt: Date.now()
+      };
+      await db.ref(`orders/${order.id}`).update(updates);
+      Object.assign(order, updates);
+      return order;
+    }
+
+    async function normalizePendingWhatsappInvoiceNumbers(orders = allOrders) {
+      const whatsappOrders = (Array.isArray(orders) ? orders : [])
+        .filter(order => order?.source === 'whatsapp-ai')
+        .sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+      for (const order of whatsappOrders) {
+        await normalizeWhatsappInvoiceNumber(order);
+      }
     }
 
     // 1. نظام المراقبة اللحظية
@@ -1529,14 +1575,22 @@ function setupRealtimeListeners() {
   if (realtimeListenersStarted) return;
   realtimeListenersStarted = true;
   whatsappOrderAlertStartedAt = Date.now();
+  normalizePendingWhatsappInvoiceNumbers(allOrders).catch(error => {
+    console.error('Unable to normalize existing WhatsApp invoice numbers:', error);
+  });
 
   // 1. مراقبة الطلبات
   const latestOrderTimestamp = allOrders.reduce((max, order) => Math.max(max, order.timestamp || 0), 0);
   const todayRange = getTodayOrdersRange();
   const ordersRef = db.ref('orders').orderByChild('timestamp').startAt(Math.max(latestOrderTimestamp + 1, todayRange.start));
 
-  ordersRef.on('child_added', (snapshot) => {
-    const order = { id: snapshot.key, ...snapshot.val() };
+  ordersRef.on('child_added', async (snapshot) => {
+    let order = { id: snapshot.key, ...snapshot.val() };
+    try {
+      order = await normalizeWhatsappInvoiceNumber(order);
+    } catch (error) {
+      console.error('Unable to normalize new WhatsApp invoice number:', error);
+    }
     const index = allOrders.findIndex(item => item.id === order.id);
     if (index >= 0) {
       allOrders[index] = order;
@@ -1547,8 +1601,13 @@ function setupRealtimeListeners() {
     refreshUI();
   });
 
-  db.ref('orders').on('child_changed', (snapshot) => {
-    const order = { id: snapshot.key, ...snapshot.val() };
+  db.ref('orders').on('child_changed', async (snapshot) => {
+    let order = { id: snapshot.key, ...snapshot.val() };
+    try {
+      order = await normalizeWhatsappInvoiceNumber(order);
+    } catch (error) {
+      console.error('Unable to normalize changed WhatsApp invoice number:', error);
+    }
     const index = allOrders.findIndex(item => item.id === order.id);
     if (index >= 0) {
       allOrders[index] = order;
@@ -3740,6 +3799,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       if (method === 'cash') return withIcon ? '💵 كاش' : 'كاش';
       if (method === 'online') return withIcon ? '💳 أونلاين' : 'أونلاين';
       if (method === 'knet') return withIcon ? '💳 كي-نت' : 'كي-نت';
+      if (method === 'payment_link' || method === 'subscription') return withIcon ? '🔗 رابط دفع' : 'رابط دفع';
       return 'N/A';
     }
     
@@ -4532,7 +4592,9 @@ function showNumericKeypadForInvoice(index, inputField) {
     
     async function printAndSaveInvoice() {
       // Invoice numbering follows the cashier branch; pickup branch is saved separately.
-      const invoiceNumber = await generateInvoiceNumber(currentBranch);
+      await normalizePendingWhatsappInvoiceNumbers(allOrders);
+      const orderId = generateId();
+      const invoiceNumber = await generateInvoiceNumber(currentBranch, orderId);
       const timestamp = Date.now();
       
       // Clean items to ensure all fields have valid values
@@ -4549,6 +4611,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       
       const order = {
         invoiceNumber,
+        invoiceSequenceVersion: 'v2',
         timestamp,
         createdAt: timestamp,
         cashier: currentCashier.name || '',
@@ -4582,7 +4645,6 @@ function showNumericKeypadForInvoice(index, inputField) {
       };
       
       try {
-        const orderId = generateId();
         await db.ref(`orders/${orderId}`).set({ ...order, id: orderId });
         await clearTableDraft(currentOrder);
         await loadData();

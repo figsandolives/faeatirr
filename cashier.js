@@ -92,6 +92,7 @@
     }
 
     let currentOrder = createEmptyCurrentOrder();
+    let invoiceSaveInProgress = false;
     let selectedProductsForCategory = [];
     let adminProductCategoryPath = [];
     let adminProductSearchTerm = '';
@@ -1380,35 +1381,29 @@
       return allProducts.filter(product => product.inventoryEnabled);
     }
 
-    // Generate invoice number based on branch
+    // Reserve one invoice number atomically so simultaneous cashier sessions
+    // cannot read the same value or overwrite each other's increment.
     async function generateInvoiceNumber(branch) {
-      // Get branch counter from Firebase
       const counterRef = db.ref('invoiceCounters/' + encodeURIComponent(branch));
-      const snapshot = await counterRef.once('value');
-      const currentCounter = (snapshot.val() || 0) + 1;
-      
-      // Update counter in Firebase
-      await counterRef.set(currentCounter);
+      const result = await counterRef.transaction(current => (Number(current) || 0) + 1);
+      if (!result.committed) throw new Error('تعذر حجز رقم الفاتورة');
+      const currentCounter = Number(result.snapshot.val());
+      if (!Number.isFinite(currentCounter) || currentCounter < 1) {
+        throw new Error('رقم الفاتورة المحجوز غير صالح');
+      }
       
       // Format based on branch
-      let prefix = '';
       let paddingLength = 0;
       
       if (branch === 'الفرع الرئيسي') {
-        prefix = '0';
         paddingLength = 3; // Total 3 digits (e.g., 025)
       } else if (branch === 'اليرموك') {
-        prefix = '00';
         paddingLength = 4; // Total 4 digits (e.g., 0025)
       } else if (branch === 'أبو الحصانية') {
-        prefix = '000';
         paddingLength = 5; // Total 5 digits (e.g., 00025)
       } else if (branch === 'المخزن الرئيسي') {
-        prefix = '0000';
         paddingLength = 6; // Total 6 digits (e.g., 000025)
       } else {
-        // Default format
-        prefix = '0';
         paddingLength = 3;
       }
       
@@ -4423,57 +4418,61 @@ function showNumericKeypadForInvoice(index, inputField) {
     }
     
     async function printAndSaveInvoice() {
-      // Invoice numbering follows the cashier branch; pickup branch is saved separately.
-      const invoiceNumber = await generateInvoiceNumber(currentBranch);
-      const timestamp = Date.now();
-      
-      // Clean items to ensure all fields have valid values
-      const cleanedItems = currentOrder.items.map(item => ({
-        productId: item.productId || '',
-        productName: item.productName || '',
-        productNameEn: item.productNameEn || '', 
-        price: item.price || 0,
-        quantity: item.quantity || 0,
-        total: item.total || 0,
-        unit: item.unit || '',
-        notes: item.notes || ''
-      }));
-      
-      const order = {
-        invoiceNumber,
-        timestamp,
-        createdAt: timestamp,
-        cashier: currentCashier.name || '',
-        cashierCode: currentCashier.code || '',
-        branch: currentBranch || '',
-        branchId: currentOrder.tableBranchId || getCurrentCashierBranchId() || '',
-        dailySessionId: currentBranch === 'اليرموك' && currentDailySession ? currentDailySession.id : '',
-        customerName: currentOrder.customer.name || '',
-        phoneNumber: currentOrder.customer.phone || '',
-        orderType: currentOrder.orderType || '',
-        paymentMethod: currentOrder.paymentMethod || '',
-        pickupBranch: currentOrder.pickupBranch || '',
-        address: currentOrder.orderType === 'delivery' && currentOrder.selectedAddress
-          ? `${currentOrder.selectedAddress.area || ''}${currentOrder.selectedAddress.details ? ` - ${currentOrder.selectedAddress.details}` : ''}`.trim()
-          : '',
-        deliveryDate: currentOrder.deliveryDate || '',
-        deliveryTimeFrom: currentOrder.deliveryTimeFrom || '',
-        deliveryTimeTo: currentOrder.deliveryTimeTo || '',
-        items: cleanedItems,
-        deliveryPrice: currentOrder.deliveryPrice || 0,
-        cashReceived: currentOrder.cashReceived || 0,
-        cashChange: currentOrder.cashChange || 0,
-        notes: currentOrder.notes || '',
-        tableId: currentOrder.tableId || '',
-        tableNumber: currentOrder.tableNumber || '',
-        tableBranchId: currentOrder.tableBranchId || '',
-        tableLocation: currentOrder.tableLocation || '',
-        tableOpenedAt: currentOrder.tableOpenedAt || '',
-        tableClosedAt: currentOrder.tableNumber ? timestamp : '',
-        total: currentOrder.items.reduce((sum, item) => sum + item.total, 0) + (currentOrder.deliveryPrice || 0)
-      };
-      
+      if (invoiceSaveInProgress) {
+        showToast('جاري حفظ الفاتورة، يرجى الانتظار');
+        return;
+      }
+      invoiceSaveInProgress = true;
       try {
+        // Invoice numbering follows the cashier branch; pickup branch is saved separately.
+        const invoiceNumber = await generateInvoiceNumber(currentBranch);
+        const timestamp = Date.now();
+
+        const cleanedItems = currentOrder.items.map(item => ({
+          productId: item.productId || '',
+          productName: item.productName || '',
+          productNameEn: item.productNameEn || '',
+          price: item.price || 0,
+          quantity: item.quantity || 0,
+          total: item.total || 0,
+          unit: item.unit || '',
+          notes: item.notes || ''
+        }));
+
+        const order = {
+          invoiceNumber,
+          timestamp,
+          createdAt: timestamp,
+          cashier: currentCashier.name || '',
+          cashierCode: currentCashier.code || '',
+          branch: currentBranch || '',
+          branchId: currentOrder.tableBranchId || getCurrentCashierBranchId() || '',
+          dailySessionId: currentBranch === 'اليرموك' && currentDailySession ? currentDailySession.id : '',
+          customerName: currentOrder.customer.name || '',
+          phoneNumber: currentOrder.customer.phone || '',
+          orderType: currentOrder.orderType || '',
+          paymentMethod: currentOrder.paymentMethod || '',
+          pickupBranch: currentOrder.pickupBranch || '',
+          address: currentOrder.orderType === 'delivery' && currentOrder.selectedAddress
+            ? `${currentOrder.selectedAddress.area || ''}${currentOrder.selectedAddress.details ? ` - ${currentOrder.selectedAddress.details}` : ''}`.trim()
+            : '',
+          deliveryDate: currentOrder.deliveryDate || '',
+          deliveryTimeFrom: currentOrder.deliveryTimeFrom || '',
+          deliveryTimeTo: currentOrder.deliveryTimeTo || '',
+          items: cleanedItems,
+          deliveryPrice: currentOrder.deliveryPrice || 0,
+          cashReceived: currentOrder.cashReceived || 0,
+          cashChange: currentOrder.cashChange || 0,
+          notes: currentOrder.notes || '',
+          tableId: currentOrder.tableId || '',
+          tableNumber: currentOrder.tableNumber || '',
+          tableBranchId: currentOrder.tableBranchId || '',
+          tableLocation: currentOrder.tableLocation || '',
+          tableOpenedAt: currentOrder.tableOpenedAt || '',
+          tableClosedAt: currentOrder.tableNumber ? timestamp : '',
+          total: currentOrder.items.reduce((sum, item) => sum + item.total, 0) + (currentOrder.deliveryPrice || 0)
+        };
+
         const orderId = generateId();
         await db.ref(`orders/${orderId}`).set({ ...order, id: orderId });
         await clearTableDraft(currentOrder);
@@ -4485,6 +4484,8 @@ function showNumericKeypadForInvoice(index, inputField) {
       } catch (error) {
         console.error('Error saving order:', error);
         showToast('خطأ في حفظ الفاتورة', true);
+      } finally {
+        invoiceSaveInProgress = false;
       }
     }
     

@@ -1515,25 +1515,59 @@
       return db.ref(`${INVOICE_SEQUENCE_ROOT}/${encodeURIComponent(branch)}`);
     }
 
-    // Stable, atomic numbering. Each order ID keeps the same number on retries.
+    function getLegacyInvoiceCounterRef(branch) {
+      return db.ref(`invoiceCounters/${encodeURIComponent(branch)}`);
+    }
+
+    function getUnencodedInvoiceSequenceRef(branch) {
+      return db.ref(`${INVOICE_SEQUENCE_ROOT}/${branch}`);
+    }
+
+    // The legacy counter is the single atomic allocator because older cashier
+    // versions still use it. V2 only stores stable order assignments. Seeding the
+    // allocator from both encoded/unencoded V2 keys prevents a stale sequence from
+    // ever moving invoice numbers backwards during migrations or cached releases.
     async function generateInvoiceNumber(branch, orderId = '') {
-      const legacySnapshot = await db.ref(`invoiceCounters/${encodeURIComponent(branch)}`).once('value');
-      const legacyCounter = Number(legacySnapshot.val()) || 0;
       const sequenceRef = getInvoiceSequenceRef(branch);
-      const result = await sequenceRef.transaction(current => {
+      const unencodedSequenceRef = getUnencodedInvoiceSequenceRef(branch);
+      const legacyCounterRef = getLegacyInvoiceCounterRef(branch);
+      const [sequenceSnapshot, unencodedSequenceSnapshot] = await Promise.all([
+        sequenceRef.once('value'),
+        unencodedSequenceRef.once('value')
+      ]);
+      const sequence = sequenceSnapshot.val() || {};
+      const unencodedSequence = unencodedSequenceSnapshot.val() || {};
+      const existingAssignment = Number(sequence.assignments?.[orderId]) ||
+        Number(unencodedSequence.assignments?.[orderId]) || 0;
+      if (orderId && existingAssignment > 0) {
+        return String(existingAssignment).padStart(getInvoicePaddingLength(branch), '0');
+      }
+
+      const highestKnownSequence = Math.max(
+        Number(sequence.counter) || 0,
+        Number(unencodedSequence.counter) || 0
+      );
+      const counterResult = await legacyCounterRef.transaction(current =>
+        Math.max(Number(current) || 0, highestKnownSequence) + 1
+      );
+      if (!counterResult.committed) throw new Error('تعذر حجز رقم الفاتورة');
+      const allocatedNumber = Number(counterResult.snapshot.val());
+      if (!allocatedNumber) throw new Error('تعذر قراءة رقم الفاتورة المحجوز');
+
+      const sequenceResult = await sequenceRef.transaction(current => {
         const state = current && typeof current === 'object' ? current : {};
         state.assignments = state.assignments && typeof state.assignments === 'object' ? state.assignments : {};
         if (orderId && Number(state.assignments[orderId]) > 0) return state;
-        const baseCounter = Number(state.counter) || legacyCounter;
-        const nextCounter = baseCounter + 1;
-        state.counter = nextCounter;
-        if (orderId) state.assignments[orderId] = nextCounter;
+        state.counter = Math.max(Number(state.counter) || 0, allocatedNumber);
+        if (orderId) state.assignments[orderId] = allocatedNumber;
         state.updatedAt = Date.now();
         return state;
       });
-      if (!result.committed) throw new Error('تعذر حجز رقم الفاتورة');
-      const state = result.snapshot.val() || {};
-      const assignedNumber = orderId ? Number(state.assignments?.[orderId]) : Number(state.counter);
+      if (!sequenceResult.committed) throw new Error('تعذر حفظ رقم الفاتورة');
+      const savedSequence = sequenceResult.snapshot.val() || {};
+      const assignedNumber = orderId
+        ? Number(savedSequence.assignments?.[orderId])
+        : allocatedNumber;
       if (!assignedNumber) throw new Error('تعذر قراءة رقم الفاتورة المحجوز');
       return String(assignedNumber).padStart(getInvoicePaddingLength(branch), '0');
     }

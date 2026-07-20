@@ -4693,7 +4693,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       }
 
       return `
-        <div style="font-size: 17px; font-weight: bold; margin-bottom: 5px;">شركة صحي ولذيذ للتجهيزات الغذائية</div>
+        <div style="font-size: 17px; font-weight: bold; margin-bottom: 5px;">صحي ولذيذ للتجهيزات الغذائية</div>
         <div style="font-size: 8px; line-height: 1.4;">
           الكويت، حولي، شارع تونس، مجمع علي فهد الخالد، دور الميزانين<br>
           66906605 | 22085888

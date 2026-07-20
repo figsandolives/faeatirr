@@ -92,7 +92,66 @@
     }
 
     let currentOrder = createEmptyCurrentOrder();
-    let invoiceSaveInProgress = false;
+    let whatsappOrderAlertStartedAt = 0;
+    const alertedWhatsappOrderIds = new Set();
+
+    function isPendingWhatsappOrder(order) {
+      return order?.source === 'whatsapp-ai' && order?.printStatus !== 'printed' && order?.isPrinted !== true;
+    }
+
+    function whatsappPendingBadge(order) {
+      return isPendingWhatsappOrder(order)
+        ? '<span title="طلب واتساب جديد غير مطبوع" style="display:inline-flex;align-items:center;gap:5px;margin-inline-start:7px;padding:3px 8px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:11px;font-weight:800;"><span style="width:9px;height:9px;border-radius:50%;background:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.18);"></span>جديد غير مطبوع</span>'
+        : '';
+    }
+
+    function playNewWhatsappOrderSound() {
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        const context = new AudioContextClass();
+        const playTone = (frequency, start, duration) => {
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          oscillator.type = 'sine';
+          oscillator.frequency.value = frequency;
+          gain.gain.setValueAtTime(0.001, context.currentTime + start);
+          gain.gain.exponentialRampToValueAtTime(0.28, context.currentTime + start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + start + duration);
+          oscillator.connect(gain); gain.connect(context.destination);
+          oscillator.start(context.currentTime + start); oscillator.stop(context.currentTime + start + duration + 0.03);
+        };
+        playTone(880, 0, 0.22); playTone(1175, 0.28, 0.28);
+        setTimeout(() => context.close().catch(() => {}), 1000);
+      } catch (error) {
+        console.warn('Unable to play WhatsApp order sound:', error);
+      }
+    }
+
+    function alertNewWhatsappOrder(order) {
+      if (!isPendingWhatsappOrder(order) || alertedWhatsappOrderIds.has(order.id)) return;
+      if ((Number(order.timestamp) || 0) < whatsappOrderAlertStartedAt - 5000) return;
+      alertedWhatsappOrderIds.add(order.id);
+      playNewWhatsappOrderSound();
+      showToast(`🔴 طلب واتساب جديد غير مطبوع: #${order.invoiceNumber || order.id}`);
+    }
+
+    async function markWhatsappOrderPrinted(orderId) {
+      if (!orderId) return;
+      const order = allOrders.find(item => item.id === orderId);
+      if (!isPendingWhatsappOrder(order)) return;
+      const employeeName = currentCashier?.name ? `${currentCashier.name} (chatBot)` : 'chatBot';
+      const updates = {
+        printStatus: 'printed', isPrinted: true, needsCashierAttention: false, printedAt: Date.now(),
+        cashier: employeeName,
+        cashierCode: currentCashier?.code || order.cashierCode || 'WA',
+        printedByCashierId: currentCashier?.id || '',
+        printedByCashierName: currentCashier?.name || ''
+      };
+      await db.ref(`orders/${orderId}`).update(updates);
+      Object.assign(order, updates);
+      refreshUI();
+    }
     let selectedProductsForCategory = [];
     let adminProductCategoryPath = [];
     let adminProductSearchTerm = '';
@@ -289,7 +348,12 @@
         address: 'العنوان',
         noAddressNow: 'بدون عنوان حالياً',
         addNewAddress: '➕ إضافة عنوان جديد',
-        confirm: 'تأكيد'
+        confirm: 'تأكيد',
+        printInvoice: '🖨️ طباعة الفاتورة',
+        printing: 'جاري الطباعة...',
+        saveChanges: 'حفظ التعديلات',
+        delete: 'حذف',
+        close: 'إغلاق'
       },
       en: {
         balance: 'Balance',
@@ -396,13 +460,51 @@
         address: 'Address',
         noAddressNow: 'No address for now',
         addNewAddress: '➕ Add new address',
-        confirm: 'Confirm'
+        confirm: 'Confirm',
+        printInvoice: '🖨️ Print Invoice',
+        printing: 'Printing...',
+        saveChanges: 'Save Changes',
+        delete: 'Delete',
+        close: 'Close'
       }
     };
 
     function cashierT(key) {
       return cashierTranslations[cashierLanguage]?.[key] || cashierTranslations.ar[key] || key;
     }
+
+    const cashierLegacyOriginalText = new WeakMap();
+    function applyCashierLegacyTranslations(root = document) {
+      const exact = new Map();
+      Object.keys(cashierTranslations.ar).forEach((key) => {
+        const ar = String(cashierTranslations.ar[key] || '').trim();
+        const en = cashierTranslations.en[key];
+        if (ar && en && !exact.has(ar)) exact.set(ar, en);
+      });
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.parentElement?.closest('script, style')) continue;
+        if (!cashierLegacyOriginalText.has(node)) cashierLegacyOriginalText.set(node, node.nodeValue || '');
+        const original = cashierLegacyOriginalText.get(node);
+        const trimmed = original.trim();
+        const translated = exact.get(trimmed);
+        node.nodeValue = cashierLanguage === 'en' && translated ? original.replace(trimmed, translated) : original;
+      }
+      document.documentElement.lang = cashierLanguage;
+      document.documentElement.dir = cashierLanguage === 'en' ? 'ltr' : 'rtl';
+    }
+
+    let cashierTranslationFramePending = false;
+    new MutationObserver(() => {
+      if (cashierTranslationFramePending) return;
+      cashierTranslationFramePending = true;
+      requestAnimationFrame(() => {
+        cashierTranslationFramePending = false;
+        applyCashierLegacyTranslations();
+      });
+    }).observe(document.body, { childList: true, subtree: true });
+    applyCashierLegacyTranslations();
 
     function cashierDisplayName(item) {
       if (!item) return '-';
@@ -420,6 +522,7 @@
       if (invoicePage) showInvoiceProductsPage();
       const shortagePage = document.getElementById('shortageDraftPage');
       if (shortagePage) renderShortageDraftPage();
+      applyCashierLegacyTranslations();
     }
 	    const INVENTORY_BRANCHES = [
 	      { id: 'main', name: 'الفرع الرئيسي' },
@@ -908,12 +1011,21 @@
 
     function formatDate(timestamp) {
       const date = new Date(timestamp);
-      return date.toLocaleDateString('ar-SA');
+      return date.toLocaleDateString(cashierLanguage === 'en' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
+        calendar: 'gregory',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
     }
 
     function formatTime(timestamp) {
       const date = new Date(timestamp);
-      return date.toLocaleTimeString('ar-SA');
+      return date.toLocaleTimeString(cashierLanguage === 'en' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
+        calendar: 'gregory',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
     }
 
     function showToast(message, isError = false) {
@@ -1381,20 +1493,10 @@
       return allProducts.filter(product => product.inventoryEnabled);
     }
 
-    // Reserve one invoice number atomically so simultaneous cashier sessions
-    // cannot read the same value or overwrite each other's increment.
-    async function generateInvoiceNumber(branch) {
-      const counterRef = db.ref('invoiceCounters/' + encodeURIComponent(branch));
-      const result = await counterRef.transaction(current => (Number(current) || 0) + 1);
-      if (!result.committed) throw new Error('تعذر حجز رقم الفاتورة');
-      const currentCounter = Number(result.snapshot.val());
-      if (!Number.isFinite(currentCounter) || currentCounter < 1) {
-        throw new Error('رقم الفاتورة المحجوز غير صالح');
-      }
-      
-      // Format based on branch
+    const INVOICE_SEQUENCE_ROOT = 'invoiceSequenceV2';
+
+    function getInvoicePaddingLength(branch) {
       let paddingLength = 0;
-      
       if (branch === 'الفرع الرئيسي') {
         paddingLength = 3; // Total 3 digits (e.g., 025)
       } else if (branch === 'اليرموك') {
@@ -1406,36 +1508,106 @@
       } else {
         paddingLength = 3;
       }
-      
-      // Pad the number with zeros
-      const paddedNumber = currentCounter.toString().padStart(paddingLength, '0');
-      
-      return paddedNumber;
+      return paddingLength;
+    }
+
+    function getInvoiceSequenceRef(branch) {
+      return db.ref(`${INVOICE_SEQUENCE_ROOT}/${encodeURIComponent(branch)}`);
+    }
+
+    // Stable, atomic numbering. Each order ID keeps the same number on retries.
+    async function generateInvoiceNumber(branch, orderId = '') {
+      const legacySnapshot = await db.ref(`invoiceCounters/${encodeURIComponent(branch)}`).once('value');
+      const legacyCounter = Number(legacySnapshot.val()) || 0;
+      const sequenceRef = getInvoiceSequenceRef(branch);
+      const result = await sequenceRef.transaction(current => {
+        const state = current && typeof current === 'object' ? current : {};
+        state.assignments = state.assignments && typeof state.assignments === 'object' ? state.assignments : {};
+        if (orderId && Number(state.assignments[orderId]) > 0) return state;
+        const baseCounter = Number(state.counter) || legacyCounter;
+        const nextCounter = baseCounter + 1;
+        state.counter = nextCounter;
+        if (orderId) state.assignments[orderId] = nextCounter;
+        state.updatedAt = Date.now();
+        return state;
+      });
+      if (!result.committed) throw new Error('تعذر حجز رقم الفاتورة');
+      const state = result.snapshot.val() || {};
+      const assignedNumber = orderId ? Number(state.assignments?.[orderId]) : Number(state.counter);
+      if (!assignedNumber) throw new Error('تعذر قراءة رقم الفاتورة المحجوز');
+      return String(assignedNumber).padStart(getInvoicePaddingLength(branch), '0');
+    }
+
+    async function normalizeWhatsappInvoiceNumber(order) {
+      if (!order?.id || order.source !== 'whatsapp-ai' || !order.branch) return order;
+      const sequenceRef = getInvoiceSequenceRef(order.branch);
+      const sequenceSnapshot = await sequenceRef.once('value');
+      const sequence = sequenceSnapshot.val() || {};
+      const currentNumber = Number(order.invoiceNumber);
+      const assignedNumber = Number(sequence.assignments?.[order.id]);
+      const stableCounter = Number(sequence.counter) || 0;
+      if (!assignedNumber && (!currentNumber || currentNumber <= stableCounter)) return order;
+      if (assignedNumber && currentNumber === assignedNumber && order.invoiceSequenceVersion === 'v2') return order;
+
+      const stableInvoiceNumber = await generateInvoiceNumber(order.branch, order.id);
+      const updates = {
+        invoiceNumber: stableInvoiceNumber,
+        invoiceSequenceVersion: 'v2',
+        invoiceNumberBeforeNormalization: String(order.invoiceNumber || ''),
+        invoiceNumberNormalizedAt: Date.now()
+      };
+      await db.ref(`orders/${order.id}`).update(updates);
+      Object.assign(order, updates);
+      return order;
+    }
+
+    async function normalizePendingWhatsappInvoiceNumbers(orders = allOrders) {
+      const whatsappOrders = (Array.isArray(orders) ? orders : [])
+        .filter(order => order?.source === 'whatsapp-ai')
+        .sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+      for (const order of whatsappOrders) {
+        await normalizeWhatsappInvoiceNumber(order);
+      }
     }
 
     // 1. نظام المراقبة اللحظية
 function setupRealtimeListeners() {
   if (realtimeListenersStarted) return;
   realtimeListenersStarted = true;
+  whatsappOrderAlertStartedAt = Date.now();
+  normalizePendingWhatsappInvoiceNumbers(allOrders).catch(error => {
+    console.error('Unable to normalize existing WhatsApp invoice numbers:', error);
+  });
 
   // 1. مراقبة الطلبات
   const latestOrderTimestamp = allOrders.reduce((max, order) => Math.max(max, order.timestamp || 0), 0);
   const todayRange = getTodayOrdersRange();
   const ordersRef = db.ref('orders').orderByChild('timestamp').startAt(Math.max(latestOrderTimestamp + 1, todayRange.start));
 
-  ordersRef.on('child_added', (snapshot) => {
-    const order = { id: snapshot.key, ...snapshot.val() };
+  ordersRef.on('child_added', async (snapshot) => {
+    let order = { id: snapshot.key, ...snapshot.val() };
+    try {
+      order = await normalizeWhatsappInvoiceNumber(order);
+    } catch (error) {
+      console.error('Unable to normalize new WhatsApp invoice number:', error);
+    }
     const index = allOrders.findIndex(item => item.id === order.id);
     if (index >= 0) {
       allOrders[index] = order;
     } else {
       allOrders.push(order);
     }
+    alertNewWhatsappOrder(order);
     refreshUI();
   });
 
-  db.ref('orders').on('child_changed', (snapshot) => {
-    const order = { id: snapshot.key, ...snapshot.val() };
+  db.ref('orders').on('child_changed', async (snapshot) => {
+    let order = { id: snapshot.key, ...snapshot.val() };
+    try {
+      order = await normalizeWhatsappInvoiceNumber(order);
+    } catch (error) {
+      console.error('Unable to normalize changed WhatsApp invoice number:', error);
+    }
     const index = allOrders.findIndex(item => item.id === order.id);
     if (index >= 0) {
       allOrders[index] = order;
@@ -1870,6 +2042,7 @@ function refreshUI() {
     function normalizeCashierBranchName(name) {
       const value = String(name || '').trim();
       if (!value) return '';
+      if (value.includes('حولي') || /hawall[yi]/i.test(value)) return 'حولي';
       if (value.includes('يرموك')) return 'اليرموك';
       if (value.includes('الحصانية')) return 'أبو الحصانية';
       if (value.includes('المخزن')) return 'المخزن الرئيسي';
@@ -2251,7 +2424,7 @@ function refreshUI() {
                     <tbody>
   ${cashierPagedOrders.map(order => `
     <tr>
-      <td>${order.invoiceNumber}</td>
+      <td>${order.invoiceNumber}${whatsappPendingBadge(order)}</td>
       <td>${order.customerName}</td>
       <td>${formatDate(order.timestamp)} ${formatTime(order.timestamp)}</td>
       <td>${order.total.toFixed(3)} ${cashierT('kd')}</td>
@@ -3627,6 +3800,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       if (method === 'cash') return withIcon ? '💵 كاش' : 'كاش';
       if (method === 'online') return withIcon ? '💳 أونلاين' : 'أونلاين';
       if (method === 'knet') return withIcon ? '💳 كي-نت' : 'كي-نت';
+      if (method === 'payment_link' || method === 'subscription') return withIcon ? '🔗 رابط دفع' : 'رابط دفع';
       return 'N/A';
     }
     
@@ -4418,62 +4592,60 @@ function showNumericKeypadForInvoice(index, inputField) {
     }
     
     async function printAndSaveInvoice() {
-      if (invoiceSaveInProgress) {
-        showToast('جاري حفظ الفاتورة، يرجى الانتظار');
-        return;
-      }
-      invoiceSaveInProgress = true;
+      // Invoice numbering follows the cashier branch; pickup branch is saved separately.
+      await normalizePendingWhatsappInvoiceNumbers(allOrders);
+      const orderId = generateId();
+      const invoiceNumber = await generateInvoiceNumber(currentBranch, orderId);
+      const timestamp = Date.now();
+      
+      // Clean items to ensure all fields have valid values
+      const cleanedItems = currentOrder.items.map(item => ({
+        productId: item.productId || '',
+        productName: item.productName || '',
+        productNameEn: item.productNameEn || '', 
+        price: item.price || 0,
+        quantity: item.quantity || 0,
+        total: item.total || 0,
+        unit: item.unit || '',
+        notes: item.notes || ''
+      }));
+      
+      const order = {
+        invoiceNumber,
+        invoiceSequenceVersion: 'v2',
+        timestamp,
+        createdAt: timestamp,
+        cashier: currentCashier.name || '',
+        cashierCode: currentCashier.code || '',
+        branch: currentBranch || '',
+        branchId: currentOrder.tableBranchId || getCurrentCashierBranchId() || '',
+        dailySessionId: currentBranch === 'اليرموك' && currentDailySession ? currentDailySession.id : '',
+        customerName: currentOrder.customer.name || '',
+        phoneNumber: currentOrder.customer.phone || '',
+        orderType: currentOrder.orderType || '',
+        paymentMethod: currentOrder.paymentMethod || '',
+        pickupBranch: currentOrder.pickupBranch || '',
+        address: currentOrder.orderType === 'delivery' && currentOrder.selectedAddress
+          ? `${currentOrder.selectedAddress.area || ''}${currentOrder.selectedAddress.details ? ` - ${currentOrder.selectedAddress.details}` : ''}`.trim()
+          : '',
+        deliveryDate: currentOrder.deliveryDate || '',
+        deliveryTimeFrom: currentOrder.deliveryTimeFrom || '',
+        deliveryTimeTo: currentOrder.deliveryTimeTo || '',
+        items: cleanedItems,
+        deliveryPrice: currentOrder.deliveryPrice || 0,
+        cashReceived: currentOrder.cashReceived || 0,
+        cashChange: currentOrder.cashChange || 0,
+        notes: currentOrder.notes || '',
+        tableId: currentOrder.tableId || '',
+        tableNumber: currentOrder.tableNumber || '',
+        tableBranchId: currentOrder.tableBranchId || '',
+        tableLocation: currentOrder.tableLocation || '',
+        tableOpenedAt: currentOrder.tableOpenedAt || '',
+        tableClosedAt: currentOrder.tableNumber ? timestamp : '',
+        total: currentOrder.items.reduce((sum, item) => sum + item.total, 0) + (currentOrder.deliveryPrice || 0)
+      };
+      
       try {
-        // Invoice numbering follows the cashier branch; pickup branch is saved separately.
-        const invoiceNumber = await generateInvoiceNumber(currentBranch);
-        const timestamp = Date.now();
-
-        const cleanedItems = currentOrder.items.map(item => ({
-          productId: item.productId || '',
-          productName: item.productName || '',
-          productNameEn: item.productNameEn || '',
-          price: item.price || 0,
-          quantity: item.quantity || 0,
-          total: item.total || 0,
-          unit: item.unit || '',
-          notes: item.notes || ''
-        }));
-
-        const order = {
-          invoiceNumber,
-          timestamp,
-          createdAt: timestamp,
-          cashier: currentCashier.name || '',
-          cashierCode: currentCashier.code || '',
-          branch: currentBranch || '',
-          branchId: currentOrder.tableBranchId || getCurrentCashierBranchId() || '',
-          dailySessionId: currentBranch === 'اليرموك' && currentDailySession ? currentDailySession.id : '',
-          customerName: currentOrder.customer.name || '',
-          phoneNumber: currentOrder.customer.phone || '',
-          orderType: currentOrder.orderType || '',
-          paymentMethod: currentOrder.paymentMethod || '',
-          pickupBranch: currentOrder.pickupBranch || '',
-          address: currentOrder.orderType === 'delivery' && currentOrder.selectedAddress
-            ? `${currentOrder.selectedAddress.area || ''}${currentOrder.selectedAddress.details ? ` - ${currentOrder.selectedAddress.details}` : ''}`.trim()
-            : '',
-          deliveryDate: currentOrder.deliveryDate || '',
-          deliveryTimeFrom: currentOrder.deliveryTimeFrom || '',
-          deliveryTimeTo: currentOrder.deliveryTimeTo || '',
-          items: cleanedItems,
-          deliveryPrice: currentOrder.deliveryPrice || 0,
-          cashReceived: currentOrder.cashReceived || 0,
-          cashChange: currentOrder.cashChange || 0,
-          notes: currentOrder.notes || '',
-          tableId: currentOrder.tableId || '',
-          tableNumber: currentOrder.tableNumber || '',
-          tableBranchId: currentOrder.tableBranchId || '',
-          tableLocation: currentOrder.tableLocation || '',
-          tableOpenedAt: currentOrder.tableOpenedAt || '',
-          tableClosedAt: currentOrder.tableNumber ? timestamp : '',
-          total: currentOrder.items.reduce((sum, item) => sum + item.total, 0) + (currentOrder.deliveryPrice || 0)
-        };
-
-        const orderId = generateId();
         await db.ref(`orders/${orderId}`).set({ ...order, id: orderId });
         await clearTableDraft(currentOrder);
         await loadData();
@@ -4484,11 +4656,51 @@ function showNumericKeypadForInvoice(index, inputField) {
       } catch (error) {
         console.error('Error saving order:', error);
         showToast('خطأ في حفظ الفاتورة', true);
-      } finally {
-        invoiceSaveInProgress = false;
       }
     }
     
+    function getInvoiceBusinessHeader(order = {}) {
+      const branchIdentity = [
+        order.branch,
+        order.branchName,
+        order.branchId,
+        order.tableBranchId
+      ]
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+        .join(' ');
+
+      if (/أبو\s*الحصانية|ابو\s*الحصانية|abu[_\s-]*hasaniya/i.test(branchIdentity)) {
+        return `
+          <div style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">مطعم التين الطبيعي</div>
+          <div style="font-size: 8px; line-height: 1.4;">
+            الكويت، أبو الحصانية، مول ٣٠<br>
+            22085886 | 99176512<br>
+            @natural_figs
+          </div>
+        `;
+      }
+
+      if (/حولي|hawall[yi]|يرموك|yarmouk/i.test(branchIdentity)) {
+        return `
+          <div style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">مخبز التين والزيتون</div>
+          <div style="font-size: 8px; line-height: 1.4;">
+            الكويت، اليرموك، ق٢ شارع ٢<br>
+            22085889 | 65162277<br>
+            @figsolives.kw
+          </div>
+        `;
+      }
+
+      return `
+        <div style="font-size: 17px; font-weight: bold; margin-bottom: 5px;">شركة صحي ولذيذ للتجهيزات الغذائية</div>
+        <div style="font-size: 8px; line-height: 1.4;">
+          الكويت، حولي، شارع تونس، مجمع علي فهد الخالد، دور الميزانين<br>
+          66906605 | 22085888
+        </div>
+      `;
+    }
+
     function showThermalInvoice(order) {
   const invoiceDeliveryFee = getOrderDeliveryFee(order);
   const invoiceItemsSubtotal = getOrderItemsGrossTotal(order);
@@ -4498,26 +4710,12 @@ function showNumericKeypadForInvoice(index, inputField) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.innerHTML = `
-    <div class="modal-content p-0" style="background: #f3f4f6; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;">
+    <div class="modal-content p-0" data-order-id="${order.id || ''}" style="background: #f3f4f6; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;">
       <div style="overflow-y: auto; padding: 16px 16px 8px; min-height: 0;">
         <div class="thermal-invoice" style="width: 72mm; margin: 0 auto; padding: 10px; background: white; border-radius: 8px;">
         <div style="text-align: center; border-bottom: 2px dashed #000; padding-bottom: 10px; margin-bottom: 10px;">
-          <img src="logo.png" alt="الشعار" style="width: 100px; height: 100px; margin: 0 auto 10px auto; display: block; object-fit: contain;" onerror="this.style.display='none';">
-          <div style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">مخبز التين والزيتون</div>
-          <div style="font-size: 8px; line-height: 1.4;">
-            الكويت، اليرموك، ق٢ شارع ٢<br>
-            22085889 | 65162277<br>
-            @figsolives.kw
-          </div>
-          
-          <div style="margin: 10px 0; border-top: 1px solid #ccc; padding: 5px 0;">
-            <div style="font-size: 16px; font-weight: bold; margin-bottom: 3px;">مطعم التين الطبيعي</div>
-            <div style="font-size: 8px; line-height: 1.4;">
-              الكويت، أبو الحصانية، مول ٣٠<br>
-              22085886 | 99176512<br>
-              @natural_figs
-            </div>
-          </div>
+          <img src="logo.png" alt="الشعار" data-invoice-logo style="width: 100px; height: 100px; margin: 0 auto 10px auto; display: block; object-fit: contain; background: #fff;" onerror="this.style.display='none';">
+          ${getInvoiceBusinessHeader(order)}
         </div>
         
         <div style="margin-bottom: 8px; border-bottom: 1px dashed #ccc; padding-bottom: 5px; font-size: 11px;">
@@ -4632,10 +4830,10 @@ function showNumericKeypadForInvoice(index, inputField) {
       
       <div class="flex gap-2" style="padding: 12px 16px 16px; background: #f3f4f6; border-top: 1px solid #e5e7eb; flex-shrink: 0;">
         <button onclick="printThermalInvoice(this)" style="flex: 2; background: #2563eb; color: white; padding: 12px; border-radius: 8px; font-weight: bold; border: none; cursor: pointer;">
-          🖨️ طباعة الفاتورة
+          ${cashierT('printInvoice')}
         </button>
         <button onclick="this.closest('.modal-overlay').remove();" style="flex: 1; background: #e5e7eb; color: #374151; padding: 12px; border-radius: 8px; font-weight: bold; border: none; cursor: pointer;">
-          إلغاء
+          ${cashierT('cancel')}
         </button>
       </div>
     </div>
@@ -4644,7 +4842,53 @@ function showNumericKeypadForInvoice(index, inputField) {
 }
 
 
-    function buildThermalInvoicePrintHtml(invoiceContent) {
+    let cachedInvoiceLogoDataUrl = '';
+
+    async function getInvoiceLogoDataUrl() {
+      if (cachedInvoiceLogoDataUrl) return cachedInvoiceLogoDataUrl;
+      try {
+        const response = await fetch(new URL('logo.png', window.location.href).href);
+        if (!response.ok) throw new Error(`Logo request failed: ${response.status}`);
+        const blob = await response.blob();
+        cachedInvoiceLogoDataUrl = await new Promise((resolve, reject) => {
+          const image = new Image();
+          const objectUrl = URL.createObjectURL(blob);
+          image.onload = () => {
+            try {
+              const size = 360;
+              const canvas = document.createElement('canvas');
+              canvas.width = size;
+              canvas.height = size;
+              const context = canvas.getContext('2d');
+              if (!context) throw new Error('Canvas is unavailable');
+              context.fillStyle = '#ffffff';
+              context.fillRect(0, 0, size, size);
+              context.drawImage(image, 0, 0, size, size);
+              resolve(canvas.toDataURL('image/png'));
+            } catch (error) {
+              reject(error);
+            } finally {
+              URL.revokeObjectURL(objectUrl);
+            }
+          };
+          image.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            reject(new Error('Unable to decode invoice logo'));
+          };
+          image.src = objectUrl;
+        });
+      } catch (error) {
+        console.error('Unable to embed invoice logo:', error);
+      }
+      return cachedInvoiceLogoDataUrl;
+    }
+
+    function buildThermalInvoicePrintHtml(invoiceContent, logoDataUrl = '') {
+      const resolvedLogoSource = logoDataUrl || new URL('logo.png', window.location.href).href;
+      const printableContent = invoiceContent.replace(
+        /src=["']logo\.png["']/i,
+        `src="${resolvedLogoSource}"`
+      );
       return `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
@@ -4726,7 +4970,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     </head>
     <body>
       <div class="thermal-invoice">
-        ${invoiceContent}
+        ${printableContent}
       </div>
     </body>
     </html>
@@ -4734,15 +4978,18 @@ function showNumericKeypadForInvoice(index, inputField) {
     }
 
     async function printThermalInvoice(button) {
+  const orderId = button.closest('.modal-content')?.dataset.orderId || '';
   const invoiceContent = button.closest('.modal-content').querySelector('.thermal-invoice').innerHTML;
-  const printHtml = buildThermalInvoicePrintHtml(invoiceContent);
+  const logoDataUrl = await getInvoiceLogoDataUrl();
+  const printHtml = buildThermalInvoicePrintHtml(invoiceContent, logoDataUrl);
 
   if (window.figsDesktop?.isDesktopApp) {
     const originalText = button.innerHTML;
     button.disabled = true;
-    button.innerHTML = 'جاري الطباعة...';
+    button.innerHTML = cashierT('printing');
     try {
       await window.figsDesktop.printHtml({ html: printHtml, type: 'receipt', silent: true });
+      await markWhatsappOrderPrinted(orderId);
       button.closest('.modal-overlay')?.remove();
       showToast('تم إرسال الفاتورة للطابعة');
       return;
@@ -4769,6 +5016,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       <\/script>
     </body>`));
   printWindow.document.close();
+  await markWhatsappOrderPrinted(orderId);
 }
 
     async function updateOrderCourierName(orderId, courierName) {
@@ -5670,7 +5918,7 @@ function renderAccountingContent(section) {
         ['التاريخ', 'اسم المنتج عربي', 'اسم المنتج إنجليزي', 'سعره سابقاً', 'سعره بعد التعديل', 'القيمة المضافة'],
         htmlRows
       );
-      const today = new Date().toLocaleDateString('ar-SA').replace(/\//g, '-');
+      const today = new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-');
       downloadExcelHtml(excelHtml, `تقرير_الزيادة_والتخفيض_${today}.xls`);
       showToast('تم تحميل تقرير الزيادة والتخفيض (Excel)');
     }
@@ -5917,7 +6165,7 @@ function renderAccountingContent(section) {
     function buildOrderTableRow(order) {
       return `
         <tr class="order-row" data-order-id="${order.id || ''}" data-search="${escapeHtml(`${order.invoiceNumber || ''} ${order.customerName || ''} ${order.phoneNumber || ''}`)}" data-cashier="${escapeHtml(order.cashierCode || '')}" data-branch="${escapeHtml(order.branch || '')}" data-timestamp="${order.timestamp || 0}">
-          <td>${order.invoiceNumber || 'N/A'}</td>
+          <td>${order.invoiceNumber || 'N/A'}${whatsappPendingBadge(order)}</td>
           <td>${escapeHtml(order.customerName || 'N/A')}</td>
           <td>${escapeHtml(order.phoneNumber || 'N/A')}</td>
           <td>${formatDate(order.timestamp)}</td>
@@ -6346,7 +6594,7 @@ function renderAccountingContent(section) {
   });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `تقرير_الطلبات_${new Date().toLocaleDateString('ar-SA').replace(/\//g, '-')}.xls`;
+  link.download = `تقرير_الطلبات_${new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-')}.xls`;
   link.click();
   
   showToast('تم تحميل ملف Excel بنجاح');
@@ -7390,7 +7638,7 @@ function renderAccountingContent(section) {
       }
 
       const excelHtml = buildExcelHtml(headers, rowsHtml, totalRow);
-      const today = new Date().toLocaleDateString('ar-SA').replace(/\//g, '-');
+      const today = new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-');
       downloadExcelHtml(excelHtml, `تقرير_المبيعات_${today}.xls`);
       showToast('تم تحميل تقرير المبيعات (Excel)');
     }
@@ -7414,7 +7662,7 @@ function renderAccountingContent(section) {
       `).join('');
 
       const excelHtml = buildExcelHtml(headers, rowsHtml);
-      const today = new Date().toLocaleDateString('ar-SA').replace(/\//g, '-');
+      const today = new Date().toLocaleDateString('ar-KW-u-ca-gregory', { calendar: 'gregory' }).replace(/\//g, '-');
       const productCode = salesReportCurrentDetailProduct?.nameAr || salesReportSelectedProduct?.nameAr || 'منتج';
       downloadExcelHtml(excelHtml, `تفاصيل_تقرير_المبيعات_${productCode}_${salesReportCurrentBranch}_${today}.xls`);
       showToast('تم تحميل تفاصيل التقرير (Excel)');

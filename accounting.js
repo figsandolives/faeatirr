@@ -12038,7 +12038,11 @@ function closeQtyModal() {
 function handleQtyConfirm() {
   const value = String(state.qtyModal.value || '').replace(',', '.');
   const qty = Number(value || 0);
-  if (!qty || Number.isNaN(qty)) {
+  // A stock count sets the actual balance, so zero is a valid counted quantity.
+  // Other voucher types still require a positive quantity.
+  const isSetMode = state.qtyModal.mode === 'set';
+  const isInvalidQty = !value || !Number.isFinite(qty) || (isSetMode ? qty < 0 : qty <= 0);
+  if (isInvalidQty) {
     if (els.qtyModalError) {
       els.qtyModalError.textContent = window.i18n.t('error');
     }

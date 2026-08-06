@@ -13,6 +13,23 @@ const app = firebase.apps.length ? firebase.app() : firebase.initializeApp(fireb
 const db = firebase.database();
 const serverTime = firebase.database.ServerValue.TIMESTAMP;
 
+// منصة البيع تعمل على مشروع Firebase منفصل عن نظام الكاشير.
+const orderingFirebaseConfig = {
+  apiKey: "AIzaSyA0XQJ9fqlWeYQ5NV4CT6GdxvM_Uztnoio",
+  authDomain: "menassafigs.firebaseapp.com",
+  databaseURL: "https://menassafigs-default-rtdb.firebaseio.com",
+  projectId: "menassafigs",
+  storageBucket: "menassafigs.firebasestorage.app",
+  messagingSenderId: "260400277192",
+  appId: "1:260400277192:web:de209362fdbe86e5d827fd"
+};
+const orderingAppName = 'ordering-store';
+const orderingApp = firebase.apps.find((candidate) => candidate.name === orderingAppName)
+  || firebase.initializeApp(orderingFirebaseConfig, orderingAppName);
+const orderingAuth = firebase.auth(orderingApp);
+const orderingDb = firebase.database(orderingApp);
+let onlineOrdersListenerAttached = false;
+
 const state = {
   deviceId: null,
   user: null,
@@ -107,6 +124,15 @@ const state = {
     currentPage: 1,
     pageSize: 10
   },
+  onlineOrderFilters: {
+    branchId: 'all',
+    orderType: 'all',
+    dateFrom: '',
+    dateTo: '',
+    query: '',
+    currentPage: 1,
+    pageSize: 10
+  },
   customerFilters: {
     zoneId: 'all',
     zoneIds: [],
@@ -170,6 +196,7 @@ const state = {
   selectedProducts: new Set(),
   selectedStockMaterials: new Set(),
   selectedOrders: new Set(),
+  selectedOnlineOrders: new Set(),
   selectedCustomers: new Set(),
   selectedCountryOriginItems: new Set(),
   editingOrder: null,
@@ -1599,6 +1626,7 @@ function selectSection(sectionId) {
 function initSections() {
   setupReportsSection();
   setupOrdersSection();
+  setupOnlineOrdersSection();
   setupPendingStockMovesSection();
   setupDevicesCashiersSection();
   setupDiscountsSection();
@@ -1633,6 +1661,7 @@ function initSections() {
 function rebuildSections() {
   setupReportsSection();
   setupOrdersSection();
+  setupOnlineOrdersSection();
   setupPendingStockMovesSection();
   setupDevicesCashiersSection();
   setupDiscountsSection();
@@ -6491,6 +6520,162 @@ function renderOrderZoneFilterOptions() {
   });
 }
 
+function setupOnlineOrdersSection() {
+  const section = document.getElementById('section-onlineOrders');
+  if (!section) return;
+  ensurePaginationFields(state.onlineOrderFilters);
+  section.innerHTML = `
+    <div class="card">
+      <h2>${window.i18n.t('online_orders')}</h2>
+      <div class="row" style="margin-top: 12px; flex-wrap: wrap;">
+        <input id="onlineOrderDateFrom" class="input" type="date" style="max-width: 180px;" placeholder="${window.i18n.t('filter_from')}" />
+        <input id="onlineOrderDateTo" class="input" type="date" style="max-width: 180px;" placeholder="${window.i18n.t('filter_to')}" />
+        <select id="onlineOrderBranchFilter" class="input" style="max-width: 180px;"></select>
+        <select id="onlineOrderTypeFilter" class="input" style="max-width: 180px;">
+          <option value="all">${window.i18n.t('order_types')}</option>
+          <option value="delivery">توصيل</option>
+          <option value="pickup">استلام</option>
+        </select>
+        <input id="onlineOrderSearch" class="input" autocomplete="off" style="max-width: 240px;" placeholder="${window.i18n.t('search_orders')}" />
+        <button id="onlineOrdersDownloadBtn" class="btn ghost small">${window.i18n.t('orders_download')}</button>
+        <button id="onlineOrdersPrintBtn" class="btn ghost small">${window.i18n.t('print_report')}</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content: flex-end; margin-bottom: 12px;">
+        ${buildPageSizeControlHtml('onlineOrdersPageSize')}
+      </div>
+      <table class="table">
+        <thead><tr>
+          <th><input type="checkbox" id="selectAllOnlineOrders" /></th>
+          <th>${window.i18n.t('invoice_number')}</th>
+          <th>${window.i18n.t('customer_name')}</th>
+          <th>${window.i18n.t('delivery_zone')}</th>
+          <th>${window.i18n.t('customer_phone')}</th>
+          <th>${window.i18n.t('date_time')}</th>
+          <th>${window.i18n.t('branch')}</th>
+          <th>${window.i18n.t('order_type')}</th>
+          <th>${window.i18n.t('net_total')}</th>
+          <th>${window.i18n.t('delivery_fee')}</th>
+          <th>${window.i18n.t('grand_total')}</th>
+          <th>${window.i18n.t('payment_method')}</th>
+          <th>${window.i18n.t('actions')}</th>
+        </tr></thead>
+        <tbody id="onlineOrdersTable"></tbody>
+      </table>
+      ${buildPaginationBarHtml('onlineOrdersPageInfo', 'onlineOrdersPagination')}
+    </div>`;
+
+  const filters = state.onlineOrderFilters;
+  section.querySelector('#onlineOrderDateFrom').value = filters.dateFrom || '';
+  section.querySelector('#onlineOrderDateTo').value = filters.dateTo || '';
+  section.querySelector('#onlineOrderSearch').value = filters.query || '';
+  section.querySelector('#onlineOrderDateFrom').addEventListener('change', (event) => { filters.dateFrom = event.target.value; resetPaginationPage(filters); renderOnlineOrders(); });
+  section.querySelector('#onlineOrderDateTo').addEventListener('change', (event) => { filters.dateTo = event.target.value; resetPaginationPage(filters); renderOnlineOrders(); });
+  section.querySelector('#onlineOrderBranchFilter').addEventListener('change', (event) => { filters.branchId = event.target.value; resetPaginationPage(filters); renderOnlineOrders(); });
+  section.querySelector('#onlineOrderTypeFilter').addEventListener('change', (event) => { filters.orderType = event.target.value; resetPaginationPage(filters); renderOnlineOrders(); });
+  bindDebouncedQueryInput(section.querySelector('#onlineOrderSearch'), (value) => { filters.query = String(value || '').trim().toLowerCase(); resetPaginationPage(filters); renderOnlineOrders(); });
+  section.querySelector('#onlineOrdersPageSize').addEventListener('change', (event) => { filters.pageSize = Number(event.target.value || 10); resetPaginationPage(filters); renderOnlineOrders(); });
+  section.querySelector('#onlineOrdersDownloadBtn').addEventListener('click', exportOnlineOrders);
+  section.querySelector('#onlineOrdersPrintBtn').addEventListener('click', printOnlineOrders);
+  section.querySelector('#selectAllOnlineOrders').addEventListener('change', (event) => toggleSelectAllOnlineOrders(event.target.checked));
+  renderOnlineOrders();
+}
+
+function getOnlineOrders() {
+  return Object.entries(state.cache.onlineOrders || {})
+    .map(([id, data]) => ({ id, ...data, orderId: data?.orderId || id }))
+    .sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
+}
+
+function onlineOrderMatchesFilters(order) {
+  const filters = state.onlineOrderFilters;
+  if (filters.branchId !== 'all' && String(order.branchId || '') !== filters.branchId) return false;
+  if (filters.orderType !== 'all' && String(order.mode || order.orderType || '').toLowerCase() !== filters.orderType) return false;
+  const timestamp = getOrderTimestamp(order);
+  if (filters.dateFrom && timestamp < new Date(`${filters.dateFrom}T00:00:00`).getTime()) return false;
+  if (filters.dateTo && timestamp > new Date(`${filters.dateTo}T23:59:59`).getTime()) return false;
+  return !filters.query || orderMatchesText(order, filters.query);
+}
+
+function getFilteredOnlineOrders() {
+  return getOnlineOrders().filter(onlineOrderMatchesFilters);
+}
+
+function renderOnlineOrders() {
+  const table = document.getElementById('onlineOrdersTable');
+  if (!table) return;
+  const filters = state.onlineOrderFilters;
+  ensurePaginationFields(filters);
+  const branchSelect = document.getElementById('onlineOrderBranchFilter');
+  const typeSelect = document.getElementById('onlineOrderTypeFilter');
+  if (branchSelect) {
+    const current = filters.branchId || 'all';
+    const branchIds = [...new Set(getOnlineOrders().map((order) => String(order.branchId || '')).filter(Boolean))];
+    branchSelect.innerHTML = `<option value="all">${window.i18n.t('all_branches')}</option>${branchIds.map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(getOrderBranchName({ branchId: id }))}</option>`).join('')}`;
+    branchSelect.value = current;
+  }
+  if (typeSelect) typeSelect.value = filters.orderType || 'all';
+
+  const filtered = getFilteredOnlineOrders();
+  const pagination = paginateEntries(filtered, filters);
+  updatePaginationControls({ infoId: 'onlineOrdersPageInfo', containerId: 'onlineOrdersPagination', filters, totalItems: filtered.length, onPageChange: (page) => { filters.currentPage = page; renderOnlineOrders(); } });
+  syncPageSizeSelect('onlineOrdersPageSize', filters);
+  table.innerHTML = '';
+  const selectAll = document.getElementById('selectAllOnlineOrders');
+  if (!filtered.length) {
+    if (selectAll) selectAll.checked = false;
+    table.innerHTML = `<tr><td colspan="13">${window.i18n.t('no_data')}</td></tr>`;
+    return;
+  }
+  pagination.items.forEach((order) => {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td><input type="checkbox" data-id="${escapeHtml(order.id)}" ${state.selectedOnlineOrders.has(order.id) ? 'checked' : ''} /></td>
+      <td>${escapeHtml(getOrderInvoiceNumber(order))}</td>
+      <td>${escapeHtml(getOrderCustomerName(order))}</td>
+      <td>${escapeHtml(getOrderZoneName(order))}</td>
+      <td>${escapeHtml(getOrderCustomerPhone(order))}</td>
+      <td>${formatDate(getOrderTimestamp(order))}</td>
+      <td>${escapeHtml(getOrderBranchName(order))}</td>
+      <td>${escapeHtml(getOrderTypeLabel(order))}</td>
+      <td>${formatMoney(getOrderItemsSubtotal(order))}</td>
+      <td>${formatMoney(getOrderDeliveryFee(order))}</td>
+      <td>${formatMoney(getOrderGrandTotal(order))}</td>
+      <td>${escapeHtml(getOrderPaymentLabel(order))}</td>
+      <td><div class="row" style="gap: 6px; flex-wrap: nowrap;"><button class="btn ghost small" data-action="print">طباعة</button><button class="btn ghost small" data-action="pdf">تحميل PDF</button></div></td>`;
+    row.querySelector('input[type="checkbox"]').addEventListener('change', (event) => event.target.checked ? state.selectedOnlineOrders.add(order.id) : state.selectedOnlineOrders.delete(order.id));
+    row.querySelector('[data-action="print"]').addEventListener('click', () => printOrderInvoice(order));
+    row.querySelector('[data-action="pdf"]').addEventListener('click', () => downloadOrderInvoicePdf(order));
+    table.appendChild(row);
+  });
+  if (selectAll) selectAll.checked = pagination.items.length > 0 && pagination.items.every((order) => state.selectedOnlineOrders.has(order.id));
+}
+
+function getSelectedOnlineOrders() {
+  const filtered = getFilteredOnlineOrders();
+  return state.selectedOnlineOrders.size ? filtered.filter((order) => state.selectedOnlineOrders.has(order.id)) : filtered;
+}
+
+function toggleSelectAllOnlineOrders(checked) {
+  paginateEntries(getFilteredOnlineOrders(), state.onlineOrderFilters).items.forEach((order) => checked ? state.selectedOnlineOrders.add(order.id) : state.selectedOnlineOrders.delete(order.id));
+  renderOnlineOrders();
+}
+
+function exportOnlineOrders() {
+  const rows = getSelectedOnlineOrders().map((order) => ({
+    [window.i18n.t('invoice_number')]: getOrderInvoiceNumber(order), [window.i18n.t('customer_name')]: getOrderCustomerName(order), [window.i18n.t('delivery_zone')]: getOrderZoneName(order), [window.i18n.t('customer_phone')]: getOrderCustomerPhone(order), [window.i18n.t('date_time')]: formatDate(getOrderTimestamp(order)), [window.i18n.t('branch')]: getOrderBranchName(order), [window.i18n.t('order_type')]: getOrderTypeLabel(order), [window.i18n.t('net_total')]: formatMoney(getOrderItemsSubtotal(order)), [window.i18n.t('delivery_fee')]: formatMoney(getOrderDeliveryFee(order)), [window.i18n.t('grand_total')]: formatMoney(getOrderGrandTotal(order)), [window.i18n.t('payment_method')]: getOrderPaymentLabel(order)
+  }));
+  if (rows.length) exportToExcel(rows, 'online-orders-report.xlsx');
+}
+
+function printOnlineOrders() {
+  const orders = getSelectedOnlineOrders();
+  if (!orders.length) return;
+  const totals = orders.reduce((sum, order) => ({ net: sum.net + getOrderItemsSubtotal(order), delivery: sum.delivery + getOrderDeliveryFee(order), total: sum.total + getOrderGrandTotal(order) }), { net: 0, delivery: 0, total: 0 });
+  printA4Report(window.i18n.t('online_orders'), [{ label: window.i18n.t('filter_from'), value: state.onlineOrderFilters.dateFrom || '-' }, { label: window.i18n.t('filter_to'), value: state.onlineOrderFilters.dateTo || '-' }], [window.i18n.t('invoice_number'), window.i18n.t('customer_name'), window.i18n.t('customer_phone'), window.i18n.t('delivery_zone'), window.i18n.t('branch'), window.i18n.t('order_type'), window.i18n.t('net_total'), window.i18n.t('delivery_fee'), window.i18n.t('grand_total'), window.i18n.t('date_time')], orders.map((order) => [getOrderInvoiceNumber(order), getOrderCustomerName(order), getOrderCustomerPhone(order), getOrderZoneName(order), getOrderBranchName(order), getOrderTypeLabel(order), formatMoney(getOrderItemsSubtotal(order)), formatMoney(getOrderDeliveryFee(order)), formatMoney(getOrderGrandTotal(order)), formatDate(getOrderTimestamp(order))]), [{ label: window.i18n.t('net_total'), value: formatMoney(totals.net) }, { label: window.i18n.t('delivery_fee'), value: formatMoney(totals.delivery) }, { label: window.i18n.t('grand_total'), value: formatMoney(totals.total) }]);
+}
+
 function setupCustomersSection() {
   const section = document.getElementById('section-customers');
   if (!section) return;
@@ -7367,6 +7552,10 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     if (!ordersByNumber[key]) ordersByNumber[key] = { id, ...order };
   });
 
+  // تختلف تسمية الكمية بين فواتير الكاشير القديمة والجديدة. بطاقة الصنف
+  // يجب أن تقرأها كلها، وإلا ستظهر فاتورة البيع بحركة 0 رغم أنها خفّضت الرصيد.
+  const getMovementItemQty = (item) => Number(item?.qty ?? item?.quantity ?? item?.count ?? 0) || 0;
+
   const addMove = (record, docType, qtyChange, docNumber, typeLabel, date, price, affectsBalance = true, extra = {}) => {
     const unitId = extra.unitId === undefined ? (itemData?.unitId || null) : extra.unitId;
     moves.push({
@@ -7423,7 +7612,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
       addMove(
         record,
         'issue',
-        -Number(item.qty || 0),
+        -getMovementItemQty(item),
         invoiceNumber,
         typeLabel,
         issue.createdAt,
@@ -7436,12 +7625,11 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
   Object.entries(orders).forEach(([id, order]) => {
     if (order.branchId !== branchId) return;
     const orderNumber = order.orderNumber || order.invoiceNumber || id;
-    const invoiceKey = normalizeDigits(String(orderNumber)).trim();
     normalizeItems(order.items).forEach((item) => {
       const lineId = item.productId || item.itemId || item.id;
       if (itemType !== 'product' || String(lineId) !== String(itemId)) return;
       const record = { id, ...order };
-      addMove(record, 'order', -Number(item.qty || 0), orderNumber, window.i18n.t('sales_invoice'), order.createdAt || 0, item.price);
+      addMove(record, 'order', -getMovementItemQty(item), orderNumber, window.i18n.t('sales_invoice'), order.createdAt || 0, item.price ?? item.unitPrice);
     });
   });
 
@@ -7454,7 +7642,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     normalizeItems(transfer.items).forEach((item) => {
       if (!isSameItem(item)) return;
       const record = { id, ...transfer };
-      addMove(record, 'transfer', direction * Number(item.qty || 0), transfer.transferNumber, window.i18n.t('transfer_action'), transfer.createdAt);
+      addMove(record, 'transfer', direction * getMovementItemQty(item), transfer.transferNumber, window.i18n.t('transfer_action'), transfer.createdAt);
     });
   });
 
@@ -7468,12 +7656,12 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
       const record = { id, ...transfer };
       if (isFrom) {
         const netQty = ['received', 'partial_received'].includes(transfer.status)
-          ? Number(item.receivedQty ?? item.qty ?? 0)
-          : Number(item.qty || 0);
+          ? Number(item.receivedQty ?? getMovementItemQty(item))
+          : getMovementItemQty(item);
         addMove(record, 'cashierTransfer', -Number(netQty || 0), transfer.transferNumber, window.i18n.t('transfer_action'), transfer.createdAt);
       }
       if (isTo && ['received', 'partial_received'].includes(transfer.status)) {
-        const receivedQty = Number(item.receivedQty ?? item.qty ?? 0);
+        const receivedQty = Number(item.receivedQty ?? getMovementItemQty(item));
         addMove(record, 'cashierTransfer', receivedQty, transfer.transferNumber, window.i18n.t('receive_action'), transfer.receivedAt || transfer.createdAt);
       }
     });
@@ -7488,7 +7676,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     normalizeItems(ret.items).forEach((item) => {
       if (!isSameItem(item)) return;
       const record = { id, ...ret };
-      addMove(record, 'stockReturn', direction * Number(item.qty || 0), ret.stockReturnNumber, window.i18n.t('stock_return_voucher'), ret.createdAt);
+      addMove(record, 'stockReturn', direction * getMovementItemQty(item), ret.stockReturnNumber, window.i18n.t('stock_return_voucher'), ret.createdAt);
     });
   });
 
@@ -7498,17 +7686,18 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     normalizeItems(ret.items).forEach((item) => {
       if (!isSameItem(item)) return;
       const record = { id, ...ret };
-      addMove(record, 'scrapReturn', -Number(item.qty || 0), ret.scrapReturnNumber, window.i18n.t('scrap_return_voucher'), ret.createdAt);
+      addMove(record, 'scrapReturn', -getMovementItemQty(item), ret.scrapReturnNumber, window.i18n.t('scrap_return_voucher'), ret.createdAt);
     });
   });
 
   const supplierReturns = state.cache.supplierReturns || {};
   Object.entries(supplierReturns).forEach(([id, ret]) => {
-    if ((purchase.branchId || mainBranchId) !== branchId) return;
+    const purchase = state.cache.purchases?.[ret.purchaseId];
+    if ((purchase?.branchId || ret.branchId || mainBranchId) !== branchId) return;
     normalizeItems(ret.items).forEach((item) => {
       if (!isSameItem(item)) return;
       const record = { id, ...ret };
-      addMove(record, 'supplierReturn', -Number(item.qty || 0), ret.returnNumber, window.i18n.t('supplier_return'), ret.createdAt);
+      addMove(record, 'supplierReturn', -getMovementItemQty(item), ret.returnNumber, window.i18n.t('supplier_return'), ret.createdAt);
     });
   });
 
@@ -7545,7 +7734,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
       const previousQty = item.previousQty;
       const qtyChange = previousQty === undefined || previousQty === null
         ? 0
-        : Number(item.qty || 0) - Number(previousQty || 0);
+        : getMovementItemQty(item) - Number(previousQty || 0);
       const record = { id, ...inv };
       addMove(record, 'inventory', qtyChange, inv.countNumber, window.i18n.t('inventory_count'), inv.createdAt);
     });
@@ -7559,7 +7748,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
       if (!isSameItem(item)) return;
       const record = { id, ...purchase };
       const unitPrice = Number(item.unitPrice ?? item.cost ?? item.price ?? 0);
-      const qty = Number(item.qty || 0);
+      const qty = getMovementItemQty(item);
       addMove(
         record,
         'purchaseRequest',
@@ -7586,7 +7775,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
       if (!isSameItem(item)) return;
       const record = { id, ...receipt, purchaseNumber, receiptNumber: receipt.receiptNumber || purchaseNumber };
       const price = item.cost ?? item.price ?? null;
-      const qty = Number(item.qty || 0);
+      const qty = getMovementItemQty(item);
       const purchaseInvoiceNumber = receipt.purchaseInvoiceNumber || purchase?.purchaseInvoiceNumber || '-';
       addMove(
         record,
@@ -7605,15 +7794,6 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     });
   });
 
-  let running = itemData ? getItemStock(itemData, branchId) : 0;
-  moves.sort((a, b) => (b.date || 0) - (a.date || 0));
-  moves.forEach((move) => {
-    move.balance = running;
-    if (move.affectsBalance !== false) {
-      running -= move.qtyChange;
-    }
-  });
-
   const start = fromDate ? new Date(fromDate) : null;
   const end = toDate ? new Date(toDate) : null;
   if (start) start.setHours(0, 0, 0, 0);
@@ -7621,24 +7801,24 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
   const startTime = start ? start.getTime() : null;
   const endTime = end ? end.getTime() : null;
 
-  let openingBalance = itemData ? getItemStock(itemData, branchId) : 0;
-  if (itemType === 'product') {
-    const productMainBranchId = itemData?.mainBranchId || mainBranchId;
-    const isMainBranch = !branchId || branchId === productMainBranchId;
-    openingBalance = isMainBranch ? Number(itemData?.openingQty || 0) : 0;
-  } else if (startTime !== null) {
-    moves.forEach((move) => {
-      if (move.date >= startTime && move.affectsBalance !== false) {
-        openingBalance -= Number(move.qtyChange || 0);
-      }
-    });
-  }
-
-  const filtered = moves.filter((move) => {
-    if (startTime === null || endTime === null) return true;
-    return move.date >= startTime && move.date <= endTime;
+  // يبدأ كشف الفترة من الرصيد الفعلي الحالي، ثم يرجع كل الحركات التي حصلت
+  // من أول يوم مختار إلى الآن. بهذه الطريقة يكون الرصيد الافتتاحي هو الرصيد
+  // الحقيقي قبل أول حركة في الفترة، لا القيمة الأصلية للصنف فقط.
+  moves.sort((a, b) => (a.date || 0) - (b.date || 0));
+  const firstPeriodTime = startTime === null ? -Infinity : startTime;
+  const openingBalance = (itemData ? getItemStock(itemData, branchId) : 0) - moves
+    .filter((move) => move.date >= firstPeriodTime && move.affectsBalance !== false)
+    .reduce((sum, move) => sum + Number(move.qtyChange || 0), 0);
+  const chronological = moves.filter((move) => {
+    if (startTime !== null && move.date < startTime) return false;
+    if (endTime !== null && move.date > endTime) return false;
+    return true;
   });
-  const chronological = filtered.reverse();
+  let runningBalance = openingBalance;
+  chronological.forEach((move) => {
+    if (move.affectsBalance !== false) runningBalance += Number(move.qtyChange || 0);
+    move.balance = runningBalance;
+  });
   const openingMove = {
     record: null,
     docType: 'opening',
@@ -7648,9 +7828,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     qtyChange: null,
     docNumber: '-',
     typeLabel: window.i18n.t('opening_qty'),
-    date: itemType === 'product'
-      ? Number(itemData?.createdAt || 0) || (startTime || (chronological[0]?.date || Date.now()))
-      : (startTime || (chronological[0]?.date || Date.now())),
+    date: startTime || (chronological[0]?.date || Number(itemData?.createdAt || 0) || Date.now()),
     price: null,
     affectsBalance: false,
     unitId: itemData?.unitId || null,
@@ -12512,7 +12690,7 @@ function getCreatedAtSortValue(id, item = {}) {
 }
 
 function getOrderInvoiceNumber(order) {
-  return order?.orderNumber || order?.invoiceNumber || order?.invoiceNo || order?.number || '-';
+  return order?.orderNumber || order?.invoiceNumber || order?.invoiceNo || order?.orderId || order?.number || '-';
 }
 
 function getOrderCustomer(order) {
@@ -12532,7 +12710,7 @@ function getOrderCustomerPhone(order) {
 
 function getOrderBranchName(order) {
   const branches = state.cache.branches || {};
-  return order?.branchName || order?.branch || getLocalizedName(branches[order?.branchId]) || '-';
+  return order?.branchName || order?.branch || getLocalizedName(branches[order?.branchId]) || order?.branchId || '-';
 }
 
 function getOrderCashierName(order) {
@@ -12542,7 +12720,7 @@ function getOrderCashierName(order) {
 
 function getOrderZoneName(order) {
   const zones = state.cache.deliveryZones || {};
-  const direct = order?.deliveryZoneName || order?.deliveryArea || order?.area || order?.zoneName;
+  const direct = order?.deliveryZoneName || order?.deliveryArea || order?.area || order?.areaName || order?.zoneName;
   if (direct) return direct;
   const zoneName = getLocalizedName(zones[order?.deliveryZoneId]);
   if (zoneName && zoneName !== '-') return zoneName;
@@ -12554,7 +12732,7 @@ function getOrderTypeLabel(order) {
   const orderTypes = state.cache.orderTypes || {};
   const direct = getLocalizedName(orderTypes[order?.orderTypeId]);
   if (direct && direct !== '-') return direct;
-  const raw = String(order?.orderTypeName || order?.orderType || order?.type || '').toLowerCase();
+  const raw = String(order?.orderTypeName || order?.orderType || order?.type || order?.mode || '').toLowerCase();
   if (['delivery', 'توصيل'].includes(raw)) return 'توصيل';
   if (['pickup', 'takeaway', 'استلام'].includes(raw)) return 'استلام';
   return order?.orderTypeName || order?.orderType || '-';
@@ -16358,6 +16536,10 @@ function setupPurchasesSection() {
             <label class="tag">${window.i18n.t('branch')}</label>
             <select id="purchaseBranchSelect" class="input"></select>
           </div>
+          <div>
+            <label class="tag">${window.i18n.t('purchase_invoice_number')}</label>
+            <input id="purchaseInvoiceNumber" class="input" autocomplete="off" />
+          </div>
         </div>
         <div class="row" style="margin-top: 12px;">
           <input id="purchaseSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_products')}" />
@@ -16396,7 +16578,7 @@ function setupPurchasesSection() {
           </div>
           <div>
             <label class="tag">${window.i18n.t('purchase_invoice_number')}</label>
-            <input id="purchaseReceiveInvoiceNumber" class="input" />
+            <input id="purchaseReceiveInvoiceNumber" class="input" readonly />
           </div>
         </div>
         <div style="margin-top: 12px;">
@@ -16426,7 +16608,8 @@ function resetPurchaseDraft() {
     editingId: null,
     originalItems: [],
     originalSupplierId: null,
-    pendingMoveId: null
+    pendingMoveId: null,
+    purchaseInvoiceNumber: ''
   };
 }
 
@@ -16446,6 +16629,7 @@ function bindPurchasesSection() {
   const cancelBtn = document.getElementById('purchaseCancelBtn');
   const supplierSelect = document.getElementById('purchaseSupplierSelect');
   const branchSelect = document.getElementById('purchaseBranchSelect');
+  const purchaseInvoiceInput = document.getElementById('purchaseInvoiceNumber');
   const searchInput = document.getElementById('purchaseSearchInput');
   const searchBtn = document.getElementById('purchaseSearchBtn');
   const submitBtn = document.getElementById('purchaseSubmitBtn');
@@ -16472,6 +16656,13 @@ function bindPurchasesSection() {
   if (branchSelect) {
     branchSelect.addEventListener('change', () => {
       state.purchaseDraft.branchId = branchSelect.value || '';
+      const errorEl = document.getElementById('purchaseError');
+      if (errorEl) errorEl.textContent = '';
+    });
+  }
+  if (purchaseInvoiceInput) {
+    purchaseInvoiceInput.addEventListener('input', () => {
+      state.purchaseDraft.purchaseInvoiceNumber = purchaseInvoiceInput.value || '';
       const errorEl = document.getElementById('purchaseError');
       if (errorEl) errorEl.textContent = '';
     });
@@ -16557,6 +16748,7 @@ function openPurchaseModal(record = null) {
     });
     state.purchaseDraft.originalItems = normalizeItems(record.items).map((item) => ({ ...item }));
     state.purchaseDraft.pendingMoveId = record.pendingMoveId || null;
+    state.purchaseDraft.purchaseInvoiceNumber = record.purchaseInvoiceNumber || '';
   }
   renderPurchasesSection();
   const errorEl = document.getElementById('purchaseError');
@@ -16577,7 +16769,9 @@ function renderPurchasesSection() {
   const storekeeperInput = document.getElementById('purchaseStorekeeper');
   const supplierSelect = document.getElementById('purchaseSupplierSelect');
   const branchSelect = document.getElementById('purchaseBranchSelect');
+  const purchaseInvoiceInput = document.getElementById('purchaseInvoiceNumber');
   if (storekeeperInput) storekeeperInput.value = state.user?.name || '-';
+  if (purchaseInvoiceInput) purchaseInvoiceInput.value = state.purchaseDraft.purchaseInvoiceNumber || '';
   if (supplierSelect) {
     supplierSelect.innerHTML = '';
     const placeholder = document.createElement('option');
@@ -16776,7 +16970,8 @@ function editPurchaseItemQty(index) {
 function submitPurchaseOrder() {
   const errorEl = document.getElementById('purchaseError');
   if (errorEl) errorEl.textContent = '';
-  if (!state.purchaseDraft.supplierId || !state.purchaseDraft.branchId || !state.purchaseDraft.items.length) {
+  const purchaseInvoiceNumber = String(state.purchaseDraft.purchaseInvoiceNumber || '').trim();
+  if (!state.purchaseDraft.supplierId || !state.purchaseDraft.branchId || !state.purchaseDraft.items.length || !purchaseInvoiceNumber) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
@@ -16790,6 +16985,7 @@ function submitPurchaseOrder() {
       supplierName,
       branchId: state.purchaseDraft.branchId,
       branchName: getBranchLabel(state.purchaseDraft.branchId),
+      purchaseInvoiceNumber,
       items: state.purchaseDraft.items,
       status: 'pending'
     };
@@ -16821,6 +17017,7 @@ function submitPurchaseOrder() {
       supplierName,
       branchId: state.purchaseDraft.branchId,
       branchName: getBranchLabel(state.purchaseDraft.branchId),
+      purchaseInvoiceNumber,
       status: 'pending',
       items: state.purchaseDraft.items,
       receivedItems: []
@@ -17615,6 +17812,96 @@ function deleteSupplierReturn(record) {
   });
 }
 
+function openVoucherProductsPicker(kind) {
+  const existing = document.getElementById('voucherProductsPickerOverlay');
+  if (existing) existing.remove();
+  state.voucherProductsPicker = { kind, tab: 'product', query: '', selected: new Map() };
+  const overlay = document.createElement('div');
+  overlay.id = 'voucherProductsPickerOverlay';
+  overlay.className = 'overlay';
+  overlay.innerHTML = `
+    <div class="modal lg" style="text-align: start; max-height: 90vh; overflow: auto; max-width: 900px; width: 100%;">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <h3>${window.i18n.t('add_products')}</h3>
+        <button type="button" class="btn ghost small" data-action="close">×</button>
+      </div>
+      <input id="voucherProductsPickerSearch" class="input" style="margin-top: 12px;" autocomplete="off" placeholder="${window.i18n.t('search_items')}" />
+      <div class="row" style="margin-top: 12px; gap: 8px;">
+        <button type="button" class="btn primary" data-tab="product">${window.i18n.t('products')}</button>
+        <button type="button" class="btn ghost" data-tab="material">${window.i18n.t('stock_materials')}</button>
+      </div>
+      <div id="voucherProductsPickerResults" class="grid three" style="margin-top: 12px;"></div>
+      <div class="row" style="justify-content: space-between; align-items: center; margin-top: 16px;">
+        <strong id="voucherProductsPickerCount"></strong>
+        <div class="row" style="gap: 8px;">
+          <button type="button" class="btn ghost" data-action="cancel">${window.i18n.t('cancel')}</button>
+          <button type="button" class="btn primary" data-action="add">${window.i18n.t('add_selected')}</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('[data-action="close"]').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#voucherProductsPickerSearch').addEventListener('input', (event) => {
+    state.voucherProductsPicker.query = event.target.value || '';
+    renderVoucherProductsPicker();
+  });
+  overlay.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => {
+    state.voucherProductsPicker.tab = button.dataset.tab;
+    renderVoucherProductsPicker();
+  }));
+  overlay.querySelector('[data-action="add"]').addEventListener('click', () => addVoucherPickerSelection());
+  renderVoucherProductsPicker();
+}
+
+function renderVoucherProductsPicker() {
+  const overlay = document.getElementById('voucherProductsPickerOverlay');
+  const picker = state.voucherProductsPicker;
+  if (!overlay || !picker) return;
+  overlay.querySelectorAll('[data-tab]').forEach((button) => {
+    const active = button.dataset.tab === picker.tab;
+    button.className = `btn ${active ? 'primary' : 'ghost'}`;
+  });
+  const entries = filterItemEntries(getAllItems().filter((entry) => entry.type === picker.tab), picker.query)
+    .sort((a, b) => (getLocalizedName(a.item) || '').localeCompare(getLocalizedName(b.item) || ''));
+  const results = overlay.querySelector('#voucherProductsPickerResults');
+  results.innerHTML = entries.length ? entries.map((entry) => {
+    const key = `${entry.type}:${entry.id}`;
+    const selected = picker.selected.has(key);
+    return `<button type="button" class="notice" data-item-key="${escapeHtml(key)}" style="text-align: start; cursor: pointer; border: 2px solid ${selected ? 'var(--primary)' : 'transparent'}; background: ${selected ? '#eff6ff' : ''};"><strong>${escapeHtml(getLocalizedName(entry.item) || '-')}</strong><div class="helper">${escapeHtml(entry.item.code || entry.item.barcode || '')}</div></button>`;
+  }).join('') : `<p class="helper">${window.i18n.t('no_data')}</p>`;
+  results.querySelectorAll('[data-item-key]').forEach((button) => button.addEventListener('click', () => {
+    const key = button.dataset.itemKey;
+    const entry = entries.find((item) => `${item.type}:${item.id}` === key);
+    if (!entry) return;
+    if (picker.selected.has(key)) picker.selected.delete(key);
+    else picker.selected.set(key, entry);
+    renderVoucherProductsPicker();
+  }));
+  overlay.querySelector('#voucherProductsPickerCount').textContent = `${window.i18n.t('selected_products_count')}: ${picker.selected.size}`;
+}
+
+function addVoucherPickerSelection() {
+  const picker = state.voucherProductsPicker;
+  if (!picker?.selected?.size) return;
+  const errorEl = document.getElementById(picker.kind === 'transfer' ? 'transferError' : 'scrapReturnError');
+  if (picker.kind === 'transfer') {
+    picker.selected.forEach((entry) => addTransferItem(entry, 1));
+  } else {
+    const branchId = state.scrapReturnDraft?.branchId;
+    if (!branchId) {
+      if (errorEl) errorEl.textContent = window.i18n.t('select_branch_prompt');
+      return;
+    }
+    picker.selected.forEach((entry) => {
+      const available = getItemStock(entry.item, branchId);
+      if (available >= 1) addScrapReturnItem(entry, 1);
+    });
+  }
+  document.getElementById('voucherProductsPickerOverlay')?.remove();
+  state.voucherProductsPicker = null;
+}
+
 function setupTransfersSection() {
   const section = document.getElementById('section-transfers');
   if (!section) return;
@@ -17631,6 +17918,7 @@ function setupTransfersSection() {
             <th>${window.i18n.t('from_branch')}</th>
             <th>${window.i18n.t('to_branch')}</th>
             <th>${window.i18n.t('storekeeper_name')}</th>
+            <th>${window.i18n.t('receiver_name')}</th>
             <th>${window.i18n.t('date_time')}</th>
             <th>${window.i18n.t('items')}</th>
             <th>${window.i18n.t('actions')}</th>
@@ -17645,10 +17933,14 @@ function setupTransfersSection() {
           <h3>${window.i18n.t('transfer_voucher')}</h3>
           <button id="transferModalCloseBtn" class="btn ghost small">×</button>
         </div>
-        <div class="grid three" style="margin-top: 12px;">
+        <div class="grid four" style="margin-top: 12px;">
           <div>
             <label class="tag">${window.i18n.t('storekeeper_name')}</label>
             <input id="transferStorekeeper" class="input" readonly />
+          </div>
+          <div>
+            <label class="tag">${window.i18n.t('receiver_name')}</label>
+            <input id="transferReceiverName" class="input" />
           </div>
           <div>
             <label class="tag">${window.i18n.t('from_branch')}</label>
@@ -17659,12 +17951,9 @@ function setupTransfersSection() {
             <select id="transferBranchSelect" class="input"></select>
           </div>
         </div>
-        ${buildEntrySearchTypeFilterHtml('transfer')}
         <div class="row" style="margin-top: 12px;">
-          <input id="transferSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_items')}" />
-          <button id="transferSearchBtn" class="btn ghost small">${window.i18n.t('search')}</button>
+          <button id="transferAddProductsBtn" class="btn ghost">${window.i18n.t('add_products')}</button>
         </div>
-        <div id="transferSearchResults" class="grid two" style="margin-top: 12px;"></div>
         <div style="margin-top: 16px;">
           <h4>${window.i18n.t('items')}</h4>
           <div id="transferItemsList" class="grid two"></div>
@@ -17692,7 +17981,8 @@ function resetTransferDraft() {
     editingId: null,
     originalItems: [],
     originalFromBranchId: null,
-    originalToBranchId: null
+    originalToBranchId: null,
+    receiverName: ''
   };
 }
 
@@ -17702,8 +17992,8 @@ function bindTransfersSection() {
   const cancelBtn = document.getElementById('transferCancelBtn');
   const fromBranchSelect = document.getElementById('transferFromBranchSelect');
   const branchSelect = document.getElementById('transferBranchSelect');
-  const searchInput = document.getElementById('transferSearchInput');
-  const searchBtn = document.getElementById('transferSearchBtn');
+  const receiverNameInput = document.getElementById('transferReceiverName');
+  const addProductsBtn = document.getElementById('transferAddProductsBtn');
   const submitBtn = document.getElementById('transferSubmitBtn');
 
   if (openBtn) openBtn.addEventListener('click', () => openTransferModal());
@@ -17730,24 +18020,8 @@ function bindTransfersSection() {
     });
   }
 
-  if (searchInput) {
-    searchInput.addEventListener('input', () => renderTransferSearchResults());
-    searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleTransferBarcodeScan();
-      }
-    });
-  }
-
-  if (searchBtn) {
-    searchBtn.addEventListener('click', () => renderTransferSearchResults());
-  }
-
-  bindEntrySearchTypeFilter('transfer', (selectedTypes) => {
-    state.transferDraft.searchTypes = selectedTypes;
-    renderTransferSearchResults();
-  });
+  if (receiverNameInput) receiverNameInput.addEventListener('input', () => { state.transferDraft.receiverName = receiverNameInput.value; });
+  if (addProductsBtn) addProductsBtn.addEventListener('click', () => openVoucherProductsPicker('transfer'));
 
   if (submitBtn) {
     submitBtn.addEventListener('click', () => submitTransferVoucher());
@@ -17762,9 +18036,6 @@ function openTransferModal() {
   renderTransfersSection();
   const errorEl = document.getElementById('transferError');
   if (errorEl) errorEl.textContent = '';
-  const searchInput = document.getElementById('transferSearchInput');
-  if (searchInput) searchInput.value = '';
-  renderTransferSearchResults();
   overlay.classList.remove('hidden');
 }
 
@@ -17778,6 +18049,7 @@ function openTransferEditModal(record) {
   state.transferDraft.originalFromBranchId = fallbackFromBranchId;
   state.transferDraft.toBranchId = record.toBranchId || '';
   state.transferDraft.originalToBranchId = record.toBranchId || '';
+  state.transferDraft.receiverName = record.receiverName || '';
   state.transferDraft.items = normalizeItems(record.items).map((item) => ({ ...item }));
   state.transferDraft.originalItems = normalizeItems(record.items).map((item) => ({ ...item }));
   renderTransfersSection();
@@ -17794,9 +18066,11 @@ function closeTransferModal() {
 function renderTransfersSection() {
   if (!state.transferDraft) resetTransferDraft();
   const storekeeperInput = document.getElementById('transferStorekeeper');
+  const receiverNameInput = document.getElementById('transferReceiverName');
   const fromBranchSelect = document.getElementById('transferFromBranchSelect');
   const branchSelect = document.getElementById('transferBranchSelect');
   if (storekeeperInput) storekeeperInput.value = state.user?.name || '-';
+  if (receiverNameInput) receiverNameInput.value = state.transferDraft.receiverName || '';
   if (!state.transferDraft.fromBranchId) {
     state.transferDraft.fromBranchId = getMainBranchId() || '';
   }
@@ -17808,8 +18082,6 @@ function renderTransfersSection() {
     renderBranchOptions(branchSelect);
     branchSelect.value = state.transferDraft.toBranchId || '';
   }
-  renderEntrySearchTypeFilter('transfer', state.transferDraft.searchTypes);
-  renderTransferSearchResults();
   renderTransferItems();
   renderTransfersTable();
 }
@@ -17969,6 +18241,7 @@ function submitTransferVoucher() {
     const payload = {
       fromBranchId: newFromBranchId,
       toBranchId: newToBranchId,
+      receiverName: state.transferDraft.receiverName || '',
       items: state.transferDraft.items
     };
     db.ref(`transfers/${editingId}`).update(payload).then(() => {
@@ -18004,6 +18277,7 @@ function submitTransferVoucher() {
       createdAt: serverTime,
       storekeeperId: state.user?.id || null,
       storekeeperName: state.user?.name || null,
+      receiverName: state.transferDraft.receiverName || '',
       fromBranchId: state.transferDraft.fromBranchId,
       toBranchId: state.transferDraft.toBranchId,
       items: state.transferDraft.items
@@ -18033,7 +18307,7 @@ function renderTransfersTable() {
   table.innerHTML = '';
   if (entries.length === 0) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td colspan="7">${window.i18n.t('no_data')}</td>`;
+    row.innerHTML = `<td colspan="8">${window.i18n.t('no_data')}</td>`;
     table.appendChild(row);
     return;
   }
@@ -18048,6 +18322,7 @@ function renderTransfersTable() {
       <td>${getBranchLabel(rec.fromBranchId)}</td>
       <td>${getBranchLabel(rec.toBranchId)}</td>
       <td>${rec.storekeeperName || '-'}</td>
+      <td>${escapeHtml(rec.receiverName || '-')}</td>
       <td>${formatDate(rec.createdAt)}</td>
       <td>${items.length}</td>
       <td>
@@ -19171,6 +19446,7 @@ function setupScrapReturnSection() {
             <th>${window.i18n.t('scrap_return_number')}</th>
             <th>${window.i18n.t('from_branch')}</th>
             <th>${window.i18n.t('storekeeper_name')}</th>
+            <th>${window.i18n.t('scrap_sender_name')}</th>
             <th>${window.i18n.t('date_time')}</th>
             <th>${window.i18n.t('items')}</th>
             <th>${window.i18n.t('actions')}</th>
@@ -19185,22 +19461,23 @@ function setupScrapReturnSection() {
           <h3>${window.i18n.t('scrap_return_voucher')}</h3>
           <button id="scrapReturnModalCloseBtn" class="btn ghost small">×</button>
         </div>
-        <div class="grid two" style="margin-top: 12px;">
+        <div class="grid three" style="margin-top: 12px;">
           <div>
             <label class="tag">${window.i18n.t('storekeeper_name')}</label>
             <input id="scrapReturnStorekeeper" class="input" readonly />
+          </div>
+          <div>
+            <label class="tag">${window.i18n.t('scrap_sender_name')}</label>
+            <input id="scrapReturnSenderName" class="input" />
           </div>
           <div>
             <label class="tag">${window.i18n.t('from_branch')}</label>
             <select id="scrapReturnBranchSelect" class="input"></select>
           </div>
         </div>
-        ${buildEntrySearchTypeFilterHtml('scrapReturn')}
         <div class="row" style="margin-top: 12px;">
-          <input id="scrapReturnSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_items')}" />
-          <button id="scrapReturnSearchBtn" class="btn ghost small">${window.i18n.t('search')}</button>
+          <button id="scrapReturnAddProductsBtn" class="btn ghost">${window.i18n.t('add_products')}</button>
         </div>
-        <div id="scrapReturnSearchResults" class="grid two" style="margin-top: 12px;"></div>
         <div style="margin-top: 16px;">
           <h4>${window.i18n.t('items')}</h4>
           <div id="scrapReturnItemsList" class="grid two"></div>
@@ -19226,7 +19503,8 @@ function resetScrapReturnDraft() {
     items: [],
     editingId: null,
     originalItems: [],
-    originalBranchId: null
+    originalBranchId: null,
+    senderName: ''
   };
 }
 
@@ -19235,8 +19513,8 @@ function bindScrapReturnSection() {
   const closeBtn = document.getElementById('scrapReturnModalCloseBtn');
   const cancelBtn = document.getElementById('scrapReturnCancelBtn');
   const branchSelect = document.getElementById('scrapReturnBranchSelect');
-  const searchInput = document.getElementById('scrapReturnSearchInput');
-  const searchBtn = document.getElementById('scrapReturnSearchBtn');
+  const senderNameInput = document.getElementById('scrapReturnSenderName');
+  const addProductsBtn = document.getElementById('scrapReturnAddProductsBtn');
   const submitBtn = document.getElementById('scrapReturnSubmitBtn');
 
   if (openBtn) openBtn.addEventListener('click', () => openScrapReturnModal());
@@ -19251,23 +19529,9 @@ function bindScrapReturnSection() {
     });
   }
 
-  if (searchInput) {
-    searchInput.addEventListener('input', () => renderScrapReturnSearchResults());
-    searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleScrapReturnBarcodeScan();
-      }
-    });
-  }
-
-  if (searchBtn) searchBtn.addEventListener('click', () => renderScrapReturnSearchResults());
+  if (senderNameInput) senderNameInput.addEventListener('input', () => { state.scrapReturnDraft.senderName = senderNameInput.value; });
+  if (addProductsBtn) addProductsBtn.addEventListener('click', () => openVoucherProductsPicker('scrapReturn'));
   if (submitBtn) submitBtn.addEventListener('click', () => submitScrapReturnVoucher());
-
-  bindEntrySearchTypeFilter('scrapReturn', (selectedTypes) => {
-    state.scrapReturnDraft.searchTypes = selectedTypes;
-    renderScrapReturnSearchResults();
-  });
 }
 
 function openScrapReturnModal() {
@@ -19277,9 +19541,6 @@ function openScrapReturnModal() {
   renderScrapReturnSection();
   const errorEl = document.getElementById('scrapReturnError');
   if (errorEl) errorEl.textContent = '';
-  const searchInput = document.getElementById('scrapReturnSearchInput');
-  if (searchInput) searchInput.value = '';
-  renderScrapReturnSearchResults();
   overlay.classList.remove('hidden');
 }
 
@@ -19290,6 +19551,7 @@ function openScrapReturnEditModal(record) {
   state.scrapReturnDraft.editingId = record.id || null;
   state.scrapReturnDraft.branchId = record.branchId || '';
   state.scrapReturnDraft.originalBranchId = record.branchId || '';
+  state.scrapReturnDraft.senderName = record.senderName || '';
   state.scrapReturnDraft.items = normalizeItems(record.items).map((item) => ({ ...item }));
   state.scrapReturnDraft.originalItems = normalizeItems(record.items).map((item) => ({ ...item }));
   renderScrapReturnSection();
@@ -19306,14 +19568,14 @@ function closeScrapReturnModal() {
 function renderScrapReturnSection() {
   if (!state.scrapReturnDraft) resetScrapReturnDraft();
   const storekeeperInput = document.getElementById('scrapReturnStorekeeper');
+  const senderNameInput = document.getElementById('scrapReturnSenderName');
   const branchSelect = document.getElementById('scrapReturnBranchSelect');
   if (storekeeperInput) storekeeperInput.value = state.user?.name || '-';
+  if (senderNameInput) senderNameInput.value = state.scrapReturnDraft.senderName || '';
   if (branchSelect) {
     renderBranchOptions(branchSelect, { excludeMain: true });
     branchSelect.value = state.scrapReturnDraft.branchId || '';
   }
-  renderEntrySearchTypeFilter('scrapReturn', state.scrapReturnDraft.searchTypes);
-  renderScrapReturnSearchResults();
   renderScrapReturnItems();
   renderScrapReturnTable();
 }
@@ -19469,6 +19731,7 @@ function submitScrapReturnVoucher() {
     const oldBranchId = state.scrapReturnDraft.originalBranchId || newBranchId;
     const payload = {
       branchId: newBranchId,
+      senderName: state.scrapReturnDraft.senderName || '',
       items: state.scrapReturnDraft.items
     };
     db.ref(`scrapReturn/${editingId}`).update(payload).then(() => {
@@ -19501,6 +19764,7 @@ function submitScrapReturnVoucher() {
       createdAt: serverTime,
       storekeeperId: state.user?.id || null,
       storekeeperName: state.user?.name || null,
+      senderName: state.scrapReturnDraft.senderName || '',
       branchId: state.scrapReturnDraft.branchId,
       items: state.scrapReturnDraft.items
     };
@@ -19528,7 +19792,7 @@ function renderScrapReturnTable() {
   table.innerHTML = '';
   if (entries.length === 0) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td colspan="6">${window.i18n.t('no_data')}</td>`;
+    row.innerHTML = `<td colspan="7">${window.i18n.t('no_data')}</td>`;
     table.appendChild(row);
     return;
   }
@@ -19539,6 +19803,7 @@ function renderScrapReturnTable() {
       <td>${rec.scrapReturnNumber || '-'}</td>
       <td>${getBranchLabel(rec.branchId)}</td>
       <td>${rec.storekeeperName || '-'}</td>
+      <td>${escapeHtml(rec.senderName || '-')}</td>
       <td>${formatDate(rec.createdAt)}</td>
       <td>${items.length}</td>
       <td>
@@ -19746,6 +20011,7 @@ function printTransferReport(record) {
     { label: window.i18n.t('branch'), value: getBranchRouteLabel(record.fromBranchId, record.toBranchId) },
     { label: window.i18n.t('date_time'), value: formatDate(record.createdAt) },
     { label: window.i18n.t('storekeeper_name'), value: record.storekeeperName || '-' },
+    { label: window.i18n.t('receiver_name'), value: record.receiverName || '-' },
     { label: window.i18n.t('items'), value: items.length }
   ];
   const columns = [
@@ -19809,6 +20075,7 @@ function printScrapReturnReport(record) {
     { label: window.i18n.t('from_branch'), value: getBranchLabel(record.branchId) },
     { label: window.i18n.t('date_time'), value: formatDate(record.createdAt) },
     { label: window.i18n.t('storekeeper_name'), value: record.storekeeperName || '-' },
+    { label: window.i18n.t('scrap_sender_name'), value: record.senderName || '-' },
     { label: window.i18n.t('items'), value: items.length }
   ];
   const columns = [
@@ -24555,6 +24822,31 @@ function watchData() {
       refreshAllDataViews();
     });
   });
+
+  orderingAuth.onAuthStateChanged((user) => {
+    if (!user) {
+      orderingAuth.signInAnonymously().catch((error) => {
+        console.error('Could not sign in to the ordering platform', error);
+        state.cache.onlineOrders = {};
+        renderOnlineOrders();
+      });
+      return;
+    }
+    if (onlineOrdersListenerAttached) return;
+    onlineOrdersListenerAttached = true;
+    orderingDb.ref('orderingPlatform/onlineOrders').on('value', (snap) => {
+      state.cache.onlineOrders = snap.val() || {};
+      if (state.importInProgress || isEditingDataInput()) {
+        state.pendingDataRefresh = true;
+        return;
+      }
+      renderOnlineOrders();
+    }, (error) => {
+      console.error('Could not load online orders', error);
+      state.cache.onlineOrders = {};
+      renderOnlineOrders();
+    });
+  });
 }
 
 function isEditingDataInput() {
@@ -24570,6 +24862,7 @@ function refreshAllDataViews() {
   renderListSections();
   renderReportsSection();
   renderOrders();
+  renderOnlineOrders();
   renderDevicesCashiers();
   renderUsers();
   renderTablesSection();

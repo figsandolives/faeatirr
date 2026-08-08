@@ -550,6 +550,14 @@
       return '';
     }
 
+    function belongsToCurrentCashierBranch(order) {
+      const currentBranchId = getCurrentCashierBranchId();
+      // The branch ID is stable even when the accounting screen is viewed in
+      // another language.  Prefer it over the translated branch label.
+      if (currentBranchId && String(order?.branchId || '') === String(currentBranchId)) return true;
+      return String(order?.branch || order?.branchName || '').trim() === String(currentBranch || '').trim();
+    }
+
     function getCurrentBranchTables() {
       const branchId = getCurrentCashierBranchId();
       if (!branchId) return [];
@@ -2378,7 +2386,7 @@ function refreshUI() {
     function renderCashier() {
       const app = document.getElementById('app');
       const visibleOrders = allOrders
-        .filter(o => o.branch === currentBranch)
+        .filter(belongsToCurrentCashierBranch)
         .filter(o => !dailyInvoiceSearchTerm || (o.invoiceNumber || '').toString().includes(dailyInvoiceSearchTerm))
         .sort((a, b) => b.timestamp - a.timestamp);
       const cashierPageSize = 10;

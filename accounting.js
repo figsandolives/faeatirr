@@ -21847,7 +21847,13 @@ function saveOrderEdits() {
   const total = Number((netTotal + deliveryFee).toFixed(3));
 
   const customerName = customerNameInput || state.editingOrder.customerName || state.editingOrder.name || null;
-  const branchName = branchId ? getLocalizedName(branches[branchId]) : (branchSelect?.selectedOptions?.[0]?.textContent || state.editingOrder.branchName || state.editingOrder.branch || null);
+  // Persist a stable branch label. `getLocalizedName` follows the interface
+  // language, which previously moved invoices between cashier lists when an
+  // accounting user saved an invoice while using English.
+  const selectedBranch = branchId ? branches[branchId] : null;
+  const branchName = selectedBranch
+    ? (selectedBranch.nameAr || selectedBranch.name || selectedBranch.nameEn || null)
+    : (state.editingOrder.branchName || state.editingOrder.branch || branchSelect?.selectedOptions?.[0]?.textContent || null);
   const deliveryZoneName = deliveryZoneId ? (zoneSelect?.selectedOptions?.[0]?.textContent || null) : getOrderZoneName(state.editingOrder);
   const paymentMethod = paymentMethodId || getOrderPaymentValue(state.editingOrder) || null;
   const paymentMethodName = paymentSelect?.selectedOptions?.[0]?.textContent || getOrderPaymentLabel(state.editingOrder);

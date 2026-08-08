@@ -30,6 +30,7 @@
       <nav class="menu">
         <button class="nav-item" data-icon="📊" data-section="reports" data-i18n="reports"></button>
         <button class="nav-item" data-icon="🧾" data-section="orders" data-i18n="orders"></button>
+        <button class="nav-item" data-icon="🛍️" data-section="onlineOrders" data-i18n="online_orders"></button>
         <button class="nav-item" data-icon="👥" data-section="customers" data-i18n="customers"></button>
         <button class="nav-item" data-icon="📦" data-section="products" data-i18n="products"></button>
         <button class="nav-item" data-icon="📋" data-section="productInfo" data-i18n="product_information"></button>
@@ -96,6 +97,7 @@
       <div id="reorderNotice" class="notice hidden"></div>
       <section id="section-reports" class="section"></section>
       <section id="section-orders" class="section"></section>
+      <section id="section-onlineOrders" class="section"></section>
       <section id="section-customers" class="section"></section>
       <section id="section-products" class="section"></section>
       <section id="section-productInfo" class="section"></section>
@@ -628,12 +630,13 @@
   </div>
 
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="translation.js"></script>
-  <script src="accounting.js"></script>
+  <script src="accounting.js?v=20260808-discount-sync"></script>
   <script src="label-print-bridge.js"></script>
 </body>
 </html>

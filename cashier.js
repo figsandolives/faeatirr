@@ -1348,10 +1348,19 @@
     }
 
     function getOrderItemsNetTotal(order) {
+      // Orders edited from accounting keep the item rows at their gross value
+      // and store the order-level discount in itemsNetTotal.  Prefer that
+      // canonical value so a reprint never loses an accounting discount.
+      const storedNetTotal = parseFloat(order?.itemsNetTotal ?? order?.netTotal);
+      if (!isNaN(storedNetTotal) && storedNetTotal >= 0) return storedNetTotal;
       return (order?.items || []).reduce((sum, item) => sum + (parseFloat(item?.total) || 0), 0);
     }
 
     function getOrderGrandTotal(order) {
+      // `total` is the amount actually charged.  It is updated by the
+      // accounting screen when a manager discount is applied.
+      const storedTotal = parseFloat(order?.total ?? order?.grandTotal);
+      if (!isNaN(storedTotal) && storedTotal >= 0) return storedTotal;
       return getOrderItemsNetTotal(order) + getOrderDeliveryFee(order);
     }
 
@@ -2461,7 +2470,7 @@ function refreshUI() {
       <td>${order.invoiceNumber}${whatsappPendingBadge(order)}</td>
       <td>${order.customerName}</td>
       <td>${formatDate(order.timestamp)} ${formatTime(order.timestamp)}</td>
-      <td>${order.total.toFixed(3)} ${cashierT('kd')}</td>
+      <td>${getOrderGrandTotal(order).toFixed(3)} ${cashierT('kd')}</td>
       ${currentBranch === 'اليرموك' ? `
         <td>
           ${order.orderType === 'delivery' && hasOpenDailySession() && order.dailySessionId === currentDailySession?.id ? `
@@ -4740,7 +4749,7 @@ function showNumericKeypadForInvoice(index, inputField) {
   const invoiceItemsSubtotal = getOrderItemsGrossTotal(order);
   const invoiceDiscountTotal = getOrderDiscountTotal(order);
   const invoiceItemsNetTotal = getOrderItemsNetTotal(order);
-  const invoiceGrandTotal = invoiceItemsNetTotal + invoiceDeliveryFee;
+  const invoiceGrandTotal = getOrderGrandTotal(order);
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.innerHTML = `

@@ -21645,9 +21645,10 @@ function renderOrderItemsEditor() {
   }, 0).toFixed(3));
   const discountType = document.getElementById('orderDiscountType')?.value || 'none';
   const discountValue = Number(normalizeDigits(document.getElementById('orderDiscountValue')?.value || '0')) || 0;
-  const discountAmount = discountType === 'percent'
+  const requestedDiscountAmount = discountType === 'percent'
     ? Number((subtotal * (discountValue / 100)).toFixed(3))
     : (discountType === 'fixed' ? Number(discountValue.toFixed(3)) : 0);
+  const discountAmount = Math.min(Math.max(requestedDiscountAmount, 0), subtotal);
   const netTotal = Math.max(subtotal - discountAmount, 0);
   const deliveryFee = Number(document.getElementById('orderDeliveryFee')?.value || 0) || 0;
   const grandTotal = Number((netTotal + deliveryFee).toFixed(3));
@@ -21835,9 +21836,13 @@ function saveOrderEdits() {
   }
 
   const subtotal = Number(items.reduce((sum, item) => sum + Number(item.total || 0), 0).toFixed(3));
-  const discount = discountType === 'percent'
+  const requestedDiscount = discountType === 'percent'
     ? Number((subtotal * (discountValue / 100)).toFixed(3))
     : (discountType === 'fixed' ? Number(discountValue.toFixed(3)) : 0);
+  // A discount cannot make an invoice negative.  Keeping the persisted
+  // discount equal to the deducted amount prevents the cashier receipt and
+  // accounting reports from showing conflicting totals.
+  const discount = Math.min(Math.max(requestedDiscount, 0), subtotal);
   const netTotal = Math.max(subtotal - discount, 0);
   const total = Number((netTotal + deliveryFee).toFixed(3));
 

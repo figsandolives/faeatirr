@@ -12350,6 +12350,7 @@ function openProductionLabelCountModal() {
       <p id="productionLabelCountError" class="helper form-error" style="min-height:20px;"></p>
       <div class="row" style="justify-content:flex-end;gap:10px;margin-top:10px;">
         <button id="productionLabelCountCancel" class="btn ghost">${window.i18n?.t?.('cancel') || 'إلغاء'}</button>
+        <button id="productionLabelCountSkipPrint" class="btn ghost">تخطي الطباعة وتسجيل الإنتاج</button>
         <button id="productionLabelCountPrint" class="btn primary">${window.i18n?.t?.('print_label') || 'طباعة الملصق'}</button>
       </div>
     </div>
@@ -12370,7 +12371,7 @@ function openProductionLabelCountModal() {
     }
   }, true);
   document.getElementById('productionLabelCountCancel')?.addEventListener('click', close);
-  document.getElementById('productionLabelCountPrint')?.addEventListener('click', () => {
+  const saveProduction = (shouldPrint) => {
     normalizeCountInput();
     const count = Math.floor(Number(input.value || 0));
     if (!Number.isFinite(count) || count <= 0) {
@@ -12380,11 +12381,14 @@ function openProductionLabelCountModal() {
     }
     if (state.productionDraft) {
       state.productionDraft.qty = count;
-      state.productionDraft.labelCopies = count;
+      state.productionDraft.labelCopies = shouldPrint ? count : 0;
+      state.productionDraft.skipLabelPrinting = !shouldPrint;
     }
     close();
     submitProductionVoucher();
-  });
+  };
+  document.getElementById('productionLabelCountPrint')?.addEventListener('click', () => saveProduction(true));
+  document.getElementById('productionLabelCountSkipPrint')?.addEventListener('click', () => saveProduction(false));
   setTimeout(() => input?.focus(), 50);
 }
 
@@ -13530,6 +13534,8 @@ function resetProductionDraft() {
     itemType: null,
     searchTypes: ['product'],
     qty: null,
+    labelCopies: null,
+    skipLabelPrinting: false,
     productionDate: '',
     expiryDate: '',
     productInfoConfirmed: false,
@@ -14106,12 +14112,15 @@ function renderProductionIssueList() {
 function submitProductionVoucher() {
   const errorEl = document.getElementById('productionError');
   if (errorEl) errorEl.textContent = '';
-  const rawLabelCopies = Math.floor(Number(state.productionDraft.labelCopies || state.productionDraft.qty || 0));
-  if (!state.productionDraft.item || !rawLabelCopies || !state.productionDraft.productionDate || !state.productionDraft.expiryDate) {
+  const rawProductionQty = Math.floor(Number(state.productionDraft.qty || 0));
+  if (!state.productionDraft.item || !rawProductionQty || !state.productionDraft.productionDate || !state.productionDraft.expiryDate) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
-  const labelCopies = Math.max(1, rawLabelCopies);
+  const productionQty = Math.max(1, rawProductionQty);
+  const labelCopies = state.productionDraft.skipLabelPrinting
+    ? 0
+    : Math.max(1, Math.floor(Number(state.productionDraft.labelCopies || productionQty)));
   if (!state.productionDraft.issueId && !state.productionDraft.issueSkipped) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
@@ -14145,7 +14154,7 @@ function submitProductionVoucher() {
       itemNameEn: itemData.nameEn || itemData.name || original.itemNameEn || null,
       unitId: itemData.unitId || original.unitId || null,
       unitName: getResolvedItemUnitName(itemData) || original.unitName || null,
-      qty: labelCopies,
+      qty: productionQty,
       productionDate: state.productionDraft.productionDate,
       expiryDate: state.productionDraft.expiryDate,
       ingredients: state.productionDraft.productInfoDraft?.ingredients || original.ingredients || null,
@@ -14160,7 +14169,7 @@ function submitProductionVoucher() {
       const oldQty = Number(original.qty || 0);
       const newItemType = state.productionDraft.itemType || oldItemType;
       const newItemId = state.productionDraft.item?.id || oldItemId;
-      const newQty = Number(labelCopies || 0);
+      const newQty = Number(productionQty || 0);
       const updates = [];
       if (oldItemType === newItemType && oldItemId === newItemId && oldBranchId === newBranchId) {
         const diff = newQty - oldQty;
@@ -14198,7 +14207,7 @@ function submitProductionVoucher() {
       itemNameEn: itemData.nameEn || itemData.name || null,
       unitId: itemData.unitId || null,
       unitName: getResolvedItemUnitName(itemData) || null,
-      qty: labelCopies,
+      qty: productionQty,
       labelCopies,
       productionDate: state.productionDraft.productionDate,
       expiryDate: state.productionDraft.expiryDate,
@@ -14208,8 +14217,10 @@ function submitProductionVoucher() {
     };
     const productionRef = db.ref('production').push();
     productionRef.set(payload).then(() => {
-      updateItemStock(state.productionDraft.itemType, state.productionDraft.item.id, branchId, Number(labelCopies || 0)).then(() => {
-        printProductionLabel(payload, labelCopies);
+      updateItemStock(state.productionDraft.itemType, state.productionDraft.item.id, branchId, Number(productionQty || 0)).then(() => {
+        if (labelCopies > 0) {
+          printProductionLabel(payload, labelCopies);
+        }
         resetProductionDraft();
         renderProductionSection();
         closeProductionModal();

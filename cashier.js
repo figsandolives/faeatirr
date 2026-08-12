@@ -13,6 +13,7 @@
     // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
+    const CASHIER_INVOICE_WHATSAPP_URL = 'https://us-central1-menassafigs.cloudfunctions.net/sendInvoiceWhatsapp';
 
     // المناطق
     const areas = [
@@ -4703,6 +4704,8 @@ function showNumericKeypadForInvoice(index, inputField) {
         
         await closeInvoicePage(true);
         showThermalInvoice(order);
+        // لا ننتظر الإرسال حتى لا تتعطل شاشة الكاشير أو الطباعة عند تأخر واتساب.
+        sendCashierInvoiceToWhatsApp(order);
         showToast('تم حفظ الفاتورة بنجاح');
       } catch (error) {
         console.error('Error saving order:', error);
@@ -4843,12 +4846,6 @@ function showNumericKeypadForInvoice(index, inputField) {
               <span>-${invoiceDiscountTotal.toFixed(3)} د.ك</span>
             </div>
           ` : ''}
-          ${invoiceDeliveryFee > 0 ? `
-            <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 2px;">
-              <span>رسوم التوصيل:</span>
-              <span>${invoiceDeliveryFee.toFixed(3)} د.ك</span>
-            </div>
-          ` : ''}
           <div style="display: flex; justify-content: space-between; font-size: 14px; font-weight: 900; margin-top: 5px; border-top: 2px double #000; padding-top: 5px;">
             <span>الإجمالي:</span>
             <span>${invoiceGrandTotal.toFixed(3)} د.ك</span>
@@ -4891,6 +4888,67 @@ function showNumericKeypadForInvoice(index, inputField) {
   `;
   document.body.appendChild(modal);
 }
+
+    function cashierWhatsappPhone(value) {
+      const digits = String(value || '').replace(/[٠-٩]/g, digit => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(digit)]).replace(/\D/g, '').replace(/^965/, '');
+      return /^\d{8}$/.test(digits) ? digits : '';
+    }
+
+    // هذه نسخة العميل فقط: نفس الإيصال الحراري، لكن تتضمن التوصيل داخل PDF المرسل.
+    function cashierWhatsappInvoiceMarkup(order) {
+      const deliveryFee = getOrderDeliveryFee(order);
+      const itemsSubtotal = getOrderItemsGrossTotal(order);
+      const discount = getOrderDiscountTotal(order);
+      const grandTotal = getOrderGrandTotal(order);
+      return `<div class="cashier-whatsapp-receipt" dir="rtl" style="width:72mm;padding:8px;background:#fff;color:#000;font-family:Cairo,Arial,sans-serif;font-size:11px;line-height:1.5">
+        <div style="text-align:center;border-bottom:2px dashed #000;padding-bottom:8px;margin-bottom:8px">
+          <img src="logo.png" alt="" style="width:68px;height:68px;object-fit:contain;display:block;margin:0 auto 5px" onerror="this.style.display='none'">
+          ${getInvoiceBusinessHeader(order)}
+        </div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px dashed #aaa;padding-bottom:5px;margin-bottom:6px"><span>فاتورة <b>#${escapeHtml(order.invoiceNumber)}</b></span><span>${escapeHtml(formatDate(order.timestamp))}</span></div>
+        <div style="margin-bottom:7px"><b>العميل:</b> ${escapeHtml(order.customerName || '—')}<br><b>الهاتف:</b> <span dir="ltr">${escapeHtml(cashierWhatsappPhone(order.phoneNumber) || order.phoneNumber || '—')}</span>${order.address ? `<br><b>العنوان:</b> ${escapeHtml(order.address)}` : ''}</div>
+        <table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:right;border-bottom:1px solid #000;padding:3px 0">الصنف</th><th style="border-bottom:1px solid #000;padding:3px 0">الكمية</th><th style="text-align:left;border-bottom:1px solid #000;padding:3px 0">السعر</th></tr></thead><tbody>${(order.items || []).map(item => `<tr><td style="padding:4px 0;border-bottom:1px dotted #bbb">${escapeHtml(item.productName || '')}${item.notes ? `<small style="display:block">${escapeHtml(item.notes)}</small>` : ''}</td><td style="text-align:center;border-bottom:1px dotted #bbb">${Number(item.quantity || 0)}</td><td style="text-align:left;border-bottom:1px dotted #bbb">${formatNumberWithThreeDecimals(item.total)}</td></tr>`).join('')}</tbody></table>
+        <div style="margin-top:8px;border-top:1px solid #000;padding-top:5px"><div style="display:flex;justify-content:space-between"><span>مجموع الأصناف</span><span>${itemsSubtotal.toFixed(3)} د.ك</span></div>${discount > 0 ? `<div style="display:flex;justify-content:space-between"><span>الخصم</span><span>-${discount.toFixed(3)} د.ك</span></div>` : ''}${deliveryFee > 0 ? `<div style="display:flex;justify-content:space-between"><span>رسوم التوصيل</span><span>${deliveryFee.toFixed(3)} د.ك</span></div>` : ''}<div style="display:flex;justify-content:space-between;font-size:14px;font-weight:900;border-top:2px double #000;margin-top:5px;padding-top:5px"><span>الإجمالي</span><span>${grandTotal.toFixed(3)} د.ك</span></div></div>
+        <div style="text-align:center;border-top:1px dashed #aaa;margin-top:10px;padding-top:7px;font-size:10px"><b>تم تأكيد طلبك</b><br>شكراً لزيارتكم</div>
+      </div>`;
+    }
+
+    async function createCashierWhatsappInvoicePdf(order) {
+      if (!window.html2canvas || !window.jspdf?.jsPDF) throw new Error('مكتبات PDF غير متوفرة');
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;left:-10000px;top:0;width:72mm;background:#fff;z-index:-1';
+      host.innerHTML = cashierWhatsappInvoiceMarkup(order);
+      document.body.appendChild(host);
+      try {
+        await document.fonts?.ready;
+        const image = host.querySelector('img');
+        await image?.decode?.().catch(() => undefined);
+        const canvas = await html2canvas(host.firstElementChild, { scale: 2, backgroundColor: '#fff', useCORS: true, logging: false });
+        const heightMm = Math.max(100, Math.ceil(canvas.height * 72 / canvas.width));
+        const pdf = new window.jspdf.jsPDF({ orientation: 'p', unit: 'mm', format: [80, heightMm + 8] });
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.96), 'JPEG', 4, 4, 72, heightMm, undefined, 'FAST');
+        return pdf.output('datauristring').split(',')[1] || '';
+      } finally {
+        host.remove();
+      }
+    }
+
+    async function sendCashierInvoiceToWhatsApp(order) {
+      const phone = cashierWhatsappPhone(order?.phoneNumber);
+      if (!phone || !order?.invoiceNumber) return;
+      try {
+        const pdfBase64 = await createCashierWhatsappInvoicePdf(order);
+        if (!pdfBase64) throw new Error('ملف PDF فارغ');
+        const response = await fetch(CASHIER_INVOICE_WHATSAPP_URL, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: `C${order.invoiceNumber}`, phone: `965${phone}`, pdfBase64 })
+        });
+        if (!response.ok) throw new Error(`WhatsApp status ${response.status}`);
+      } catch (error) {
+        console.warn('Could not send cashier invoice through WhatsApp', error);
+        showToast('تم حفظ الفاتورة، وتعذر إرسال واتساب تلقائياً', true);
+      }
+    }
 
 
     let cachedInvoiceLogoDataUrl = '';

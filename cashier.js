@@ -804,6 +804,16 @@
       return getLocalDayRange(new Date());
     }
 
+    // Keep the real creation timestamp intact, but give accounting a separate
+    // business date for orders that are booked for a later delivery day.
+    // This is deliberately a date string so it remains stable across devices
+    // and time zones (unlike a midnight timestamp).
+    function getAccountingDateForNewOrder(deliveryDate) {
+      const today = new Date();
+      const todayValue = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      return deliveryDate && deliveryDate !== todayValue ? deliveryDate : '';
+    }
+
     function normalizeOrdersSnapshot(snapshot) {
       return snapshot.val()
         ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data }))
@@ -4681,6 +4691,10 @@ function showNumericKeypadForInvoice(index, inputField) {
           ? `${currentOrder.selectedAddress.area || ''}${currentOrder.selectedAddress.details ? ` - ${currentOrder.selectedAddress.details}` : ''}`.trim()
           : '',
         deliveryDate: currentOrder.deliveryDate || '',
+        // A future delivery is shown in accounting and inventory on its
+        // delivery date, not on the date the cashier created it.
+        accountingDate: getAccountingDateForNewOrder(currentOrder.deliveryDate),
+        isInvoiceDeferred: Boolean(getAccountingDateForNewOrder(currentOrder.deliveryDate)),
         deliveryTimeFrom: currentOrder.deliveryTimeFrom || '',
         deliveryTimeTo: currentOrder.deliveryTimeTo || '',
         items: cleanedItems,

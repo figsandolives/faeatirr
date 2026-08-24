@@ -557,6 +557,16 @@
             <select id="orderPayment"></select>
             <select id="orderBranch"></select>
           </div>
+          <div style="margin-top: 16px; padding: 14px; border: 1px solid #c7d2fe; background: #eef2ff; border-radius: 10px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 800; color: #3730a3;">
+              <input id="orderDeferredToggle" type="checkbox" style="width: 18px; height: 18px;" />
+              <span>تأجيل الفاتورة</span>
+            </label>
+            <div id="orderDeferredDateWrap" style="margin-top: 12px;">
+              <label for="orderDeferredDate" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">تاريخ التأجيل</label>
+              <input id="orderDeferredDate" type="date" style="width: 100%; padding: 10px; border: 1px solid #c7d2fe; border-radius: 8px; font-size: 16px;" />
+            </div>
+          </div>
         </div>
         <div style="margin-bottom: 30px;">
           <h3 style="font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #667eea;" data-i18n="discount"></h3>

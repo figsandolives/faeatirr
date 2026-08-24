@@ -12676,6 +12676,13 @@ function normalizeItems(list) {
 }
 
 function getOrderTimestamp(order) {
+  // `accountingDate` is the operating date selected for a postponed invoice.
+  // Use local midnight to make the date filter inclusive and deterministic,
+  // while `createdAt`/`timestamp` continues to record when it was created.
+  if (order?.accountingDate && /^\d{4}-\d{2}-\d{2}$/.test(order.accountingDate)) {
+    const scheduled = new Date(`${order.accountingDate}T00:00:00`).getTime();
+    if (Number.isFinite(scheduled)) return scheduled;
+  }
   const value = order?.createdAt ?? order?.timestamp ?? order?.date ?? order?.createdAtMs;
   const time = typeof value === 'number' ? value : new Date(value || 0).getTime();
   return Number.isFinite(time) ? time : 0;
@@ -21191,6 +21198,23 @@ function renderOrders() {
     .sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
 
   const filtered = entries.filter((order) => orderMatchesFilters(order, customers));
+  const filteredDay = state.orderFilters.dateFrom && state.orderFilters.dateFrom === state.orderFilters.dateTo
+    ? state.orderFilters.dateFrom
+    : '';
+  // When looking at one day, show the invoices *created* on that day but
+  // transferred to another day. They stay out of today's table because their
+  // accounting date is later, while the notice makes them visible to the
+  // accountant who closed today's invoices.
+  const deferredForFilteredDay = filteredDay
+    ? (() => {
+      const dayStart = new Date(`${filteredDay}T00:00:00`).getTime();
+      const dayEnd = new Date(`${filteredDay}T23:59:59.999`).getTime();
+      return entries.filter((order) => {
+        const createdAt = getCreatedAtSortValue(order.id, order);
+        return order.isInvoiceDeferred && createdAt >= dayStart && createdAt <= dayEnd;
+      });
+    })()
+    : [];
   const pagination = paginateEntries(filtered, state.orderFilters);
   const pagedOrders = pagination.items;
   updatePaginationControls({
@@ -21206,6 +21230,23 @@ function renderOrders() {
   syncPageSizeSelect('ordersPageSize', state.orderFilters);
 
   table.innerHTML = '';
+
+  const deferredNotice = document.getElementById('deferredInvoicesNotice');
+  if (deferredNotice) deferredNotice.remove();
+  if (deferredForFilteredDay.length) {
+    const notice = document.createElement('div');
+    notice.id = 'deferredInvoicesNotice';
+    notice.style.cssText = 'margin:0 0 14px;padding:16px;border:1px solid #c7d2fe;border-radius:12px;background:#eef2ff;color:#312e81;';
+    notice.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:900;font-size:16px;">
+        <span>الفواتير المؤجلة</span>
+        <span style="padding:2px 9px;border-radius:999px;background:#4338ca;color:#fff;font-size:13px;">${deferredForFilteredDay.length}</span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+        ${deferredForFilteredDay.map((order) => `<span style="padding:7px 10px;border:1px solid #a5b4fc;border-radius:8px;background:#fff;font-weight:800;">#${escapeHtml(String(getOrderInvoiceNumber(order)))} <small style="color:#5b21b6;">${escapeHtml(order.accountingDate)}</small></span>`).join('')}
+      </div>`;
+    table.closest('.card')?.parentNode?.insertBefore(notice, table.closest('.card'));
+  }
 
   if (filtered.length === 0) {
     const selectAll = document.getElementById('selectAllOrders');
@@ -21622,6 +21663,21 @@ function openOrderEditModal(order) {
   const discountValueInput = document.getElementById('orderDiscountValue');
   if (discountValueInput) discountValueInput.value = order.discountValue || getOrderDiscountAmount(order) || '';
 
+  const deferredToggle = document.getElementById('orderDeferredToggle');
+  const deferredDate = document.getElementById('orderDeferredDate');
+  const deferredDateWrap = document.getElementById('orderDeferredDateWrap');
+  const syncDeferredDateVisibility = () => {
+    if (!deferredDateWrap || !deferredDate || !deferredToggle) return;
+    deferredDateWrap.style.display = deferredToggle.checked ? '' : 'none';
+    deferredDate.disabled = !deferredToggle.checked;
+  };
+  if (deferredToggle && deferredDate) {
+    deferredToggle.checked = Boolean(order.isInvoiceDeferred && order.accountingDate);
+    deferredDate.value = order.accountingDate || order.deliveryDate || '';
+    deferredToggle.onchange = syncDeferredDateVisibility;
+    syncDeferredDateVisibility();
+  }
+
   renderOrderItemsEditor();
   els.orderEditError.textContent = '';
   els.orderEditOverlay.classList.remove('hidden');
@@ -21821,6 +21877,8 @@ function saveOrderEdits() {
   const paymentSelect = document.getElementById('orderPayment');
   const discountType = document.getElementById('orderDiscountType')?.value || 'none';
   const discountValue = Number(normalizeDigits(document.getElementById('orderDiscountValue')?.value || '0')) || 0;
+  const isInvoiceDeferred = Boolean(document.getElementById('orderDeferredToggle')?.checked);
+  const accountingDate = document.getElementById('orderDeferredDate')?.value || '';
   const customers = state.cache.customers || {};
   const branches = state.cache.branches || {};
 
@@ -21843,6 +21901,10 @@ function saveOrderEdits() {
   });
   if (items.length === 0) {
     els.orderEditError.textContent = window.i18n.t('empty_cart');
+    return;
+  }
+  if (isInvoiceDeferred && !accountingDate) {
+    els.orderEditError.textContent = 'اختر تاريخ التأجيل أولاً.';
     return;
   }
 
@@ -21898,6 +21960,8 @@ function saveOrderEdits() {
     branchId,
     branchName,
     branch: branchName,
+    accountingDate: isInvoiceDeferred ? accountingDate : '',
+    isInvoiceDeferred,
     updatedAt: Date.now()
   };
 

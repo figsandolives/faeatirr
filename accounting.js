@@ -12299,7 +12299,7 @@ function bindProductionLinkModal() {
       }
       closeProductionLinkModal();
       renderProductionDraft();
-      openProductionLabelCountModal();
+      submitProductionVoucher();
     });
   }
   if (els.productionLinkSkip) {
@@ -12310,7 +12310,7 @@ function bindProductionLinkModal() {
       }
       closeProductionLinkModal();
       renderProductionDraft();
-      openProductionLabelCountModal();
+      submitProductionVoucher();
     });
   }
 }
@@ -12319,7 +12319,7 @@ function openProductionLinkModal() {
   if (!els.productionLinkModal) return;
   renderProductionIssueList();
   if (els.productionLinkConfirm) {
-    els.productionLinkConfirm.textContent = window.i18n?.t?.('print_label') || 'طباعة الملصق';
+    els.productionLinkConfirm.textContent = window.i18n?.t?.('confirm') || 'تأكيد';
   }
   els.productionLinkModal.classList.remove('hidden');
 }
@@ -13513,19 +13513,29 @@ function setupProductionSection() {
             <select id="productionBranchSelect" class="input"></select>
           </div>
         </div>
-        ${buildEntrySearchTypeFilterHtml('production')}
         <div class="row" style="margin-top: 12px;">
-          <input id="productionSearchInput" class="input" style="max-width: 320px;" placeholder="${window.i18n.t('search_items')}" />
-          <button id="productionSearchBtn" class="btn ghost small">${window.i18n.t('search')}</button>
+          <button id="openProductionItemsBtn" class="btn primary">${window.i18n.t('add_products')}</button>
         </div>
-        <div id="productionSearchResults" class="grid two" style="margin-top: 12px;"></div>
         <div id="productionDraftSummary" style="margin-top: 16px;"></div>
-        <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+        <div class="production-modal-actions row" style="justify-content: flex-end; margin-top: 12px;">
           <button id="productionCancelBtn" class="btn ghost">${window.i18n.t('cancel')}</button>
-          <button id="productionLinkBtn" class="btn ghost">${window.i18n.t('next')}</button>
-          <button id="productionPrintBtn" class="btn primary">${window.i18n.t('print_label')}</button>
+          <button id="productionLinkBtn" class="btn primary">${window.i18n.t('select_issue_voucher')}</button>
         </div>
         <p id="productionError" class="helper form-error" style="margin-top: 8px;"></p>
+      </div>
+    </div>
+    <div id="productionItemsModal" class="overlay hidden">
+      <div class="modal lg production-items-modal" style="text-align: start; max-width: 900px; width: 100%;">
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <h3>${window.i18n.t('add_products')}</h3>
+          <button id="productionItemsCloseBtn" class="btn ghost small">×</button>
+        </div>
+        <input id="productionItemsSearchInput" class="input" style="margin-top: 12px;" placeholder="${window.i18n.t('product_and_material_search')}" />
+        <div id="productionItemsSearchResults" class="production-items-results" style="margin-top: 12px;"></div>
+        <div class="production-picker-actions row">
+          <span id="productionItemsSelectedCount" class="tag"></span>
+          <button id="productionItemsAddBtn" class="btn primary">${window.i18n.t('add_selected')}</button>
+        </div>
       </div>
     </div>
   `;
@@ -13538,6 +13548,7 @@ function setupProductionSection() {
 function resetProductionDraft() {
   state.productionDraft = {
     item: null,
+    items: [],
     itemType: null,
     searchTypes: ['product'],
     qty: null,
@@ -13571,6 +13582,7 @@ function bindProductionSection() {
   const searchBtn = document.getElementById('productionSearchBtn');
   const linkBtn = document.getElementById('productionLinkBtn');
   const printBtn = document.getElementById('productionPrintBtn');
+  const openItemsBtn = document.getElementById('openProductionItemsBtn');
   const queryFilter = document.getElementById('productionSearchFilter');
   const fromFilter = document.getElementById('productionDateFromFilter');
   const toFilter = document.getElementById('productionDateToFilter');
@@ -13594,6 +13606,7 @@ function bindProductionSection() {
   if (cancelBtn) {
     cancelBtn.addEventListener('click', () => closeProductionModal());
   }
+  if (openItemsBtn) openItemsBtn.addEventListener('click', () => openProductionItemsModal());
 
   if (staffSelect) {
     staffSelect.addEventListener('change', () => {
@@ -13703,6 +13716,7 @@ function openProductionEditModal(record) {
   if (itemData) {
     state.productionDraft.item = { id: record.itemId, type: record.itemType || 'product', item: itemData };
     state.productionDraft.itemType = record.itemType || 'product';
+    state.productionDraft.items = [{ entry: state.productionDraft.item, qty: record.qty || 1, ingredients: record.ingredients || '', origin: record.origin || '' }];
   }
   state.productionDraft.qty = record.qty || null;
   state.productionDraft.productionDate = record.productionDate || '';
@@ -13807,6 +13821,51 @@ function renderProductionStaffSelect() {
 
 function getProductionSearchEntries() {
   return filterEntriesBySearchTypes(getAllItems(), state.productionDraft?.searchTypes);
+}
+
+function openProductionItemsModal() {
+  const modal = document.getElementById('productionItemsModal');
+  const input = document.getElementById('productionItemsSearchInput');
+  if (!modal || !input) return;
+  modal.classList.remove('hidden');
+  input.value = '';
+  const selected = new Set((state.productionDraft.items || []).map((row) => `${row.entry.type}:${row.entry.id}`));
+  const render = () => {
+    const query = input.value.trim();
+    const entries = query ? filterItemEntries(getAllItems(), query) : getAllItems().slice(0, 30);
+    const results = document.getElementById('productionItemsSearchResults');
+    const count = document.getElementById('productionItemsSelectedCount');
+    if (count) count.textContent = `${selected.size} ${window.i18n.t('selected_products')}`;
+    if (!results) return;
+    results.innerHTML = entries.map((entry) => {
+      const key = `${entry.type}:${entry.id}`;
+      const ar = entry.item.nameAr || entry.item.name || '';
+      const en = entry.item.nameEn || '';
+      return `<label class="production-picker-item"><input type="checkbox" value="${escapeHtml(key)}" ${selected.has(key) ? 'checked' : ''} /><span><strong>${escapeHtml(ar)}</strong><small>${escapeHtml(en)}</small></span><span class="tag">${escapeHtml(getResolvedItemUnitName(entry.item) || '-')}</span></label>`;
+    }).join('') || `<p class="helper">${window.i18n.t('no_data')}</p>`;
+    results.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => checkbox.addEventListener('change', () => {
+      checkbox.checked ? selected.add(checkbox.value) : selected.delete(checkbox.value);
+      if (count) count.textContent = `${selected.size} ${window.i18n.t('selected_products')}`;
+    }));
+  };
+  input.oninput = render;
+  document.getElementById('productionItemsCloseBtn').onclick = () => modal.classList.add('hidden');
+  document.getElementById('productionItemsAddBtn').onclick = () => {
+    const existing = new Map((state.productionDraft.items || []).map((row) => [`${row.entry.type}:${row.entry.id}`, row]));
+    getAllItems().forEach((entry) => {
+      const key = `${entry.type}:${entry.id}`;
+      if (selected.has(key) && !existing.has(key)) {
+        const defaults = getProductionInfoDefaults(entry);
+        state.productionDraft.items.push({ entry, qty: '', ingredients: defaults.ingredients, origin: defaults.origin });
+      }
+    });
+    state.productionDraft.items = state.productionDraft.items.filter((row) => selected.has(`${row.entry.type}:${row.entry.id}`));
+    state.productionDraft.item = state.productionDraft.items[0]?.entry || null;
+    modal.classList.add('hidden');
+    renderProductionDraft();
+  };
+  render();
+  setTimeout(() => input.focus(), 50);
 }
 
 function handleProductionBarcodeScan() {
@@ -14005,90 +14064,41 @@ function continueProductionAfterInfo() {
 function renderProductionDraft() {
   const container = document.getElementById('productionDraftSummary');
   const linkBtn = document.getElementById('productionLinkBtn');
-  const printBtn = document.getElementById('productionPrintBtn');
-  const searchInput = document.getElementById('productionSearchInput');
-  const searchBtn = document.getElementById('productionSearchBtn');
   if (!container) return;
-  if (printBtn) {
-    printBtn.style.display = 'none';
-  }
-  if (linkBtn) {
-    linkBtn.textContent = 'اختيار سند الصرف / طباعة الملصق';
-  }
-  if (!state.productionDraft.item) {
+  const draft = state.productionDraft;
+  const items = draft.items || [];
+  if (!items.length) {
     container.innerHTML = `<p class="helper">${window.i18n.t('select')}</p>`;
     if (linkBtn) linkBtn.disabled = true;
-    if (printBtn) printBtn.disabled = true;
-    if (searchInput) searchInput.disabled = false;
-    if (searchBtn) searchBtn.disabled = false;
     return;
   }
-  const item = state.productionDraft.item;
-  if (!state.productionDraft.productInfoConfirmed) {
-    const infoDraft = state.productionDraft.productInfoDraft || { ingredients: '', origin: '' };
-    container.innerHTML = `
-      <div class="notice">
-        <div><strong>${escapeHtml(getLocalizedName(item.item))}</strong></div>
-        <div class="grid two" style="margin-top: 10px;">
-          <div>
-            <label class="tag" for="productionIngredientsInput">المكونات</label>
-            <textarea id="productionIngredientsInput" class="input" rows="4" placeholder="المكونات">${escapeHtml(infoDraft.ingredients || '')}</textarea>
-          </div>
-          <div>
-            <label class="tag" for="productionOriginInput">بلد المنشأ</label>
-            <textarea id="productionOriginInput" class="input" rows="4" placeholder="بلد المنشأ">${escapeHtml(infoDraft.origin || '')}</textarea>
-          </div>
-        </div>
-        <div class="row" style="justify-content: flex-end; margin-top: 10px;">
-          <button id="productionInfoContinueBtn" class="btn primary">حفظ والمتابعة</button>
-          <button id="productionChangeItem" class="btn ghost small">${window.i18n.t('change_product')}</button>
-        </div>
-      </div>
-    `;
-    if (searchInput) searchInput.disabled = true;
-    if (searchBtn) searchBtn.disabled = true;
-    if (linkBtn) linkBtn.disabled = true;
-    if (printBtn) printBtn.disabled = true;
-    document.getElementById('productionIngredientsInput')?.addEventListener('input', (event) => {
-      state.productionDraft.productInfoDraft.ingredients = event.target.value || '';
-    });
-    document.getElementById('productionOriginInput')?.addEventListener('input', (event) => {
-      state.productionDraft.productInfoDraft.origin = event.target.value || '';
-    });
-    document.getElementById('productionInfoContinueBtn')?.addEventListener('click', () => continueProductionAfterInfo());
-    document.getElementById('productionChangeItem')?.addEventListener('click', () => {
-      clearProductionItem();
-      renderProductionDraft();
-      renderProductionSearchResults();
-    });
-    return;
-  }
-  const issue = state.cache.stockIssue?.[state.productionDraft.issueId];
-  const issueLabel = state.productionDraft.issueSkipped ? 'تم التخطي' : (issue?.issueNumber || '-');
+  const dateDisabled = Boolean(draft.productionDate || draft.expiryDate);
   container.innerHTML = `
-    <div class="notice">
-      <div><strong>${getLocalizedName(item.item)}</strong></div>
-      <div class="helper">${window.i18n.t('production_date')}: ${state.productionDraft.productionDate || '-'}</div>
-      <div class="helper">${window.i18n.t('expiry_date')}: ${state.productionDraft.expiryDate || '-'}</div>
-      <div class="helper">${window.i18n.t('branch')}: ${getBranchLabel(state.productionDraft.branchId)}</div>
-      <div class="helper">${window.i18n.t('issue_number')}: ${issueLabel}</div>
-      <button id="productionChangeItem" class="btn ghost small" style="margin-top: 8px;">${window.i18n.t('change_product')}</button>
+    <div class="production-common-dates grid two">
+      <div><label class="tag">${window.i18n.t('common_production_date')}</label><input id="productionCommonDate" class="input" type="date" value="${draft.productionDate || ''}" /></div>
+      <div><label class="tag">${window.i18n.t('common_expiry_date')}</label><input id="productionCommonExpiry" class="input" type="date" value="${draft.expiryDate || ''}" /></div>
     </div>
-  `;
-  if (searchInput) searchInput.disabled = true;
-  if (searchBtn) searchBtn.disabled = true;
-  const changeBtn = document.getElementById('productionChangeItem');
-  if (changeBtn) {
-    changeBtn.addEventListener('click', () => {
-      clearProductionItem();
-      renderProductionDraft();
-      renderProductionSearchResults();
-    });
-  }
-  const readyForLink = Boolean(state.productionDraft.productInfoConfirmed && state.productionDraft.productionDate && state.productionDraft.expiryDate);
-  if (linkBtn) linkBtn.disabled = !readyForLink;
-  const readyForPrint = readyForLink && (Boolean(state.productionDraft.issueId) || Boolean(state.productionDraft.issueSkipped));
-  if (printBtn) printBtn.disabled = !readyForPrint;
+    <div class="production-draft-table-wrap"><table class="table production-draft-table"><thead><tr>
+      <th>${window.i18n.t('products')}</th><th>${window.i18n.t('country_origin')}</th><th>${window.i18n.t('ingredients')}</th><th>${window.i18n.t('production_date')}</th><th>${window.i18n.t('expiry_date')}</th><th>${window.i18n.t('quantity')}</th><th>${window.i18n.t('unit')}</th><th></th>
+    </tr></thead><tbody>${items.map((row, index) => `<tr data-production-row="${index}">
+      <td><strong>${escapeHtml(row.entry.item.nameAr || row.entry.item.name || '')}</strong><br><span class="helper">${escapeHtml(row.entry.item.nameEn || '')}</span></td>
+      <td><input class="input production-origin" value="${escapeHtml(row.origin || '')}" /></td>
+      <td><input class="input production-ingredients" value="${escapeHtml(row.ingredients || '')}" /></td>
+      <td><input class="input" type="date" value="${row.productionDate || draft.productionDate || ''}" ${dateDisabled ? 'disabled' : ''} /></td>
+      <td><input class="input" type="date" value="${row.expiryDate || draft.expiryDate || ''}" ${dateDisabled ? 'disabled' : ''} /></td>
+      <td><input class="input production-qty" inputmode="numeric" value="${row.qty || ''}" /></td>
+      <td>${escapeHtml(getResolvedItemUnitName(row.entry.item) || '-')}</td><td><button class="btn ghost small production-remove" type="button">×</button></td>
+    </tr>`).join('')}</tbody></table></div>`;
+  if (linkBtn) linkBtn.disabled = !items.length || !draft.productionDate || !draft.expiryDate || items.some((row) => !Number(row.qty));
+  document.getElementById('productionCommonDate')?.addEventListener('change', (event) => { draft.productionDate = event.target.value || ''; renderProductionDraft(); });
+  document.getElementById('productionCommonExpiry')?.addEventListener('change', (event) => { draft.expiryDate = event.target.value || ''; renderProductionDraft(); });
+  container.querySelectorAll('[data-production-row]').forEach((tr) => {
+    const row = items[Number(tr.dataset.productionRow)];
+    tr.querySelector('.production-origin')?.addEventListener('input', (e) => { row.origin = e.target.value || ''; });
+    tr.querySelector('.production-ingredients')?.addEventListener('input', (e) => { row.ingredients = e.target.value || ''; });
+    tr.querySelector('.production-qty')?.addEventListener('input', (e) => { e.target.value = normalizeDigits(e.target.value || '').replace(/[^\d]/g, ''); row.qty = Number(e.target.value || 0); if (linkBtn) linkBtn.disabled = !draft.productionDate || !draft.expiryDate || items.some((item) => !Number(item.qty)); });
+    tr.querySelector('.production-remove')?.addEventListener('click', () => { draft.items.splice(Number(tr.dataset.productionRow), 1); draft.item = draft.items[0]?.entry || null; renderProductionDraft(); });
+  });
 }
 
 function renderProductionIssueList() {
@@ -14116,9 +14126,53 @@ function renderProductionIssueList() {
   });
 }
 
+async function submitMultipleProductionVouchers() {
+  const draft = state.productionDraft;
+  const issue = draft.issueId ? state.cache.stockIssue?.[draft.issueId] : null;
+  const staff = draft.productionStaffId ? state.cache.productionStaff?.[draft.productionStaffId] : null;
+  const productionStaffName = draft.productionStaffId ? getStaffLabel(staff, null) : (state.user?.name || null);
+  const productionNumber = await generateCounter('meta/productionCounter');
+  for (const row of draft.items) {
+    const itemData = row.entry.item || {};
+    const payload = {
+      productionNumber, productionBarcode: generateBarcodeValue(), createdAt: serverTime,
+      storekeeperId: state.user?.id || null, storekeeperName: state.user?.name || null,
+      productionStaffId: draft.productionStaffId, productionStaffName,
+      issueId: draft.issueId || null, issueNumber: issue?.issueNumber || null,
+      itemId: row.entry.id, itemType: row.entry.type,
+      itemName: getLocalizedName(itemData), itemNameAr: itemData.nameAr || itemData.name || null, itemNameEn: itemData.nameEn || itemData.name || null,
+      unitId: itemData.unitId || null, unitName: getResolvedItemUnitName(itemData) || null,
+      qty: Math.floor(Number(row.qty)), labelCopies: 1,
+      productionDate: draft.productionDate, expiryDate: draft.expiryDate,
+      ingredients: row.ingredients || null, origin: row.origin || null, branchId: draft.branchId
+    };
+    await db.ref('production').push().set(payload);
+    await updateItemStock(row.entry.type, row.entry.id, draft.branchId, Number(payload.qty));
+    printProductionLabel(payload, 1);
+  }
+  resetProductionDraft();
+  renderProductionSection();
+  closeProductionModal();
+}
+
 function submitProductionVoucher() {
   const errorEl = document.getElementById('productionError');
   if (errorEl) errorEl.textContent = '';
+  if (!state.productionDraft.editingId && Array.isArray(state.productionDraft.items)) {
+    const valid = state.productionDraft.items.length
+      && state.productionDraft.productionDate && state.productionDraft.expiryDate
+      && state.productionDraft.branchId && state.productionDraft.productionStaffId
+      && state.productionDraft.items.every((row) => Math.floor(Number(row.qty)) > 0);
+    if (!valid || (!state.productionDraft.issueId && !state.productionDraft.issueSkipped)) {
+      if (errorEl) errorEl.textContent = window.i18n.t('error');
+      return;
+    }
+    submitMultipleProductionVouchers().catch((error) => {
+      console.error('Multiple production save failed:', error);
+      if (errorEl) errorEl.textContent = window.i18n.t('error');
+    });
+    return;
+  }
   const rawProductionQty = Math.floor(Number(state.productionDraft.qty || 0));
   if (!state.productionDraft.item || !rawProductionQty || !state.productionDraft.productionDate || !state.productionDraft.expiryDate) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');

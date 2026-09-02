@@ -1706,3 +1706,48 @@ textarea.input:focus {
   gap: 12px;
   padding: 10px 0;
 }
+
+/* Production voucher: keep essential actions visible with long product lists. */
+.production-items-modal {
+  max-height: 88vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.production-items-results {
+  overflow-y: auto;
+  min-height: 180px;
+  max-height: 56vh;
+  padding: 2px;
+}
+
+.production-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.production-picker-item > span:nth-child(2) { flex: 1; }
+.production-picker-item small { display: block; color: #6b7280; margin-top: 3px; direction: ltr; text-align: start; }
+.production-picker-actions,
+.production-modal-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: #fff;
+  padding: 12px 0 2px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.production-picker-actions { justify-content: space-between; }
+.production-draft-table-wrap { overflow-x: auto; margin-top: 12px; }
+.production-draft-table { min-width: 1050px; }
+.production-draft-table .input { min-width: 115px; }
+.production-draft-table td:first-child { min-width: 190px; }
+.production-common-dates { padding: 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 12px; }

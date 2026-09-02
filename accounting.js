@@ -10914,7 +10914,7 @@ function renderProductCategoriesSection() {
         </div>
         <div class="row">
           <button class="btn ghost small" data-action="open">${window.i18n.t('view')}</button>
-          <button class="btn ghost small" data-action="edit" ${Array.isArray(rec.items) ? 'disabled title="تعديل السند متعدد المنتجات من شاشة السند قريباً"' : ''}>${window.i18n.t('edit')}</button>
+          <button class="btn ghost small" data-action="edit">${window.i18n.t('edit')}</button>
           <button class="btn danger small" data-action="delete">${window.i18n.t('delete')}</button>
         </div>
       </div>
@@ -11199,7 +11199,7 @@ function renderMaterialCategoriesSection() {
         </div>
         <div class="row">
           <button class="btn ghost small" data-action="open">${window.i18n.t('view')}</button>
-          <button class="btn ghost small" data-action="edit" ${Array.isArray(rec.items) ? 'disabled' : ''}>${window.i18n.t('edit')}</button>
+          <button class="btn ghost small" data-action="edit">${window.i18n.t('edit')}</button>
           <button class="btn danger small" data-action="delete">${window.i18n.t('delete')}</button>
         </div>
       </div>

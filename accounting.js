@@ -10914,7 +10914,7 @@ function renderProductCategoriesSection() {
         </div>
         <div class="row">
           <button class="btn ghost small" data-action="open">${window.i18n.t('view')}</button>
-          <button class="btn ghost small" data-action="edit">${window.i18n.t('edit')}</button>
+          <button class="btn ghost small" data-action="edit" ${Array.isArray(rec.items) ? 'disabled title="تعديل السند متعدد المنتجات من شاشة السند قريباً"' : ''}>${window.i18n.t('edit')}</button>
           <button class="btn danger small" data-action="delete">${window.i18n.t('delete')}</button>
         </div>
       </div>
@@ -11199,7 +11199,7 @@ function renderMaterialCategoriesSection() {
         </div>
         <div class="row">
           <button class="btn ghost small" data-action="open">${window.i18n.t('view')}</button>
-          <button class="btn ghost small" data-action="edit">${window.i18n.t('edit')}</button>
+          <button class="btn ghost small" data-action="edit" ${Array.isArray(rec.items) ? 'disabled' : ''}>${window.i18n.t('edit')}</button>
           <button class="btn danger small" data-action="delete">${window.i18n.t('delete')}</button>
         </div>
       </div>
@@ -14126,29 +14126,58 @@ function renderProductionIssueList() {
   });
 }
 
+function getProductionRecordItems(record) {
+  if (Array.isArray(record?.items) && record.items.length) return record.items;
+  if (!record?.itemId) return [];
+  return [{
+    itemId: record.itemId, itemType: record.itemType || 'product', itemName: record.itemName || '-',
+    itemNameAr: record.itemNameAr || record.itemName || '-', itemNameEn: record.itemNameEn || '',
+    unitId: record.unitId || null, unitName: record.unitName || null, qty: record.qty || 0,
+    ingredients: record.ingredients || null, origin: record.origin || null,
+    productionDate: record.productionDate || '', expiryDate: record.expiryDate || ''
+  }];
+}
+
+function getProductionItemsText(record) {
+  return getProductionRecordItems(record).map((item) => {
+    const name = item.itemNameAr || item.itemName || '-';
+    const english = item.itemNameEn ? `<span class="helper">${escapeHtml(item.itemNameEn)}</span>` : '';
+    return `<div><strong>${escapeHtml(name)}</strong>${english}<br><span class="helper">${formatQuantityWithUnit(item.qty, item, item.unitName)}</span></div>`;
+  }).join('');
+}
+
 async function submitMultipleProductionVouchers() {
   const draft = state.productionDraft;
   const issue = draft.issueId ? state.cache.stockIssue?.[draft.issueId] : null;
   const staff = draft.productionStaffId ? state.cache.productionStaff?.[draft.productionStaffId] : null;
   const productionStaffName = draft.productionStaffId ? getStaffLabel(staff, null) : (state.user?.name || null);
   const productionNumber = await generateCounter('meta/productionCounter');
-  for (const row of draft.items) {
+  const items = draft.items.map((row) => {
     const itemData = row.entry.item || {};
-    const payload = {
-      productionNumber, productionBarcode: generateBarcodeValue(), createdAt: serverTime,
-      storekeeperId: state.user?.id || null, storekeeperName: state.user?.name || null,
-      productionStaffId: draft.productionStaffId, productionStaffName,
-      issueId: draft.issueId || null, issueNumber: issue?.issueNumber || null,
+    return {
       itemId: row.entry.id, itemType: row.entry.type,
       itemName: getLocalizedName(itemData), itemNameAr: itemData.nameAr || itemData.name || null, itemNameEn: itemData.nameEn || itemData.name || null,
       unitId: itemData.unitId || null, unitName: getResolvedItemUnitName(itemData) || null,
-      qty: Math.floor(Number(row.qty)), labelCopies: 1,
+      qty: Math.floor(Number(row.qty)),
       productionDate: draft.productionDate, expiryDate: draft.expiryDate,
-      ingredients: row.ingredients || null, origin: row.origin || null, branchId: draft.branchId
+      ingredients: row.ingredients || null, origin: row.origin || null
     };
-    await db.ref('production').push().set(payload);
-    await updateItemStock(row.entry.type, row.entry.id, draft.branchId, Number(payload.qty));
-    printProductionLabel(payload, 1);
+  });
+  const firstItem = items[0];
+  const payload = {
+    productionNumber, productionBarcode: generateBarcodeValue(), createdAt: serverTime,
+    storekeeperId: state.user?.id || null, storekeeperName: state.user?.name || null,
+    productionStaffId: draft.productionStaffId, productionStaffName,
+    issueId: draft.issueId || null, issueNumber: issue?.issueNumber || null,
+    branchId: draft.branchId, productionDate: draft.productionDate, expiryDate: draft.expiryDate,
+    items,
+    // Keep the first product fields for compatibility with existing screens and historical records.
+    ...firstItem
+  };
+  await db.ref('production').push().set(payload);
+  for (const item of items) {
+    await updateItemStock(item.itemType, item.itemId, draft.branchId, Number(item.qty));
+    printProductionLabel({ ...payload, ...item }, 1);
   }
   resetProductionDraft();
   renderProductionSection();
@@ -14304,11 +14333,10 @@ function renderProductionTable() {
   entries.forEach((rec) => {
     const row = document.createElement('tr');
     const staffLabel = rec.productionStaffName || getStaffLabel(state.cache.productionStaff?.[rec.productionStaffId], '-') || '-';
-    const qtyText = formatQuantityWithUnit(rec.qty, rec, getResolvedItemUnitName(rec));
     row.innerHTML = `
       <td>${rec.productionNumber || '-'}</td>
-      <td>${rec.itemName || '-'}</td>
-      <td>${qtyText}</td>
+      <td>${getProductionItemsText(rec)}</td>
+      <td>${getProductionRecordItems(rec).map((item) => formatQuantityWithUnit(item.qty, item, item.unitName)).join('<br>')}</td>
       <td>${formatDate(rec.createdAt)}</td>
       <td>${rec.productionDate || '-'}</td>
       <td>${rec.expiryDate || '-'}</td>
@@ -14327,7 +14355,9 @@ function renderProductionTable() {
     `;
     row.querySelector('[data-action="print"]').addEventListener('click', () => printProductionLabel(rec));
     row.querySelector('[data-action="report"]').addEventListener('click', () => printProductionReport(rec));
-    row.querySelector('[data-action="edit"]').addEventListener('click', () => openProductionEditModal(rec));
+    row.querySelector('[data-action="edit"]').addEventListener('click', () => {
+      if (!Array.isArray(rec.items)) openProductionEditModal(rec);
+    });
     row.querySelector('[data-action="delete"]').addEventListener('click', () => deleteProduction(rec));
     row.querySelector('[data-action="issue"]').addEventListener('click', () => {
       const issue = state.cache.stockIssue?.[rec.issueId];
@@ -14342,7 +14372,7 @@ function getProductionTableEntries() {
   const filters = state.productionFilters || { query: '', fromDate: '', toDate: '', branchId: 'all', staffId: 'all' };
   const queryRaw = String(filters.query || '').trim();
   const queryNorm = normalizeSearchValue(queryRaw);
-  return Object.entries(records)
+  const filtered = Object.entries(records)
     .map(([id, rec]) => ({ id, ...rec }))
     .filter((rec) => {
       if (filters.branchId !== 'all' && (rec.branchId || '') !== filters.branchId) return false;
@@ -14350,11 +14380,24 @@ function getProductionTableEntries() {
       if ((filters.fromDate || filters.toDate) && !isTimestampInDateRange(rec.createdAt, filters.fromDate, filters.toDate)) return false;
       if (!queryRaw) return true;
       const staffLabel = rec.productionStaffName || getStaffLabel(state.cache.productionStaff?.[rec.productionStaffId], '-') || '-';
-      const targetText = `${rec.itemName || ''} ${rec.productionNumber || ''} ${rec.issueNumber || ''} ${staffLabel}`.toLowerCase();
+      const itemText = getProductionRecordItems(rec).map((item) => `${item.itemName || ''} ${item.itemNameAr || ''} ${item.itemNameEn || ''}`).join(' ');
+      const targetText = `${itemText} ${rec.productionNumber || ''} ${rec.issueNumber || ''} ${staffLabel}`.toLowerCase();
       const targetCode = normalizeSearchValue(`${rec.productionNumber || ''} ${rec.issueNumber || ''}`);
       return targetText.includes(queryRaw.toLowerCase()) || targetCode.includes(queryNorm);
     })
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const grouped = new Map();
+  filtered.forEach((rec) => {
+    const key = rec.productionNumber ? `number:${rec.productionNumber}` : `id:${rec.id}`;
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, { ...rec, groupedIds: [rec.id], items: getProductionRecordItems(rec) });
+      return;
+    }
+    existing.groupedIds.push(rec.id);
+    existing.items.push(...getProductionRecordItems(rec));
+    existing.createdAt = Math.min(Number(existing.createdAt || Infinity), Number(rec.createdAt || Infinity));
+  });
+  return Array.from(grouped.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
 
 function exportProductionReport() {
@@ -14363,8 +14406,8 @@ function exportProductionReport() {
   const rows = entries.map((rec, index) => ({
     [window.i18n.t('row_number')]: index + 1,
     [window.i18n.t('production_voucher')]: rec.productionNumber || '-',
-    [window.i18n.t('product_single')]: rec.itemName || '-',
-    [window.i18n.t('quantity')]: formatQuantityWithUnit(rec.qty, rec, getResolvedItemUnitName(rec)),
+    [window.i18n.t('product_single')]: getProductionRecordItems(rec).map((item) => `${item.itemNameAr || item.itemName || '-'}${item.itemNameEn ? ` / ${item.itemNameEn}` : ''}`).join('\n'),
+    [window.i18n.t('quantity')]: getProductionRecordItems(rec).map((item) => formatQuantityWithUnit(item.qty, item, item.unitName)).join('\n'),
     [window.i18n.t('date_time')]: formatDate(rec.createdAt),
     [window.i18n.t('production_date')]: rec.productionDate || '-',
     [window.i18n.t('expiry_date')]: rec.expiryDate || '-',
@@ -14396,8 +14439,8 @@ function printProductionTableReport() {
   const rows = entries.map((rec, index) => ([
     index + 1,
     rec.productionNumber || '-',
-    rec.itemName || '-',
-    formatQuantityWithUnit(rec.qty, rec, getResolvedItemUnitName(rec)),
+    getProductionRecordItems(rec).map((item) => `${item.itemNameAr || item.itemName || '-'}${item.itemNameEn ? ` / ${item.itemNameEn}` : ''}`).join('<br>'),
+    getProductionRecordItems(rec).map((item) => formatQuantityWithUnit(item.qty, item, item.unitName)).join('<br>'),
     formatDate(rec.createdAt),
     rec.productionDate || '-',
     rec.expiryDate || '-',
@@ -14406,7 +14449,7 @@ function printProductionTableReport() {
     rec.productionStaffName || getStaffLabel(state.cache.productionStaff?.[rec.productionStaffId], '-') || '-',
     rec.issueNumber || '-'
   ]));
-  const totalQty = entries.reduce((sum, rec) => sum + Number(rec.qty || 0), 0);
+  const totalQty = entries.reduce((sum, rec) => sum + getProductionRecordItems(rec).reduce((itemSum, item) => itemSum + Number(item.qty || 0), 0), 0);
   printA4Report(
     window.i18n.t('production'),
     [
@@ -14432,9 +14475,9 @@ function deleteProduction(record) {
   if (!record?.id) return;
   if (!confirm(window.i18n.t('confirm_delete'))) return;
   const branchId = record.branchId || getMainBranchId();
-  updateItemStock(record.itemType, record.itemId, branchId, -Number(record.qty || 0)).then(() => {
-    db.ref(`production/${record.id}`).remove();
-  });
+  const ids = record.groupedIds?.length ? record.groupedIds : [record.id];
+  Promise.all(getProductionRecordItems(record).map((item) => updateItemStock(item.itemType, item.itemId, branchId, -Number(item.qty || 0))))
+    .then(() => Promise.all(ids.map((id) => db.ref(`production/${id}`).remove())));
 }
 
 function isNearExpiryDate(dateText, days = 7) {
@@ -20357,11 +20400,12 @@ function printProductionReport(record) {
     window.i18n.t('production_date'),
     window.i18n.t('expiry_date')
   ];
-  const itemData = record.itemType === 'product'
-    ? state.cache.products?.[record.itemId]
-    : state.cache.stockMaterials?.[record.itemId];
-  const nameWithUnit = formatItemNameWithUnit(record.itemName || '-', record, getResolvedItemUnitName(record) || getResolvedItemUnitName(itemData));
-  const rows = [[nameWithUnit, formatQuantityWithUnit(record.qty, record, getResolvedItemUnitName(record) || getResolvedItemUnitName(itemData)), record.productionDate || '-', record.expiryDate || '-']];
+  const rows = getProductionRecordItems(record).map((item) => {
+    const itemData = item.itemType === 'product' ? state.cache.products?.[item.itemId] : state.cache.stockMaterials?.[item.itemId];
+    const name = item.itemNameAr || item.itemName || '-';
+    const englishName = item.itemNameEn ? ` / ${item.itemNameEn}` : '';
+    return [formatItemNameWithUnit(`${name}${englishName}`, item, item.unitName || getResolvedItemUnitName(itemData)), formatQuantityWithUnit(item.qty, item, item.unitName || getResolvedItemUnitName(itemData)), item.productionDate || record.productionDate || '-', item.expiryDate || record.expiryDate || '-'];
+  });
   const printedAt = `${window.i18n.t('printed_at')}: ${formatDate(Date.now())}`;
   const issue = state.cache.stockIssue?.[record.issueId];
   const issueItems = normalizeItems(issue?.items);

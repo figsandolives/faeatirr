@@ -13,6 +13,36 @@
     // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
+    // طلبات الموقع موجودة في مشروع Firebase مستقل عن الكاشير. كان البحث
+    // سابقاً يتم في قاعدة الكاشير، لذلك كانت نافذة طلبات الأونلاين فارغة.
+    const orderingPlatformFirebaseConfig = {
+      apiKey: 'AIzaSyA0XQJ9fqlWeYQ5NV4CT6GdxvM_Uztnoio',
+      authDomain: 'menassafigs.firebaseapp.com',
+      databaseURL: 'https://menassafigs-default-rtdb.firebaseio.com',
+      projectId: 'menassafigs',
+      storageBucket: 'menassafigs.firebasestorage.app',
+      messagingSenderId: '260400277192',
+      appId: '1:260400277192:web:de209362fdbe86e5d827fd'
+    };
+    const orderingPlatformApp = firebase.apps.find(app => app.name === 'cashier-ordering-platform')
+      || firebase.initializeApp(orderingPlatformFirebaseConfig, 'cashier-ordering-platform');
+    const orderingPlatformDb = firebase.database(orderingPlatformApp);
+    const orderingPlatformAuth = firebase.auth(orderingPlatformApp);
+    let orderingPlatformReady = null;
+
+    async function ensureOrderingPlatformReady() {
+      if (!orderingPlatformReady) {
+        orderingPlatformReady = (async () => {
+          if (!orderingPlatformAuth.currentUser) await orderingPlatformAuth.signInAnonymously();
+          orderingPlatformDb.ref('orderingPlatform/onlineOrders').on('value', snapshot => {
+            allOnlineOrders = snapshot.val()
+              ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })).sort((a, b) => (b.createdAtMs || b.timestamp || 0) - (a.createdAtMs || a.timestamp || 0))
+              : [];
+          }, error => console.error('Unable to read online orders:', error));
+        })();
+      }
+      return orderingPlatformReady;
+    }
     const CASHIER_INVOICE_WHATSAPP_URL = 'https://us-central1-menassafigs.cloudfunctions.net/sendInvoiceWhatsapp';
 
     // المناطق
@@ -1760,11 +1790,6 @@ function setupRealtimeListeners() {
     refreshUI();
   });
 
-  db.ref('orderingPlatform/onlineOrders').on('value', (snapshot) => {
-    allOnlineOrders = snapshot.val()
-      ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })).sort((a, b) => (b.createdAtMs || b.timestamp || 0) - (a.createdAtMs || a.timestamp || 0))
-      : [];
-  });
 
   // 5. مراقبة الأقسام (Categories)
 	  db.ref('categories').on('value', (snapshot) => {
@@ -2505,6 +2530,21 @@ function refreshUI() {
       renderCashier();
     }
 
+    function closeCashierActionMenus() {
+      document.querySelectorAll('.cashier-action-menu').forEach(menu => menu.classList.add('hidden'));
+    }
+
+    function toggleCashierActionMenu(event, menuId) {
+      event?.stopPropagation();
+      const menu = document.getElementById(menuId);
+      if (!menu) return;
+      const willOpen = menu.classList.contains('hidden');
+      closeCashierActionMenus();
+      menu.classList.toggle('hidden', !willOpen);
+    }
+
+    document.addEventListener('click', () => closeCashierActionMenus());
+
     function renderCashier() {
       const app = document.getElementById('app');
       const visibleOrders = allOrders
@@ -2525,9 +2565,6 @@ function refreshUI() {
               <button onclick="toggleCashierLanguage()" class="bg-white text-blue-700 px-4 py-2 rounded-lg font-bold hover:bg-blue-50 transition">
                 ${cashierT('switchLanguage')}
               </button>
-	              <button onclick="openOnlineOrderPreparationPicker()" class="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold hover:bg-orange-600 transition">
-	                إبلاغ عن طلب أونلاين
-	              </button>
 	              ${currentBranch === 'اليرموك' && hasOpenDailySession() ? `
 	                <button onclick="showDailyBalanceStart()" class="bg-amber-500 px-4 py-2 rounded-lg font-bold hover:bg-amber-600 transition border-4 border-white shadow-lg ring-2 ring-amber-200">
 	                  ${cashierT('balance')}
@@ -2551,9 +2588,15 @@ function refreshUI() {
                         ${cashierT('tables')}
                       </button>
                     ` : ''}
-		                <button onclick="startNewInvoiceFromCashier()" class="bg-green-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-green-700 transition" style="min-width:170px;">
-		                  ${cashierT('newInvoice')}
-		                </button>
+	                <button onclick="startNewInvoiceFromCashier()" class="bg-green-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-green-700 transition" style="min-width:170px;">
+	                  ${cashierT('newInvoice')}
+	                </button>
+                    <div class="relative">
+                      <button onclick="toggleCashierActionMenu(event, 'newInvoiceActionMenu')" aria-label="خيارات الفاتورة الجديدة" class="bg-gray-700 text-white px-4 py-3 rounded-lg font-bold text-xl hover:bg-gray-800 transition">⋮</button>
+                      <div id="newInvoiceActionMenu" class="cashier-action-menu hidden absolute left-0 mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden z-50">
+                        <button onclick="openOnlineOrderPreparationPicker(); closeCashierActionMenus();" class="block w-full text-right px-4 py-3 text-orange-700 font-bold hover:bg-orange-50">إبلاغ عن طلب أونلاين</button>
+                      </div>
+                    </div>
                   </div>
 		                ${isShortageRequestBranch() ? `
 		                  <button onclick="showShortageRequestsPage()" class="bg-purple-800 text-white px-8 py-3 rounded-lg font-bold text-lg hover:bg-purple-900 transition">
@@ -2624,15 +2667,16 @@ function refreshUI() {
         </td>
       ` : ''}
       <td>
-        <button onclick="openCashierQuickEditOrder('${order.id}')" class="bg-amber-500 text-white px-4 py-2 rounded hover:bg-amber-600 transition ml-2">
-          ${cashierT('edit')}
-        </button>
         <button onclick="reprintInvoice('${order.id}')" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
           ${cashierT('print')}
         </button>
-        <button onclick="openCashierOrderPreparation('${order.id}')" class="text-red-600 font-bold px-3 py-2 hover:text-red-800 transition">
-          إبلاغ على الطلب
-        </button>
+        <span class="relative inline-block">
+          <button onclick="toggleCashierActionMenu(event, 'orderActionMenu-${order.id}')" aria-label="إجراءات الفاتورة" class="bg-gray-200 text-gray-800 px-3 py-2 rounded font-bold text-xl hover:bg-gray-300 transition mr-2">⋮</button>
+          <span id="orderActionMenu-${order.id}" class="cashier-action-menu hidden absolute left-0 mt-2 w-44 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden z-50 text-right">
+            <button onclick="openCashierQuickEditOrder('${order.id}'); closeCashierActionMenus();" class="block w-full px-4 py-3 text-amber-700 font-bold hover:bg-amber-50">${cashierT('edit')}</button>
+            <button onclick="openCashierOrderPreparation('${order.id}'); closeCashierActionMenus();" class="block w-full px-4 py-3 text-red-700 font-bold hover:bg-red-50">إبلاغ على الطلب</button>
+          </span>
+        </span>
       </td>
     </tr>
   `).join('')}
@@ -5206,6 +5250,77 @@ function showNumericKeypadForInvoice(index, inputField) {
           font-size: 17px !important;
           font-weight: 700;
         }
+
+        /* إشعار التحضير أخف من الفاتورة حتى لا يخرج مزدحماً من الورق الحراري. */
+        .thermal-invoice .preparation-notice,
+        .thermal-invoice .preparation-notice * {
+          font-size: 11px !important;
+          line-height: 1.35 !important;
+        }
+        .thermal-invoice .preparation-notice .notice-title,
+        .thermal-invoice .preparation-notice .notice-title * {
+          font-size: 15px !important;
+          font-weight: 900;
+        }
+        .thermal-invoice .preparation-notice .notice-meta {
+          display: flex;
+          justify-content: space-between;
+          gap: 5px;
+          text-align: right;
+          border-bottom: 1px dashed #999;
+          padding-bottom: 5px;
+          margin-bottom: 6px;
+        }
+        .thermal-invoice .preparation-notice .notice-section,
+        .thermal-invoice .preparation-notice .notice-section * {
+          text-align: center;
+          font-size: 14px !important;
+          font-weight: 900;
+          margin: 6px 0;
+        }
+        .thermal-invoice .preparation-notice .notice-items {
+          width: 100%;
+          border-collapse: collapse;
+          text-align: right;
+        }
+        .thermal-invoice .preparation-notice .notice-items th {
+          border-bottom: 1px solid #000;
+          padding: 3px 0;
+          text-align: right;
+        }
+        .thermal-invoice .preparation-notice .notice-items th:last-child,
+        .thermal-invoice .preparation-notice .notice-items td:last-child {
+          width: 42px;
+          text-align: center;
+        }
+        .thermal-invoice .preparation-notice .notice-items td {
+          border-bottom: 1px dotted #aaa;
+          padding: 4px 0;
+        }
+        .thermal-invoice .preparation-notice .notice-items small {
+          display: block;
+          font-size: 9px !important;
+          font-weight: 400;
+        }
+        .thermal-invoice .preparation-notice .notice-schedule {
+          text-align: center;
+          font-size: 13px !important;
+          font-weight: 900;
+          margin-top: 9px;
+          padding-top: 7px;
+          border-top: 2px solid #000;
+        }
+        .thermal-invoice .preparation-notice .notice-schedule * {
+          font-size: 13px !important;
+          font-weight: 900;
+        }
+        .thermal-invoice .preparation-notice .notice-thanks {
+          text-align: center;
+          font-size: 12px !important;
+          font-weight: 900;
+          margin-top: 8px;
+        }
+        .thermal-invoice .preparation-notice .notice-thanks * { font-size: 12px !important; font-weight: 900; }
         
         @media print {
           html, body {
@@ -5229,6 +5344,11 @@ function showNumericKeypadForInvoice(index, inputField) {
           .thermal-invoice strong,
           .thermal-invoice b {
             font-size: 17px !important;
+          }
+
+          .thermal-invoice .preparation-notice,
+          .thermal-invoice .preparation-notice * {
+            font-size: 11px !important;
           }
         }
       </style>
@@ -5720,8 +5840,9 @@ function showNumericKeypadForInvoice(index, inputField) {
 
     async function openOnlineOrderPreparationPicker() {
       try {
+        await ensureOrderingPlatformReady();
         if (!allOnlineOrders.length) {
-          const snapshot = await db.ref('orderingPlatform/onlineOrders').once('value');
+          const snapshot = await orderingPlatformDb.ref('orderingPlatform/onlineOrders').once('value');
           allOnlineOrders = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
         }
         const modal = document.createElement('div');
@@ -5777,6 +5898,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       return rawItems.map((item, index) => ({
         key: String(index),
         name: item.productName || item.nameAr || item.name || item.productNameEn || 'صنف',
+        nameEn: item.productNameEn || item.nameEn || item.name || item.nameAr || '',
         quantity: Number(item.quantity || 0),
         notes: item.notes || item.note || item.preparationNotes || ''
       }));
@@ -5801,8 +5923,8 @@ function showNumericKeypadForInvoice(index, inputField) {
           </div>` : ''}
           <div class="max-h-96 overflow-y-auto space-y-2">${items.map(item => `
             <label class="flex gap-3 items-start bg-gray-50 border border-gray-200 rounded-lg p-3 cursor-pointer">
-              <input type="checkbox" class="preparation-item mt-1" value="${item.key}" checked>
-              <span><b>${escapeHtml(item.name)}</b> <span class="text-gray-600">× ${item.quantity}</span>${item.notes ? `<small class="block mt-1 text-blue-700">ملاحظة: ${escapeHtml(item.notes)}</small>` : ''}</span>
+              <input type="checkbox" class="preparation-item mt-1" value="${item.key}">
+              <span><b>${escapeHtml(item.name)}</b>${item.nameEn && item.nameEn !== item.name ? `<small class="block text-gray-500" dir="ltr">${escapeHtml(item.nameEn)}</small>` : ''} <span class="text-gray-600">× ${item.quantity}</span>${item.notes ? `<small class="block mt-1 text-blue-700">ملاحظة: ${escapeHtml(item.notes)}</small>` : ''}</span>
             </label>`).join('')}</div>
           <div class="flex gap-3 mt-5">
             <button onclick="printPreparationNotice(this)" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold">طباعة</button>
@@ -5818,6 +5940,13 @@ function showNumericKeypadForInvoice(index, inputField) {
       if (Number.isNaN(parsed.getTime())) return date;
       const days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
       return `${days[parsed.getDay()]} بتاريخ ${parsed.getDate()} / ${parsed.getMonth() + 1} / ${parsed.getFullYear()}م`;
+    }
+
+    function preparationDateEnglish(date) {
+      if (!date) return 'the scheduled date';
+      const parsed = new Date(`${date}T00:00:00`);
+      if (Number.isNaN(parsed.getTime())) return date;
+      return new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'numeric', year: 'numeric' }).format(parsed);
     }
 
     async function printPreparationNotice(button) {
@@ -5838,10 +5967,14 @@ function showNumericKeypadForInvoice(index, inputField) {
         return;
       }
       const order = context.order;
-      const content = `<div style="text-align:center;border-bottom:2px dashed #000;padding-bottom:8px;margin-bottom:9px"><img src="logo.png" alt="الشعار" style="width:82px;height:82px;object-fit:contain;display:block;margin:0 auto 5px"><div style="font-size:18px;font-weight:900">إبلاغ بطلب</div></div>
-        <div style="font-size:12px;border-bottom:1px dashed #999;padding-bottom:6px;margin-bottom:7px"><div>رقم الفاتورة: <b>#${escapeHtml(order.invoiceNumber || order.orderId || order.id)}</b></div><div>الكاشير: ${escapeHtml(order.cashier || (context.isOnline ? 'طلب أونلاين' : '—'))}</div><div>العميل: ${escapeHtml(order.customerName || '—')}</div><div>هاتف العميل: <span dir="ltr">${escapeHtml(order.phoneNumber || order.phone || '—')}</span></div></div>
-        <div style="font-weight:900;font-size:16px;margin:8px 0">أصناف تحتاج تحضير</div><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:right;border-bottom:1px solid #000;padding:4px 0">الصنف</th><th style="width:55px;border-bottom:1px solid #000;padding:4px 0">الكمية</th></tr></thead><tbody>${items.map(item => `<tr><td style="padding:5px 0;border-bottom:1px dotted #aaa"><b>${escapeHtml(item.name)}</b>${item.notes ? `<small style="display:block;color:#075985;margin-top:2px">ملاحظة: ${escapeHtml(item.notes)}</small>` : ''}</td><td style="text-align:center;font-weight:bold;padding:5px 0;border-bottom:1px dotted #aaa">${item.quantity}</td></tr>`).join('')}</tbody></table>
-        <div style="margin-top:14px;border-top:2px solid #000;padding-top:9px;text-align:center;font-size:16px;font-weight:900;line-height:1.7">يرجى تحضير الأصناف أعلاه يوم ${escapeHtml(preparationDateText(date))}<br>قبل الوقت المحدد بين ${escapeHtml(formatDeliveryDisplayTime(from) || from || '—')} و ${escapeHtml(formatDeliveryDisplayTime(to) || to || '—')}</div><div style="text-align:center;font-size:14px;font-weight:bold;margin-top:12px">شكراً...</div>`;
+      const content = `<div class="preparation-notice" style="text-align:center">
+        <div style="border-bottom:2px dashed #000;padding-bottom:6px;margin-bottom:6px"><img src="logo.png" alt="الشعار" style="width:68px;height:68px;object-fit:contain;display:block;margin:0 auto 3px"><div class="notice-title">إبلاغ بطلب<br><span dir="ltr">ORDER PREPARATION NOTICE</span></div></div>
+        <div class="notice-meta"><span>رقم الفاتورة / <span dir="ltr">Invoice No.</span>: <b>#${escapeHtml(order.invoiceNumber || order.orderId || order.id)}</b></span><span>الكاشير / <span dir="ltr">Cashier</span>: <b>${escapeHtml(order.cashier || (context.isOnline ? 'Online Order' : '—'))}</b></span></div>
+        <div class="notice-section">.. أصناف تحتاج تحضير ..<br><span dir="ltr">.. ITEMS TO PREPARE ..</span></div>
+        <table class="notice-items"><thead><tr><th>الصنف<br><span dir="ltr">Item</span></th><th>الكمية<br><span dir="ltr">Qty</span></th></tr></thead><tbody>${items.map(item => `<tr><td><b>${escapeHtml(item.name)}</b>${item.nameEn && item.nameEn !== item.name ? `<small dir="ltr">${escapeHtml(item.nameEn)}</small>` : ''}${item.notes ? `<small>ملاحظة / <span dir="ltr">Note</span>: ${escapeHtml(item.notes)}</small>` : ''}</td><td>${item.quantity}</td></tr>`).join('')}</tbody></table>
+        <div class="notice-schedule">يرجى تحضير الأصناف أعلاه يوم ${escapeHtml(preparationDateText(date))}<br><span dir="ltr">Please prepare the items above for ${escapeHtml(preparationDateEnglish(date))}</span><br><br>قبل الوقت المحدد بين<br><span dir="ltr">Before the scheduled time between</span><br><b>${escapeHtml(formatDeliveryDisplayTime(from) || from || '—')} — ${escapeHtml(formatDeliveryDisplayTime(to) || to || '—')}</b></div>
+        <div class="notice-thanks">شكراً...<br><span dir="ltr">Thank you...</span></div>
+      </div>`;
       const printHtml = buildThermalInvoicePrintHtml(content, await getInvoiceLogoDataUrl());
       try {
         if (window.figsDesktop?.isDesktopApp) await window.figsDesktop.printHtml({ html: printHtml, type: 'receipt', silent: true });

@@ -36,6 +36,8 @@
     let allCategories = [];
     let allProductCategories = [];
     let allCustomers = [];
+    let allOnlineOrders = [];
+    let customerDuplicateCleanupStarted = false;
     let allOrders = [];
     let allCashiers = [];
     let allProductPriceChanges = [];
@@ -1754,7 +1756,14 @@ function setupRealtimeListeners() {
   // 4. مراقبة العملاء
   db.ref('customers').on('value', (snapshot) => {
     allCustomers = sortCustomersNewestFirst(snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : []);
+    mergeExistingDuplicateCustomers();
     refreshUI();
+  });
+
+  db.ref('orderingPlatform/onlineOrders').on('value', (snapshot) => {
+    allOnlineOrders = snapshot.val()
+      ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })).sort((a, b) => (b.createdAtMs || b.timestamp || 0) - (a.createdAtMs || a.timestamp || 0))
+      : [];
   });
 
   // 5. مراقبة الأقسام (Categories)
@@ -2007,15 +2016,117 @@ function refreshUI() {
 
     async function saveCustomer(customer) {
       try {
-        const id = customer.id || generateId();
-        customer.id = id;
-        await db.ref(`customers/${id}`).set({ ...customer, id });
+        const phone = normalizeCustomerPhone(customer.phone);
+        if (!phone) {
+          showToast('رقم الهاتف غير صالح', true);
+          return false;
+        }
+
+        // الرقم هو هوية العميل. نعيد استخدام السجل الموجود بدلاً من إنشاء
+        // سجل ثانٍ لنفس الرقم، حتى لو كتب الموظف الرقم بصيغة مختلفة.
+        const samePhoneCustomers = allCustomers.filter(item => normalizeCustomerPhone(item.phone) === phone);
+        const requestedId = customer.id || samePhoneCustomers[0]?.id || generateId();
+        const phoneIndex = await db.ref(`customerPhoneIndex/${phone}`).transaction(current => current || requestedId);
+        const id = phoneIndex.snapshot.val() || requestedId;
+        const previousRecord = allCustomers.find(item => item.id === id);
+        const previousPhone = normalizeCustomerPhone(previousRecord?.phone);
+        const indexedCustomer = id === customer.id ? customer : allCustomers.find(item => item.id === id);
+        const existing = indexedCustomer || samePhoneCustomers.find(item => item.id === customer.id) || samePhoneCustomers[0];
+        const mergedAddresses = mergeCustomerAddresses(...samePhoneCustomers.map(item => item.addresses), customer.addresses);
+        customer = {
+          ...(existing || {}),
+          ...customer,
+          id,
+          phone,
+          addresses: mergedAddresses,
+          createdAt: existing?.createdAt || customer.createdAt || Date.now()
+        };
+        await db.ref(`customers/${id}`).set(customer);
+        if (previousPhone && previousPhone !== phone) {
+          await db.ref(`customerPhoneIndex/${previousPhone}`).transaction(current => current === id ? null : current);
+        }
+
+        const duplicateIds = samePhoneCustomers.map(item => item.id).filter(itemId => itemId && itemId !== id);
+        if (duplicateIds.length) {
+          const updates = {};
+          duplicateIds.forEach(itemId => { updates[`customers/${itemId}`] = null; });
+          await db.ref().update(updates);
+        }
         await loadData();
         return true;
       } catch (error) {
         console.error('Error saving customer:', error);
         showToast('خطأ في حفظ العميل', true);
         return false;
+      }
+    }
+
+    function normalizeCustomerPhone(value) {
+      const digits = String(value || '')
+        .replace(/[٠-٩]/g, digit => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(digit)])
+        .replace(/\D/g, '');
+      const local = digits.replace(/^00965/, '').replace(/^965/, '');
+      return /^\d{8}$/.test(local) ? `965${local}` : '';
+    }
+
+    function mergeCustomerAddresses(...lists) {
+      const addresses = lists.flatMap(list => Array.isArray(list) ? list : []);
+      const seen = new Set();
+      return addresses.filter(address => {
+        const normalized = `${String(address?.area || '').trim()}|${String(address?.details || '').trim()}`;
+        if (normalized === '|' || seen.has(normalized)) return false;
+        seen.add(normalized);
+        return true;
+      }).map(address => ({ area: address.area || '', details: address.details || '' }));
+    }
+
+    async function mergeExistingDuplicateCustomers() {
+      if (customerDuplicateCleanupStarted || !allCustomers.length) return;
+      customerDuplicateCleanupStarted = true;
+      const groups = new Map();
+      allCustomers.forEach(customer => {
+        const phone = normalizeCustomerPhone(customer.phone);
+        if (!phone) return;
+        const list = groups.get(phone) || [];
+        list.push(customer);
+        groups.set(phone, list);
+      });
+      const updates = {};
+      const duplicateGroups = [];
+      let merged = 0;
+      groups.forEach((customers, phone) => {
+        const ordered = [...customers].sort((a, b) => getCustomerCreatedValue(a) - getCustomerCreatedValue(b));
+        const primary = ordered[0];
+        updates[`customers/${primary.id}`] = {
+          ...primary,
+          id: primary.id,
+          phone,
+          addresses: mergeCustomerAddresses(...ordered.map(item => item.addresses))
+        };
+        updates[`customerPhoneIndex/${phone}`] = primary.id;
+        ordered.slice(1).forEach(duplicate => { updates[`customers/${duplicate.id}`] = null; merged++; });
+        if (ordered.length > 1) duplicateGroups.push({ phone, name: primary.name || '', phones: ordered.map(item => normalizeCustomerPhone(item.phone)) });
+      });
+      try {
+        if (Object.keys(updates).length) await db.ref().update(updates);
+        // الفواتير لا تحمل معرف العميل، بل رقم الهاتف فقط. لذلك نطبع الرقم
+        // الموحد على الفواتير القديمة ذات السجل المكرر أيضاً.
+        if (duplicateGroups.length) {
+          const ordersSnapshot = await db.ref('orders').once('value');
+          const orderUpdates = {};
+          Object.entries(ordersSnapshot.val() || {}).forEach(([orderId, order]) => {
+            const group = duplicateGroups.find(item => item.phones.includes(normalizeCustomerPhone(order?.phoneNumber)));
+            if (group) {
+              orderUpdates[`orders/${orderId}/phoneNumber`] = group.phone;
+              orderUpdates[`orders/${orderId}/customerName`] = group.name || order.customerName || '';
+            }
+          });
+          if (Object.keys(orderUpdates).length) await db.ref().update(orderUpdates);
+        }
+        if (merged) showToast(`تم دمج ${merged} سجل عميل مكرر حسب رقم الهاتف`);
+      } catch (error) {
+        console.error('Unable to merge duplicate customers:', error);
+        customerDuplicateCleanupStarted = false;
       }
     }
 
@@ -2414,6 +2525,9 @@ function refreshUI() {
               <button onclick="toggleCashierLanguage()" class="bg-white text-blue-700 px-4 py-2 rounded-lg font-bold hover:bg-blue-50 transition">
                 ${cashierT('switchLanguage')}
               </button>
+	              <button onclick="openOnlineOrderPreparationPicker()" class="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold hover:bg-orange-600 transition">
+	                إبلاغ عن طلب أونلاين
+	              </button>
 	              ${currentBranch === 'اليرموك' && hasOpenDailySession() ? `
 	                <button onclick="showDailyBalanceStart()" class="bg-amber-500 px-4 py-2 rounded-lg font-bold hover:bg-amber-600 transition border-4 border-white shadow-lg ring-2 ring-amber-200">
 	                  ${cashierT('balance')}
@@ -2515,6 +2629,9 @@ function refreshUI() {
         </button>
         <button onclick="reprintInvoice('${order.id}')" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
           ${cashierT('print')}
+        </button>
+        <button onclick="openCashierOrderPreparation('${order.id}')" class="text-red-600 font-bold px-3 py-2 hover:text-red-800 transition">
+          إبلاغ على الطلب
         </button>
       </td>
     </tr>
@@ -4347,9 +4464,20 @@ function showNumericKeypadForInvoice(index, inputField) {
         area = document.getElementById('newCustomerAreaManual').value.trim();
       }
       
+      const normalizedPhone = normalizeCustomerPhone(`${prefix}${phone}`);
+      const existing = allCustomers.find(item => normalizeCustomerPhone(item.phone) === normalizedPhone);
+      if (existing) {
+        showToast('هذا الرقم مسجل بالفعل؛ تم اختيار حساب العميل الموجود', true);
+        currentOrder.customer = existing;
+        currentOrder.selectedAddress = (existing.addresses || [])[0] || null;
+        applyDeliveryPriceFromSelectedAddress();
+        document.querySelector('.modal-overlay')?.remove();
+        continueInvoiceAfterCustomerSelection();
+        return;
+      }
       const customer = {
         name,
-        phone: prefix + phone,
+        phone: normalizedPhone,
         addresses: area || address ? [{ area, details: address }] : []
       };
       
@@ -4643,14 +4771,28 @@ function showNumericKeypadForInvoice(index, inputField) {
         return;
       }
       
-      currentOrder.customer = {
-        name,
-        phone: prefix + phone
-      };
-      currentOrder.pickupBranch = pickupBranch;
-      
-      document.querySelector('.modal-overlay').remove();
-      printAndSaveInvoice();
+      resolvePickupCustomer(name, `${prefix}${phone}`).then(customer => {
+        if (!customer) return;
+        currentOrder.customer = customer;
+        currentOrder.pickupBranch = pickupBranch;
+        document.querySelector('.modal-overlay').remove();
+        printAndSaveInvoice();
+      });
+    }
+
+    async function resolvePickupCustomer(name, rawPhone) {
+      const phone = normalizeCustomerPhone(rawPhone);
+      if (!phone) {
+        showToast('رقم الهاتف غير صالح', true);
+        return null;
+      }
+      const existing = allCustomers.find(item => normalizeCustomerPhone(item.phone) === phone);
+      if (existing) {
+        showToast('تم استخدام حساب العميل المسجل لهذا الرقم');
+        return existing;
+      }
+      const customer = { name, phone, addresses: [] };
+      return (await saveCustomer(customer)) ? customer : null;
     }
     
     async function printAndSaveInvoice() {
@@ -5561,6 +5703,162 @@ function showNumericKeypadForInvoice(index, inputField) {
     }
 
     
+    let currentPreparationReport = null;
+
+    async function openCashierOrderPreparation(orderId) {
+      try {
+        const snapshot = await db.ref(`orders/${orderId}`).once('value');
+        const data = snapshot.val();
+        const order = data ? { id: orderId, ...data } : allOrders.find(item => item.id === orderId);
+        if (!order) throw new Error('order not found');
+        openPreparationItemsModal(order, false);
+      } catch (error) {
+        console.error('Unable to open preparation notice:', error);
+        showToast('تعذر تحميل بيانات الفاتورة', true);
+      }
+    }
+
+    async function openOnlineOrderPreparationPicker() {
+      try {
+        if (!allOnlineOrders.length) {
+          const snapshot = await db.ref('orderingPlatform/onlineOrders').once('value');
+          allOnlineOrders = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
+        }
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+          <div class="modal-content p-6 w-full max-w-2xl">
+            <h2 class="text-2xl font-bold text-orange-600 mb-4">إبلاغ عن طلب أونلاين</h2>
+            <input id="onlinePreparationSearch" oninput="filterOnlinePreparationOrders()" class="w-full p-3 border-2 border-gray-300 rounded-lg mb-3" placeholder="ابحث برقم الفاتورة أو اسم العميل">
+            <div id="onlinePreparationOrders" class="max-h-96 overflow-y-auto space-y-2">
+              ${renderOnlinePreparationOrderChoices()}
+            </div>
+            <div class="flex gap-3 mt-5">
+              <button onclick="continueOnlinePreparationOrder()" class="flex-1 bg-orange-500 text-white px-6 py-3 rounded-lg font-bold">التالي</button>
+              <button onclick="this.closest('.modal-overlay').remove()" class="flex-1 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold">إلغاء</button>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
+      } catch (error) {
+        console.error('Unable to load online orders:', error);
+        showToast('تعذر تحميل طلبات المنصة', true);
+      }
+    }
+
+    function renderOnlinePreparationOrderChoices(search = '') {
+      const term = String(search || '').trim().toLowerCase();
+      const rows = allOnlineOrders.filter(order => `${order.orderId || order.id} ${order.customerName || ''} ${order.phone || ''}`.toLowerCase().includes(term));
+      return rows.length ? rows.map(order => `
+        <label class="block bg-gray-50 hover:bg-orange-50 border border-gray-200 rounded-lg p-3 cursor-pointer">
+          <input type="radio" name="onlinePreparationOrder" value="${escapeHtml(order.id)}" class="ml-2">
+          <b>#${escapeHtml(order.orderId || order.id)}</b> — ${escapeHtml(order.customerName || 'عميل')}
+          <span class="text-sm text-gray-500">${escapeHtml(order.phone || '')}</span>
+        </label>`).join('') : '<div class="text-center text-gray-500 p-5">لا توجد طلبات مطابقة</div>';
+    }
+
+    function filterOnlinePreparationOrders() {
+      const target = document.getElementById('onlinePreparationOrders');
+      if (target) target.innerHTML = renderOnlinePreparationOrderChoices(document.getElementById('onlinePreparationSearch')?.value || '');
+    }
+
+    function continueOnlinePreparationOrder() {
+      const id = document.querySelector('input[name="onlinePreparationOrder"]:checked')?.value;
+      const order = allOnlineOrders.find(item => item.id === id);
+      if (!order) {
+        showToast('اختر رقم الفاتورة أولاً', true);
+        return;
+      }
+      document.querySelector('.modal-overlay')?.remove();
+      openPreparationItemsModal(order, true);
+    }
+
+    function preparationOrderItems(order) {
+      const rawItems = Array.isArray(order.items) ? order.items : Object.values(order.items || {});
+      return rawItems.map((item, index) => ({
+        key: String(index),
+        name: item.productName || item.nameAr || item.name || item.productNameEn || 'صنف',
+        quantity: Number(item.quantity || 0),
+        notes: item.notes || item.note || item.preparationNotes || ''
+      }));
+    }
+
+    function openPreparationItemsModal(order, isOnline) {
+      currentPreparationReport = { order, isOnline };
+      const items = preparationOrderItems(order);
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      const deliveryDate = order.deliveryDate || '';
+      const from = order.deliveryTimeFrom || '';
+      const to = order.deliveryTimeTo || '';
+      modal.innerHTML = `
+        <div class="modal-content p-6 w-full max-w-2xl" data-preparation-modal="true">
+          <h2 class="text-2xl font-bold text-red-600 mb-2">إبلاغ بطلب #${escapeHtml(order.invoiceNumber || order.orderId || order.id)}</h2>
+          <p class="text-gray-600 mb-4">حدد الأصناف المطلوب تحضيرها ثم اطبع الإبلاغ.</p>
+          ${isOnline ? `<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 bg-orange-50 p-4 rounded-lg">
+            <div><label class="block font-bold mb-1">تاريخ التوصيل</label><input id="preparationDeliveryDate" type="date" class="w-full p-2 border rounded" value="${escapeHtml(deliveryDate)}"></div>
+            <div><label class="block font-bold mb-1">من الساعة</label><input id="preparationDeliveryFrom" type="time" class="w-full p-2 border rounded" value="${escapeHtml(from)}"></div>
+            <div><label class="block font-bold mb-1">إلى الساعة</label><input id="preparationDeliveryTo" type="time" class="w-full p-2 border rounded" value="${escapeHtml(to)}"></div>
+          </div>` : ''}
+          <div class="max-h-96 overflow-y-auto space-y-2">${items.map(item => `
+            <label class="flex gap-3 items-start bg-gray-50 border border-gray-200 rounded-lg p-3 cursor-pointer">
+              <input type="checkbox" class="preparation-item mt-1" value="${item.key}" checked>
+              <span><b>${escapeHtml(item.name)}</b> <span class="text-gray-600">× ${item.quantity}</span>${item.notes ? `<small class="block mt-1 text-blue-700">ملاحظة: ${escapeHtml(item.notes)}</small>` : ''}</span>
+            </label>`).join('')}</div>
+          <div class="flex gap-3 mt-5">
+            <button onclick="printPreparationNotice(this)" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold">طباعة</button>
+            <button onclick="this.closest('.modal-overlay').remove()" class="flex-1 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold">إلغاء</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+    }
+
+    function preparationDateText(date) {
+      if (!date) return 'حسب موعد الطلب';
+      const parsed = new Date(`${date}T00:00:00`);
+      if (Number.isNaN(parsed.getTime())) return date;
+      const days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      return `${days[parsed.getDay()]} بتاريخ ${parsed.getDate()} / ${parsed.getMonth() + 1} / ${parsed.getFullYear()}م`;
+    }
+
+    async function printPreparationNotice(button) {
+      const context = currentPreparationReport;
+      const modal = button.closest('[data-preparation-modal]');
+      if (!context || !modal) return;
+      const indexes = [...modal.querySelectorAll('.preparation-item:checked')].map(item => Number(item.value));
+      const items = preparationOrderItems(context.order).filter((_, index) => indexes.includes(index));
+      if (!items.length) {
+        showToast('حدد صنفاً واحداً على الأقل', true);
+        return;
+      }
+      const date = context.isOnline ? modal.querySelector('#preparationDeliveryDate')?.value : context.order.deliveryDate;
+      const from = context.isOnline ? modal.querySelector('#preparationDeliveryFrom')?.value : context.order.deliveryTimeFrom;
+      const to = context.isOnline ? modal.querySelector('#preparationDeliveryTo')?.value : context.order.deliveryTimeTo;
+      if (context.isOnline && (!date || !from || !to)) {
+        showToast('حدد تاريخ ووقت التوصيل للطلب الأونلاين', true);
+        return;
+      }
+      const order = context.order;
+      const content = `<div style="text-align:center;border-bottom:2px dashed #000;padding-bottom:8px;margin-bottom:9px"><img src="logo.png" alt="الشعار" style="width:82px;height:82px;object-fit:contain;display:block;margin:0 auto 5px"><div style="font-size:18px;font-weight:900">إبلاغ بطلب</div></div>
+        <div style="font-size:12px;border-bottom:1px dashed #999;padding-bottom:6px;margin-bottom:7px"><div>رقم الفاتورة: <b>#${escapeHtml(order.invoiceNumber || order.orderId || order.id)}</b></div><div>الكاشير: ${escapeHtml(order.cashier || (context.isOnline ? 'طلب أونلاين' : '—'))}</div><div>العميل: ${escapeHtml(order.customerName || '—')}</div><div>هاتف العميل: <span dir="ltr">${escapeHtml(order.phoneNumber || order.phone || '—')}</span></div></div>
+        <div style="font-weight:900;font-size:16px;margin:8px 0">أصناف تحتاج تحضير</div><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:right;border-bottom:1px solid #000;padding:4px 0">الصنف</th><th style="width:55px;border-bottom:1px solid #000;padding:4px 0">الكمية</th></tr></thead><tbody>${items.map(item => `<tr><td style="padding:5px 0;border-bottom:1px dotted #aaa"><b>${escapeHtml(item.name)}</b>${item.notes ? `<small style="display:block;color:#075985;margin-top:2px">ملاحظة: ${escapeHtml(item.notes)}</small>` : ''}</td><td style="text-align:center;font-weight:bold;padding:5px 0;border-bottom:1px dotted #aaa">${item.quantity}</td></tr>`).join('')}</tbody></table>
+        <div style="margin-top:14px;border-top:2px solid #000;padding-top:9px;text-align:center;font-size:16px;font-weight:900;line-height:1.7">يرجى تحضير الأصناف أعلاه يوم ${escapeHtml(preparationDateText(date))}<br>قبل الوقت المحدد بين ${escapeHtml(formatDeliveryDisplayTime(from) || from || '—')} و ${escapeHtml(formatDeliveryDisplayTime(to) || to || '—')}</div><div style="text-align:center;font-size:14px;font-weight:bold;margin-top:12px">شكراً...</div>`;
+      const printHtml = buildThermalInvoicePrintHtml(content, await getInvoiceLogoDataUrl());
+      try {
+        if (window.figsDesktop?.isDesktopApp) await window.figsDesktop.printHtml({ html: printHtml, type: 'receipt', silent: true });
+        else {
+          const printWindow = window.open('', '_blank', 'width=800,height=600');
+          if (!printWindow) throw new Error('نافذة الطباعة غير متاحة');
+          printWindow.document.write(printHtml.replace('</body>', '<script>window.print();window.onafterprint=function(){window.close()};<\\/script></body>'));
+          printWindow.document.close();
+        }
+        modal.closest('.modal-overlay')?.remove();
+        showToast('تم إرسال إبلاغ الطلب للطابعة');
+      } catch (error) {
+        console.error('Preparation notice print failed:', error);
+        showToast('تعذر طباعة إبلاغ الطلب', true);
+      }
+    }
+
     async function reprintInvoice(orderId) {
       try {
         const snapshot = await db.ref(`orders/${orderId}`).once('value');
@@ -8106,9 +8404,15 @@ function renderAccountingContent(section) {
         return;
       }
       
+      const normalizedPhone = normalizeCustomerPhone(`${prefix}${phone}`);
+      const existing = allCustomers.find(item => normalizeCustomerPhone(item.phone) === normalizedPhone);
+      if (existing) {
+        showToast(`الرقم مسجل بالفعل باسم ${existing.name}`, true);
+        return;
+      }
       const customer = {
         name,
-        phone: prefix + phone,
+        phone: normalizedPhone,
         addresses: []
       };
       
@@ -8214,7 +8518,7 @@ function renderAccountingContent(section) {
 
     async function saveEditedCustomer(customerId) {
       const name = document.getElementById('editCustomerName').value.trim();
-      const phone = document.getElementById('editCustomerPhone').value.trim();
+      const phone = normalizeCustomerPhone(document.getElementById('editCustomerPhone').value.trim());
       
       if (!name || !phone) {
         showToast('الرجاء إدخال الاسم ورقم الهاتف', true);
@@ -8224,6 +8528,11 @@ function renderAccountingContent(section) {
       const customer = allCustomers.find(c => c.id === customerId);
       if (!customer) {
         showToast('العميل غير موجود', true);
+        return;
+      }
+      const duplicate = allCustomers.find(item => item.id !== customerId && normalizeCustomerPhone(item.phone) === phone);
+      if (duplicate) {
+        showToast(`لا يمكن تغيير الرقم: مسجل بالفعل باسم ${duplicate.name}`, true);
         return;
       }
       const oldPhone = customer.phone || '';

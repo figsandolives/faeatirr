@@ -11834,7 +11834,55 @@ function openStickerMakerEditModal(field) {
 
 function openStickerMakerPrintModal() {
   if (!state.stickerMaker?.record) return;
-  const input = document.getElementById('stickerMakerCopies'); input.value = ''; document.getElementById('stickerMakerPrintModal').classList.remove('hidden'); setTimeout(() => input.focus(), 20);
+  document.getElementById('stickerMakerPrintOverlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'stickerMakerPrintOverlay';
+  overlay.className = 'overlay';
+  overlay.style.cssText = 'z-index:10000; display:flex;';
+  overlay.innerHTML = `
+    <div class="modal card" style="max-width:400px; text-align:start; width:min(400px, calc(100vw - 32px));">
+      <h3>عدد الستيكرات</h3>
+      <label class="tag" for="stickerMakerCopiesDynamic">اكتب عدد الستيكرات المراد طباعتها</label>
+      <input id="stickerMakerCopiesDynamic" class="input" inputmode="numeric" dir="ltr" autocomplete="off" placeholder="اكتب العدد" />
+      <p id="stickerMakerCopiesError" class="helper form-error" style="min-height:20px;"></p>
+      <div class="row" style="justify-content:flex-end; margin-top:12px;">
+        <button id="stickerMakerCopiesPrint" class="btn primary">طباعة</button>
+        <button id="stickerMakerCopiesCancel" class="btn ghost">إلغاء</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const input = overlay.querySelector('#stickerMakerCopiesDynamic');
+  const error = overlay.querySelector('#stickerMakerCopiesError');
+  const normalize = () => { input.value = normalizeDigits(input.value || '').replace(/[^0-9]/g, ''); };
+  input.addEventListener('input', normalize);
+  input.addEventListener('keydown', (event) => {
+    event.stopPropagation();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      overlay.querySelector('#stickerMakerCopiesPrint')?.click();
+    }
+  }, true);
+  input.addEventListener('keyup', (event) => event.stopPropagation(), true);
+  overlay.querySelector('#stickerMakerCopiesCancel').onclick = () => overlay.remove();
+  overlay.querySelector('#stickerMakerCopiesPrint').onclick = () => {
+    normalize();
+    const copies = Number(input.value);
+    if (!Number.isInteger(copies) || copies < 1) {
+      error.textContent = 'اكتب عدداً صحيحاً أكبر من صفر';
+      input.focus();
+      return;
+    }
+    const record = state.stickerMaker?.record;
+    if (!record) return overlay.remove();
+    overlay.remove();
+    state.stickerMaker = { query: '', record: null, editingField: '', printing: false };
+    renderStickerMakerSection();
+    Promise.resolve(printProductionLabel(record, copies)).catch((printError) => {
+      console.error('Sticker maker print failed:', printError);
+      alert(`تعذرت طباعة الستيكر: ${printError?.message || printError}`);
+    });
+  };
+  setTimeout(() => input.focus(), 40);
 }
 
 function bindStickerMakerModals() {

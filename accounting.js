@@ -11834,12 +11834,15 @@ function openStickerMakerEditModal(field) {
 
 function openStickerMakerPrintModal() {
   if (!state.stickerMaker?.record) return;
-  const input = document.getElementById('stickerMakerCopies'); input.value = '1'; document.getElementById('stickerMakerPrintModal').classList.remove('hidden'); setTimeout(() => input.focus(), 20);
+  const input = document.getElementById('stickerMakerCopies'); input.value = ''; document.getElementById('stickerMakerPrintModal').classList.remove('hidden'); setTimeout(() => input.focus(), 20);
 }
 
 function bindStickerMakerModals() {
   const numberInput = document.getElementById('stickerMakerCopies');
   numberInput.oninput = () => { numberInput.value = normalizeDigits(numberInput.value).replace(/[^0-9]/g, ''); };
+  numberInput.onkeydown = (event) => event.stopPropagation();
+  numberInput.onkeyup = (event) => event.stopPropagation();
+  numberInput.onkeypress = (event) => event.stopPropagation();
   document.getElementById('stickerMakerEditCancel').onclick = () => document.getElementById('stickerMakerEditModal').classList.add('hidden');
   document.getElementById('stickerMakerEditSave').onclick = () => {
     const draft = state.stickerMaker, field = draft?.editingField; if (!draft?.record || !field) return;
@@ -11855,10 +11858,17 @@ function bindStickerMakerModals() {
     document.getElementById('stickerMakerEditModal').classList.add('hidden'); renderStickerMakerSection();
   };
   document.getElementById('stickerMakerPrintCancel').onclick = () => document.getElementById('stickerMakerPrintModal').classList.add('hidden');
-  document.getElementById('stickerMakerPrintConfirm').onclick = async () => {
+  document.getElementById('stickerMakerPrintConfirm').onclick = () => {
     const copies = Number(normalizeDigits(numberInput.value)); if (!Number.isInteger(copies) || copies < 1) { numberInput.focus(); return; }
+    if (state.stickerMaker?.printing) return;
+    state.stickerMaker.printing = true;
     document.getElementById('stickerMakerPrintModal').classList.add('hidden'); const record = state.stickerMaker?.record;
-    await printProductionLabel(record, copies); state.stickerMaker = { query: '', record: null, editingField: '' }; renderStickerMakerSection();
+    state.stickerMaker = { query: '', record: null, editingField: '', printing: false };
+    renderStickerMakerSection();
+    Promise.resolve(printProductionLabel(record, copies)).catch((error) => {
+      console.error('Sticker maker print failed:', error);
+      alert(`تعذرت طباعة الستيكر: ${error?.message || error}`);
+    });
   };
 }
 

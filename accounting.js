@@ -1004,7 +1004,7 @@ const legacyDeliveryAreas = [
 
 const sectionGroups = {
   itemCards: 'inventory',
-  countryOrigins: 'inventory',
+  stickerMaker: 'inventory',
   stockMaterials: 'inventory',
   materialCategories: 'inventory',
   storageLocations: 'inventory',
@@ -1636,7 +1636,7 @@ function initSections() {
   setupProductInfoSection();
   setupProductCategoriesSection();
   setupItemCardSection();
-  setupCountryOriginsSection();
+  setupStickerMakerSection();
   setupProductionFollowUpSection();
   setupStockMaterialsSection();
   setupMaterialCategoriesSection();
@@ -1671,7 +1671,7 @@ function rebuildSections() {
   setupProductInfoSection();
   setupProductCategoriesSection();
   setupItemCardSection();
-  setupCountryOriginsSection();
+  setupStickerMakerSection();
   setupProductionFollowUpSection();
   setupStockMaterialsSection();
   setupMaterialCategoriesSection();
@@ -11741,6 +11741,117 @@ function getCountryOriginAssignedEntries(originId, query = '') {
   }).sort((a, b) => String(a.item.code || '').localeCompare(String(b.item.code || '')));
 }
 
+function getStickerMakerRows(query = '') {
+  const needle = normalizeSearchValue(query);
+  const rows = (items, type) => Object.entries(items || {}).map(([id, item]) => ({ id, item, type }));
+  return [...rows(state.cache.products, 'product'), ...rows(state.cache.stockMaterials, 'material')]
+    .filter(({ item }) => !needle || normalizeSearchValue([item.nameAr, item.nameEn, item.name, item.code, item.barcode].join(' ')).includes(needle))
+    .sort((a, b) => String(a.item.nameAr || a.item.name || '').localeCompare(String(b.item.nameAr || b.item.name || ''), 'ar'))
+    .slice(0, 50);
+}
+
+function getStickerMakerRecord(selection) {
+  if (!selection) return null;
+  const { id, item, type } = selection;
+  const info = type === 'product' ? getProductInfoByProductId(id) : null;
+  return {
+    itemId: id, itemType: type === 'product' ? 'product' : 'stockMaterial',
+    itemName: item.nameAr || item.name || item.nameEn || '', itemNameAr: item.nameAr || item.name || '', itemNameEn: item.nameEn || item.name || '',
+    productionBarcode: info?.barcode || item.barcode || item.code || '', productionDate: item.fixedProductionDate || new Date().toISOString().slice(0, 10), expiryDate: item.fixedExpiryDate || '',
+    labelIngredients: info?.ingredients || item.ingredients || '', labelOrigin: info?.origin || item.origin || null, stickerMaker: true
+  };
+}
+
+function setupStickerMakerSection() {
+  state.stickerMaker ||= { query: '', record: null, editingField: '' };
+  renderStickerMakerSection();
+}
+
+function renderStickerMakerSection() {
+  const section = document.getElementById('section-stickerMaker');
+  if (!section) return;
+  const draft = state.stickerMaker ||= { query: '', record: null, editingField: '' };
+  const hasRecord = Boolean(draft.record);
+  section.innerHTML = `
+    <div class="sticker-maker">
+      <div class="sticker-search-wrap">
+        <label class="tag" for="stickerMakerSearch">البحث عن منتج أو مادة مخزون</label>
+        <input id="stickerMakerSearch" class="input" autocomplete="off" placeholder="اكتب الاسم العربي أو الإنجليزي أو الباركود" value="${escapeHtml(draft.query)}" />
+        <div id="stickerMakerResults" class="sticker-search-results hidden"></div>
+      </div>
+      <div class="sticker-preview-card ${hasRecord ? '' : 'is-empty'}">${hasRecord ? '<iframe id="stickerMakerPreview" title="معاينة الستيكر"></iframe>' : ''}</div>
+      <button id="stickerMakerPrint" class="btn primary sticker-print-btn" ${hasRecord ? '' : 'disabled'}>طباعة</button>
+    </div>`;
+  const search = document.getElementById('stickerMakerSearch');
+  const results = document.getElementById('stickerMakerResults');
+  const renderResults = () => {
+    draft.query = search.value || '';
+    const matches = draft.query.trim() ? getStickerMakerRows(draft.query) : [];
+    results.classList.toggle('hidden', !matches.length);
+    results.innerHTML = matches.map(({ id, item, type }) => `<button type="button" class="sticker-search-result" data-id="${escapeHtml(id)}" data-type="${type}"><strong>${escapeHtml(item.nameAr || item.name || item.nameEn || '-')}</strong><span>${escapeHtml(item.nameEn || item.name || '-')}</span><small>${type === 'product' ? 'منتج' : 'مادة مخزون'}</small></button>`).join('');
+    results.querySelectorAll('.sticker-search-result').forEach((button) => { button.onclick = () => {
+      const item = (button.dataset.type === 'product' ? state.cache.products : state.cache.stockMaterials)?.[button.dataset.id];
+      if (!item) return;
+      draft.record = getStickerMakerRecord({ id: button.dataset.id, item, type: button.dataset.type }); draft.query = ''; renderStickerMakerSection();
+    }; });
+  };
+  search?.addEventListener('input', renderResults); search?.addEventListener('focus', renderResults);
+  document.getElementById('stickerMakerPrint')?.addEventListener('click', openStickerMakerPrintModal);
+  if (hasRecord) renderStickerMakerPreview(draft.record);
+  bindStickerMakerModals();
+}
+
+function renderStickerMakerPreview(record) {
+  const frame = document.getElementById('stickerMakerPreview'); if (!frame) return;
+  frame.srcdoc = buildProductionLabelHtml(record, 1).replace('</style>', '.sheet { transform: scale(2.45); transform-origin: top center; } </style>');
+  frame.onload = () => {
+    const doc = frame.contentDocument;
+    doc.querySelector('.meta-card.production')?.addEventListener('dblclick', () => openStickerMakerEditModal('productionDate'));
+    doc.querySelector('.meta-card.expiry')?.addEventListener('dblclick', () => openStickerMakerEditModal('expiryDate'));
+    doc.querySelector('.ingredients')?.addEventListener('dblclick', () => openStickerMakerEditModal('ingredients'));
+  };
+}
+
+function openStickerMakerEditModal(field) {
+  const draft = state.stickerMaker; if (!draft?.record) return;
+  draft.editingField = field;
+  const input = document.getElementById('stickerMakerEditInput'), textarea = document.getElementById('stickerMakerEditTextarea');
+  document.getElementById('stickerMakerEditTitle').textContent = field === 'ingredients' ? 'تعديل المكونات' : field === 'productionDate' ? 'تعديل تاريخ الإنتاج' : 'تعديل تاريخ الانتهاء';
+  input.classList.toggle('hidden', field === 'ingredients'); textarea.classList.toggle('hidden', field !== 'ingredients');
+  if (field === 'ingredients') textarea.value = draft.record.labelIngredients || ''; else input.value = draft.record[field] || '';
+  document.getElementById('stickerMakerEditModal').classList.remove('hidden'); setTimeout(() => (field === 'ingredients' ? textarea : input).focus(), 20);
+}
+
+function openStickerMakerPrintModal() {
+  if (!state.stickerMaker?.record) return;
+  const input = document.getElementById('stickerMakerCopies'); input.value = '1'; document.getElementById('stickerMakerPrintModal').classList.remove('hidden'); setTimeout(() => input.focus(), 20);
+}
+
+function bindStickerMakerModals() {
+  const numberInput = document.getElementById('stickerMakerCopies');
+  numberInput.oninput = () => { numberInput.value = normalizeDigits(numberInput.value).replace(/[^0-9]/g, ''); };
+  document.getElementById('stickerMakerEditCancel').onclick = () => document.getElementById('stickerMakerEditModal').classList.add('hidden');
+  document.getElementById('stickerMakerEditSave').onclick = () => {
+    const draft = state.stickerMaker, field = draft?.editingField; if (!draft?.record || !field) return;
+    const value = field === 'ingredients' ? String(document.getElementById('stickerMakerEditTextarea').value || '').trim() : document.getElementById('stickerMakerEditInput').value;
+    if (field === 'ingredients') {
+      draft.record.labelIngredients = value;
+      if (draft.record.itemType === 'product') {
+        const info = getProductInfoByProductId(draft.record.itemId), infoId = getProductInfoEntryId(draft.record.itemId, info);
+        const payload = info ? { ingredients: value } : { id: draft.record.itemId, productId: draft.record.itemId, productName: draft.record.itemNameAr, ingredients: value, origin: '', barcode: draft.record.productionBarcode, createdAt: Date.now() };
+        db.ref(`productInfos/${infoId}`).update(payload).catch(() => alert('تعذر حفظ المكونات في معلومات المنتج'));
+      } else db.ref(`stockMaterials/${draft.record.itemId}/ingredients`).set(value).catch(() => alert('تعذر حفظ المكونات للمادة'));
+    } else draft.record[field] = value;
+    document.getElementById('stickerMakerEditModal').classList.add('hidden'); renderStickerMakerSection();
+  };
+  document.getElementById('stickerMakerPrintCancel').onclick = () => document.getElementById('stickerMakerPrintModal').classList.add('hidden');
+  document.getElementById('stickerMakerPrintConfirm').onclick = async () => {
+    const copies = Number(normalizeDigits(numberInput.value)); if (!Number.isInteger(copies) || copies < 1) { numberInput.focus(); return; }
+    document.getElementById('stickerMakerPrintModal').classList.add('hidden'); const record = state.stickerMaker?.record;
+    await printProductionLabel(record, copies); state.stickerMaker = { query: '', record: null, editingField: '' }; renderStickerMakerSection();
+  };
+}
+
 function setupCountryOriginsSection() {
   const section = document.getElementById('section-countryOrigins');
   if (!section) return;
@@ -14791,12 +14902,13 @@ function getProductionLabelNames(record) {
 function getProductionLabelInfo(record) {
   if (!record) return {};
   const product = record.itemType === 'product' ? state.cache.products?.[record.itemId] : null;
+  const material = record.itemType !== 'product' ? state.cache.stockMaterials?.[record.itemId] : null;
   const info = record.itemType === 'product' ? getProductInfoByProductId(record.itemId) : null;
   const originFromSelect = product?.countryOriginId ? getLocalizedName(state.cache.countryOrigins?.[product.countryOriginId]) : '';
   return {
-    ingredients: info?.ingredients || record.ingredients || '',
-    origin: info?.origin || record.origin || originFromSelect || '',
-    barcode: info?.barcode || product?.barcode || record.productionBarcode || ''
+    ingredients: record.labelIngredients ?? info?.ingredients ?? material?.ingredients ?? record.ingredients ?? '',
+    origin: record.labelOrigin ?? info?.origin ?? material?.origin ?? record.origin ?? originFromSelect ?? '',
+    barcode: info?.barcode || product?.barcode || material?.barcode || record.productionBarcode || ''
   };
 }
 
@@ -25056,7 +25168,7 @@ function refreshAllDataViews() {
   renderProductInfoSection();
   renderProductCategoriesSection();
   renderItemCardSection();
-  renderCountryOriginsSection();
+  renderStickerMakerSection();
   renderStockMaterialsSection();
   renderMaterialCategoriesSection();
   renderStorageLocationsSection();

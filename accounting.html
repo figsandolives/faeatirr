@@ -38,7 +38,7 @@
         <button class="nav-item" data-icon="⚖" data-section="units" data-i18n="units"></button>
         <button class="nav-item" data-icon="🧷" data-section="itemCards" data-i18n="item_cards"></button>
         <button class="nav-item" data-icon="🏬" data-section="storageLocations" data-i18n="storage_locations"></button>
-        <button class="nav-item" data-icon="🌍" data-section="countryOrigins" data-i18n="country_origins"></button>
+        <button class="nav-item" data-icon="🏷️" data-section="stickerMaker">صانع الستيكرات</button>
         <button class="nav-item" data-icon="⏳" data-section="productionFollowUp" data-i18n="production_followup"></button>
 
         <div class="nav-group" data-group="inventory">
@@ -105,7 +105,7 @@
       <section id="section-units" class="section"></section>
       <section id="section-itemCards" class="section"></section>
       <section id="section-storageLocations" class="section"></section>
-      <section id="section-countryOrigins" class="section"></section>
+      <section id="section-stickerMaker" class="section"></section>
       <section id="section-productionFollowUp" class="section"></section>
       <section id="section-stockMaterials" class="section"></section>
       <section id="section-materialCategories" class="section"></section>
@@ -503,6 +503,30 @@
         <button id="productionDateCancel" class="btn ghost" data-i18n="cancel"></button>
       </div>
       <p id="productionDateError" class="helper form-error"></p>
+    </div>
+  </div>
+
+  <div id="stickerMakerEditModal" class="overlay hidden">
+    <div class="modal card" style="max-width: 480px; text-align: start;">
+      <h3 id="stickerMakerEditTitle">تعديل الستيكر</h3>
+      <input id="stickerMakerEditInput" class="input hidden" type="date" />
+      <textarea id="stickerMakerEditTextarea" class="input hidden" rows="5" placeholder="المكونات"></textarea>
+      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+        <button id="stickerMakerEditSave" class="btn primary">حفظ</button>
+        <button id="stickerMakerEditCancel" class="btn ghost" data-i18n="cancel"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="stickerMakerPrintModal" class="overlay hidden">
+    <div class="modal card" style="max-width: 400px; text-align: start;">
+      <h3>عدد الستيكرات</h3>
+      <label class="tag" for="stickerMakerCopies">اكتب عدد الستيكرات المراد طباعتها</label>
+      <input id="stickerMakerCopies" class="input" inputmode="numeric" dir="ltr" autocomplete="off" />
+      <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+        <button id="stickerMakerPrintConfirm" class="btn primary">طباعة</button>
+        <button id="stickerMakerPrintCancel" class="btn ghost" data-i18n="cancel"></button>
+      </div>
     </div>
   </div>
 

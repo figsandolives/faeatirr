@@ -1751,3 +1751,16 @@ textarea.input:focus {
 .production-draft-table .input { min-width: 115px; }
 .production-draft-table td:first-child { min-width: 190px; }
 .production-common-dates { padding: 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 12px; }
+
+.sticker-maker { width: min(100%, 760px); margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.sticker-search-wrap { width: min(100%, 560px); position: relative; z-index: 2; }
+.sticker-search-results { position: absolute; top: calc(100% + 5px); inset-inline: 0; max-height: 300px; overflow-y: auto; background: #fff; border: 1px solid #d8dee8; border-radius: 12px; box-shadow: 0 14px 32px rgba(15, 23, 42, .15); padding: 6px; }
+.sticker-search-result { width: 100%; border: 0; border-bottom: 1px solid #edf0f5; background: #fff; padding: 10px 12px; cursor: pointer; text-align: start; display: grid; grid-template-columns: 1fr auto; gap: 2px 14px; color: var(--text); }
+.sticker-search-result:hover { background: #f8fafc; }
+.sticker-search-result span { direction: ltr; color: var(--muted); text-align: start; }
+.sticker-search-result small { grid-column: 1 / -1; color: var(--accent); }
+.sticker-preview-card { width: min(100%, 660px); height: 420px; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 16px; background: #f1f5f9; border: 1px solid #d8dee8; }
+.sticker-preview-card.is-empty { background: #fff; }
+.sticker-empty-state { color: var(--muted); font-weight: 700; }
+#stickerMakerPreview { width: 100%; height: 100%; border: 0; background: transparent; }
+.sticker-print-btn { min-width: 180px; }

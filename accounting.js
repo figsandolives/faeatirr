@@ -11792,6 +11792,8 @@ function renderStickerMakerSection() {
     results.querySelectorAll('.sticker-search-result').forEach((button) => { button.onclick = () => {
       const item = (button.dataset.type === 'product' ? state.cache.products : state.cache.stockMaterials)?.[button.dataset.id];
       if (!item) return;
+      const itemName = item.nameAr || item.name || item.nameEn || '';
+      if (!confirm(`هل تريد اختيار «${itemName}» لصناعة الستيكر؟`)) return;
       draft.record = getStickerMakerRecord({ id: button.dataset.id, item, type: button.dataset.type }); draft.query = ''; renderStickerMakerSection();
     }; });
   };
@@ -11803,7 +11805,10 @@ function renderStickerMakerSection() {
 
 function renderStickerMakerPreview(record) {
   const frame = document.getElementById('stickerMakerPreview'); if (!frame) return;
-  frame.srcdoc = buildProductionLabelHtml(record, 1).replace('</style>', '.sheet { transform: scale(2.45); transform-origin: top center; } </style>');
+  frame.srcdoc = buildProductionLabelHtml(record, 1).replace('</style>', `
+    html, body { width: 100% !important; height: 100% !important; display: flex; justify-content: center; align-items: flex-start; overflow: hidden !important; }
+    .sheet { flex: 0 0 ${labelPrintSettings.widthMm}mm; transform: scale(2.35); transform-origin: top center; margin-top: 26px; }
+  </style>`);
   frame.onload = () => {
     const doc = frame.contentDocument;
     doc.querySelector('.meta-card.production')?.addEventListener('dblclick', () => openStickerMakerEditModal('productionDate'));
@@ -15305,10 +15310,6 @@ function buildProductionLabelHtml(record, copies = 1) {
                 <div class="title en">${nameEn}</div>
                 <div class="ingredients">المكونات: ${ingredients}</div>
                 <div class="meta-row">
-                  <div class="meta-card origin">
-                    <span class="meta-label">بلد المنشأ</span>
-                    <span class="meta-value">${origin}</span>
-                  </div>
                   <div class="meta-card production">
                     <span class="meta-label">إنتاج</span>
                     <span class="meta-value">${productionDate}</span>
@@ -15316,6 +15317,10 @@ function buildProductionLabelHtml(record, copies = 1) {
                   <div class="meta-card expiry">
                     <span class="meta-label">انتهاء</span>
                     <span class="meta-value">${expiryDate}</span>
+                  </div>
+                  <div class="meta-card origin">
+                    <span class="meta-label">بلد المنشأ</span>
+                    <span class="meta-value">${origin}</span>
                   </div>
                 </div>
                 <div class="barcode">${barcodeSvg}</div>
@@ -15414,6 +15419,7 @@ function buildProductionLabelHtml(record, copies = 1) {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
             gap: 1mm;
+            direction: rtl;
             color: #000;
           }
           .meta-card {

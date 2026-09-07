@@ -1759,8 +1759,9 @@ textarea.input:focus {
 .sticker-search-result:hover { background: #f8fafc; }
 .sticker-search-result span { direction: ltr; color: var(--muted); text-align: start; }
 .sticker-search-result small { grid-column: 1 / -1; color: var(--accent); }
-.sticker-preview-card { width: min(100%, 660px); height: 420px; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 16px; background: #f1f5f9; border: 1px solid #d8dee8; }
+.sticker-preview-card { width: min(100%, 660px); height: 420px; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 16px; background: #f1f5f9; border: 1px solid #d8dee8; position: relative; }
 .sticker-preview-card.is-empty { background: #fff; }
 .sticker-empty-state { color: var(--muted); font-weight: 700; }
 #stickerMakerPreview { width: 100%; height: 100%; border: 0; background: transparent; }
+#stickerMakerPreviewBarcode { position: absolute; z-index: 2; pointer-events: none; left: calc(50% - 242px); top: 60px; width: 260px; height: 62px; transform: translateY(260px) rotate(-90deg); transform-origin: top left; image-rendering: pixelated; }
 .sticker-print-btn { min-width: 180px; }

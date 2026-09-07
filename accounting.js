@@ -11779,7 +11779,7 @@ function renderStickerMakerSection() {
         <input id="stickerMakerSearch" class="input" autocomplete="off" placeholder="اكتب الاسم العربي أو الإنجليزي أو الباركود" value="${escapeHtml(draft.query)}" />
         <div id="stickerMakerResults" class="sticker-search-results hidden"></div>
       </div>
-      <div class="sticker-preview-card ${hasRecord ? '' : 'is-empty'}">${hasRecord ? '<iframe id="stickerMakerPreview" title="معاينة الستيكر"></iframe>' : ''}</div>
+      <div class="sticker-preview-card ${hasRecord ? '' : 'is-empty'}">${hasRecord ? '<iframe id="stickerMakerPreview" title="معاينة الستيكر"></iframe><canvas id="stickerMakerPreviewBarcode" aria-label="الباركود"></canvas>' : ''}</div>
       <button id="stickerMakerPrint" class="btn primary sticker-print-btn" ${hasRecord ? '' : 'disabled'}>طباعة</button>
     </div>`;
   const search = document.getElementById('stickerMakerSearch');
@@ -11815,6 +11815,11 @@ function renderStickerMakerPreview(record) {
     doc.querySelector('.meta-card.expiry')?.addEventListener('dblclick', () => openStickerMakerEditModal('expiryDate'));
     doc.querySelector('.ingredients')?.addEventListener('dblclick', () => openStickerMakerEditModal('ingredients'));
   };
+  const canvas = document.getElementById('stickerMakerPreviewBarcode');
+  const barcode = getProductionLabelInfo(record).barcode || record.productionBarcode || generateBarcodeValue();
+  if (canvas && barcode && typeof JsBarcode !== 'undefined') {
+    JsBarcode(canvas, barcode, { format: 'CODE128', displayValue: false, height: 62, width: 1.15, margin: 0 });
+  }
 }
 
 function openStickerMakerEditModal(field) {
@@ -25071,6 +25076,16 @@ function renderUsers() {
   });
 }
 
+let dataRefreshTimer = null;
+
+function scheduleDataRefresh() {
+  clearTimeout(dataRefreshTimer);
+  dataRefreshTimer = setTimeout(() => {
+    dataRefreshTimer = null;
+    refreshAllDataViews();
+  }, 120);
+}
+
 function watchData() {
   const paths = [
     'orders',
@@ -25121,7 +25136,7 @@ function watchData() {
         state.pendingDataRefresh = true;
         return;
       }
-      refreshAllDataViews();
+      scheduleDataRefresh();
     });
   });
 
@@ -25174,7 +25189,7 @@ function refreshAllDataViews() {
   renderProductInfoSection();
   renderProductCategoriesSection();
   renderItemCardSection();
-  renderStickerMakerSection();
+  if (state.currentSection === 'stickerMaker') renderStickerMakerSection();
   renderStockMaterialsSection();
   renderMaterialCategoriesSection();
   renderStorageLocationsSection();

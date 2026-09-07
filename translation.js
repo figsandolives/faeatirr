@@ -566,7 +566,21 @@ const translations = {
     fixed_expiry_date: "تاريخ صلاحية محدد",
     skip_issue_voucher: "تخطي سند الصرف",
     edit_invoice: "✏️ تعديل الفاتورة",
-    customer_information: "معلومات العميل"
+    customer_information: "معلومات العميل",
+    sticker_maker: "صانع الستيكرات",
+    sticker_search_label: "البحث عن منتج أو مادة مخزون",
+    sticker_search_placeholder: "اكتب الاسم العربي أو الإنجليزي أو الباركود",
+    sticker_select_confirm: "هل تريد اختيار «{name}» لصناعة الستيكر؟",
+    sticker_edit_ingredients: "تعديل المكونات",
+    sticker_edit_production_date: "تعديل تاريخ الإنتاج",
+    sticker_edit_expiry_date: "تعديل تاريخ الانتهاء",
+    sticker_quantity: "عدد الستيكرات",
+    sticker_quantity_help: "اكتب عدد الستيكرات المراد طباعتها",
+    sticker_quantity_placeholder: "اكتب العدد",
+    sticker_invalid_quantity: "اكتب عدداً صحيحاً أكبر من صفر",
+    sticker_print_failed: "تعذرت طباعة الستيكر: {message}",
+    sticker_product_info_save_failed: "تعذر حفظ المكونات في معلومات المنتج",
+    sticker_material_save_failed: "تعذر حفظ المكونات للمادة"
   },
   en: {
     app_title: "Management & Cashier System",
@@ -1135,7 +1149,21 @@ const translations = {
     fixed_expiry_date: "Fixed Expiry Date",
     skip_issue_voucher: "Skip Issue Voucher",
     edit_invoice: "✏️ Edit Invoice",
-    customer_information: "Customer Information"
+    customer_information: "Customer Information",
+    sticker_maker: "Sticker Maker",
+    sticker_search_label: "Search for a product or stock material",
+    sticker_search_placeholder: "Enter the Arabic or English name, or barcode",
+    sticker_select_confirm: "Do you want to select “{name}” for the sticker?",
+    sticker_edit_ingredients: "Edit Ingredients",
+    sticker_edit_production_date: "Edit Production Date",
+    sticker_edit_expiry_date: "Edit Expiry Date",
+    sticker_quantity: "Number of Stickers",
+    sticker_quantity_help: "Enter the number of stickers to print",
+    sticker_quantity_placeholder: "Enter quantity",
+    sticker_invalid_quantity: "Enter a whole number greater than zero",
+    sticker_print_failed: "Could not print the sticker: {message}",
+    sticker_product_info_save_failed: "Could not save ingredients in product information",
+    sticker_material_save_failed: "Could not save ingredients for the stock material"
   }
 };
 

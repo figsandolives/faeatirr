@@ -11775,12 +11775,12 @@ function renderStickerMakerSection() {
   section.innerHTML = `
     <div class="sticker-maker">
       <div class="sticker-search-wrap">
-        <label class="tag" for="stickerMakerSearch">البحث عن منتج أو مادة مخزون</label>
-        <input id="stickerMakerSearch" class="input" autocomplete="off" placeholder="اكتب الاسم العربي أو الإنجليزي أو الباركود" value="${escapeHtml(draft.query)}" />
+        <label class="tag" for="stickerMakerSearch">${window.i18n.t('sticker_search_label')}</label>
+        <input id="stickerMakerSearch" class="input" autocomplete="off" placeholder="${window.i18n.t('sticker_search_placeholder')}" value="${escapeHtml(draft.query)}" />
         <div id="stickerMakerResults" class="sticker-search-results hidden"></div>
       </div>
       <div class="sticker-preview-card ${hasRecord ? '' : 'is-empty'}">${hasRecord ? '<iframe id="stickerMakerPreview" title="معاينة الستيكر"></iframe><canvas id="stickerMakerPreviewBarcode" aria-label="الباركود"></canvas>' : ''}</div>
-      <button id="stickerMakerPrint" class="btn primary sticker-print-btn" ${hasRecord ? '' : 'disabled'}>طباعة</button>
+      <button id="stickerMakerPrint" class="btn primary sticker-print-btn" ${hasRecord ? '' : 'disabled'}>${window.i18n.t('print')}</button>
     </div>`;
   const search = document.getElementById('stickerMakerSearch');
   const results = document.getElementById('stickerMakerResults');
@@ -11788,12 +11788,12 @@ function renderStickerMakerSection() {
     draft.query = search.value || '';
     const matches = draft.query.trim() ? getStickerMakerRows(draft.query) : [];
     results.classList.toggle('hidden', !matches.length);
-    results.innerHTML = matches.map(({ id, item, type }) => `<button type="button" class="sticker-search-result" data-id="${escapeHtml(id)}" data-type="${type}"><strong>${escapeHtml(item.nameAr || item.name || item.nameEn || '-')}</strong><span>${escapeHtml(item.nameEn || item.name || '-')}</span><small>${type === 'product' ? 'منتج' : 'مادة مخزون'}</small></button>`).join('');
+    results.innerHTML = matches.map(({ id, item, type }) => `<button type="button" class="sticker-search-result" data-id="${escapeHtml(id)}" data-type="${type}"><strong>${escapeHtml(item.nameAr || item.name || item.nameEn || '-')}</strong><span>${escapeHtml(item.nameEn || item.name || '-')}</span><small>${type === 'product' ? window.i18n.t('product_single') : window.i18n.t('stock_materials')}</small></button>`).join('');
     results.querySelectorAll('.sticker-search-result').forEach((button) => { button.onclick = () => {
       const item = (button.dataset.type === 'product' ? state.cache.products : state.cache.stockMaterials)?.[button.dataset.id];
       if (!item) return;
       const itemName = item.nameAr || item.name || item.nameEn || '';
-      if (!confirm(`هل تريد اختيار «${itemName}» لصناعة الستيكر؟`)) return;
+      if (!confirm(window.i18n.t('sticker_select_confirm').replace('{name}', itemName))) return;
       draft.record = getStickerMakerRecord({ id: button.dataset.id, item, type: button.dataset.type }); draft.query = ''; renderStickerMakerSection();
     }; });
   };
@@ -11826,7 +11826,7 @@ function openStickerMakerEditModal(field) {
   const draft = state.stickerMaker; if (!draft?.record) return;
   draft.editingField = field;
   const input = document.getElementById('stickerMakerEditInput'), textarea = document.getElementById('stickerMakerEditTextarea');
-  document.getElementById('stickerMakerEditTitle').textContent = field === 'ingredients' ? 'تعديل المكونات' : field === 'productionDate' ? 'تعديل تاريخ الإنتاج' : 'تعديل تاريخ الانتهاء';
+  document.getElementById('stickerMakerEditTitle').textContent = field === 'ingredients' ? window.i18n.t('sticker_edit_ingredients') : field === 'productionDate' ? window.i18n.t('sticker_edit_production_date') : window.i18n.t('sticker_edit_expiry_date');
   input.classList.toggle('hidden', field === 'ingredients'); textarea.classList.toggle('hidden', field !== 'ingredients');
   if (field === 'ingredients') textarea.value = draft.record.labelIngredients || ''; else input.value = draft.record[field] || '';
   document.getElementById('stickerMakerEditModal').classList.remove('hidden'); setTimeout(() => (field === 'ingredients' ? textarea : input).focus(), 20);
@@ -11841,13 +11841,13 @@ function openStickerMakerPrintModal() {
   overlay.style.cssText = 'z-index:10000; display:flex;';
   overlay.innerHTML = `
     <div class="modal card" style="max-width:400px; text-align:start; width:min(400px, calc(100vw - 32px));">
-      <h3>عدد الستيكرات</h3>
-      <label class="tag" for="stickerMakerCopiesDynamic">اكتب عدد الستيكرات المراد طباعتها</label>
-      <input id="stickerMakerCopiesDynamic" class="input" inputmode="numeric" dir="ltr" autocomplete="off" placeholder="اكتب العدد" />
+      <h3>${window.i18n.t('sticker_quantity')}</h3>
+      <label class="tag" for="stickerMakerCopiesDynamic">${window.i18n.t('sticker_quantity_help')}</label>
+      <input id="stickerMakerCopiesDynamic" class="input" inputmode="numeric" dir="ltr" autocomplete="off" placeholder="${window.i18n.t('sticker_quantity_placeholder')}" />
       <p id="stickerMakerCopiesError" class="helper form-error" style="min-height:20px;"></p>
       <div class="row" style="justify-content:flex-end; margin-top:12px;">
-        <button id="stickerMakerCopiesPrint" class="btn primary">طباعة</button>
-        <button id="stickerMakerCopiesCancel" class="btn ghost">إلغاء</button>
+        <button id="stickerMakerCopiesPrint" class="btn primary">${window.i18n.t('print')}</button>
+        <button id="stickerMakerCopiesCancel" class="btn ghost">${window.i18n.t('cancel')}</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -11868,7 +11868,7 @@ function openStickerMakerPrintModal() {
     normalize();
     const copies = Number(input.value);
     if (!Number.isInteger(copies) || copies < 1) {
-      error.textContent = 'اكتب عدداً صحيحاً أكبر من صفر';
+      error.textContent = window.i18n.t('sticker_invalid_quantity');
       input.focus();
       return;
     }
@@ -11879,7 +11879,7 @@ function openStickerMakerPrintModal() {
     renderStickerMakerSection();
     Promise.resolve(printProductionLabel(record, copies)).catch((printError) => {
       console.error('Sticker maker print failed:', printError);
-      alert(`تعذرت طباعة الستيكر: ${printError?.message || printError}`);
+      alert(window.i18n.t('sticker_print_failed').replace('{message}', printError?.message || printError));
     });
   };
   setTimeout(() => input.focus(), 40);
@@ -11900,8 +11900,8 @@ function bindStickerMakerModals() {
       if (draft.record.itemType === 'product') {
         const info = getProductInfoByProductId(draft.record.itemId), infoId = getProductInfoEntryId(draft.record.itemId, info);
         const payload = info ? { ingredients: value } : { id: draft.record.itemId, productId: draft.record.itemId, productName: draft.record.itemNameAr, ingredients: value, origin: '', barcode: draft.record.productionBarcode, createdAt: Date.now() };
-        db.ref(`productInfos/${infoId}`).update(payload).catch(() => alert('تعذر حفظ المكونات في معلومات المنتج'));
-      } else db.ref(`stockMaterials/${draft.record.itemId}/ingredients`).set(value).catch(() => alert('تعذر حفظ المكونات للمادة'));
+        db.ref(`productInfos/${infoId}`).update(payload).catch(() => alert(window.i18n.t('sticker_product_info_save_failed')));
+      } else db.ref(`stockMaterials/${draft.record.itemId}/ingredients`).set(value).catch(() => alert(window.i18n.t('sticker_material_save_failed')));
     } else draft.record[field] = value;
     document.getElementById('stickerMakerEditModal').classList.add('hidden'); renderStickerMakerSection();
   };
@@ -11915,7 +11915,7 @@ function bindStickerMakerModals() {
     renderStickerMakerSection();
     Promise.resolve(printProductionLabel(record, copies)).catch((error) => {
       console.error('Sticker maker print failed:', error);
-      alert(`تعذرت طباعة الستيكر: ${error?.message || error}`);
+      alert(window.i18n.t('sticker_print_failed').replace('{message}', error?.message || error));
     });
   };
 }
@@ -14356,7 +14356,9 @@ async function submitMultipleProductionVouchers() {
   await db.ref('production').push().set(payload);
   for (const item of items) {
     await updateItemStock(item.itemType, item.itemId, draft.branchId, Number(item.qty));
-    printProductionLabel({ ...payload, ...item }, 1);
+    // Each line in a multi-product production voucher needs one label per
+    // produced unit, not one label for the whole line.
+    printProductionLabel({ ...payload, ...item }, Math.max(1, Math.floor(Number(item.qty || 0))));
   }
   resetProductionDraft();
   renderProductionSection();

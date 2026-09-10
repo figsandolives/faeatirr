@@ -38,6 +38,7 @@
             allOnlineOrders = snapshot.val()
               ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })).sort((a, b) => (b.createdAtMs || b.timestamp || 0) - (a.createdAtMs || a.timestamp || 0))
               : [];
+            refreshUI();
           }, error => console.error('Unable to read online orders:', error));
         })();
       }
@@ -84,8 +85,11 @@
     const REMOTE_HAWALLI_PRINTER = 'remote:hawalli';
     const HAWALLI_PRINT_STATION = 'hawalli';
     const HAWALLI_PRINT_STATION_FLAG = 'hawalliReceiptPrinterStation';
+    const HAWALLI_A4_PRINT_STATION_FLAG = 'hawalliA4PrinterStation';
     let remoteReceiptQueueStarted = false;
     let remoteReceiptQueueBusy = false;
+    let remoteA4PrintQueueStarted = false;
+    let remoteA4PrintQueueBusy = false;
     let currentCashier = null;
     let currentBranch = null;
     let currentDailySession = null;
@@ -2477,6 +2481,14 @@ function refreshUI() {
       }
       renderCashier();
       setupRealtimeListeners();
+	      // يظهر شريط طلبات الموقع فور دخول كاشير الفرع الرئيسي، دون الحاجة
+	      // إلى فتح نافذة إبلاغ الطلبات أولاً.
+	      if (isMainBranch(currentBranch)) {
+	        ensureOrderingPlatformReady().catch(error => {
+	          console.error('Unable to start website-orders listener:', error);
+	          showToast('تعذر متابعة طلبات الموقع', true);
+	        });
+	      }
 	      if (currentBranch === 'اليرموك' && !hasOpenDailySession()) {
 	        showOpenDailySessionModal();
 	      }
@@ -2502,6 +2514,14 @@ function refreshUI() {
 
     function hawalliPrintJobsRef() {
       return db.ref(`remoteReceiptPrintJobs/${HAWALLI_PRINT_STATION}`);
+    }
+
+    function hawalliA4PrintStationRef() {
+      return db.ref(`remoteA4PrinterStations/${HAWALLI_PRINT_STATION}`);
+    }
+
+    function hawalliA4PrintJobsRef() {
+      return db.ref(`remoteA4PrintJobs/${HAWALLI_PRINT_STATION}`);
     }
 
     async function claimHawalliPrintStation() {
@@ -2535,7 +2555,11 @@ function refreshUI() {
 
     function startHawalliPrintStationHeartbeat() {
       heartbeatHawalliPrintStation();
-      window.setInterval(heartbeatHawalliPrintStation, 30000);
+      heartbeatHawalliA4PrintStation();
+      window.setInterval(() => {
+        heartbeatHawalliPrintStation();
+        heartbeatHawalliA4PrintStation();
+      }, 30000);
     }
 
     async function markHawalliPrintStationSuccessful() {
@@ -2612,6 +2636,106 @@ function refreshUI() {
       return { remote: false, ...result };
     }
 
+    async function hasLocalHawalliA4Printer() {
+      if (!window.figsDesktop?.isDesktopApp || !isMainBranch(currentBranch)) return false;
+      const settings = await window.figsDesktop.getSettings();
+      return Boolean(settings?.a4Printer && settings.a4Printer !== REMOTE_HAWALLI_PRINTER);
+    }
+
+    async function claimHawalliA4PrintStation() {
+      if (!(await hasLocalHawalliA4Printer())) return false;
+      const deviceId = getDeviceId();
+      const now = Date.now();
+      const result = await hawalliA4PrintStationRef().transaction(current => {
+        if (current?.deviceId && current.deviceId !== deviceId && Number(current.leaseUntil || 0) > now) return;
+        return {
+          deviceId, name: 'جهاز حولي A4', branch: currentBranch, online: true,
+          lastSeenAt: now, leaseUntil: now + 90 * 1000,
+          lastSuccessfulPrintAt: Number(current?.lastSuccessfulPrintAt || now)
+        };
+      });
+      return Boolean(result.committed && result.snapshot.val()?.deviceId === deviceId);
+    }
+
+    async function heartbeatHawalliA4PrintStation() {
+      const claimed = await claimHawalliA4PrintStation().catch(error => {
+        console.warn('Unable to claim Hawalli A4 print station', error);
+        return false;
+      });
+      if (claimed) {
+        localStorage.setItem(HAWALLI_A4_PRINT_STATION_FLAG, '1');
+        startRemoteA4PrintQueue();
+      }
+      return claimed;
+    }
+
+    async function markHawalliA4PrintStationSuccessful() {
+      if (!isMainBranch(currentBranch) || !window.figsDesktop?.isDesktopApp) return;
+      localStorage.setItem(HAWALLI_A4_PRINT_STATION_FLAG, '1');
+      const claimed = await claimHawalliA4PrintStation();
+      if (!claimed) return;
+      await hawalliA4PrintStationRef().update({ lastSuccessfulPrintAt: Date.now(), online: true });
+      startRemoteA4PrintQueue();
+    }
+
+    function startRemoteA4PrintQueue() {
+      if (remoteA4PrintQueueStarted) return;
+      remoteA4PrintQueueStarted = true;
+      hawalliA4PrintJobsRef().on('child_added', () => {
+        processQueuedRemoteA4PrintJobs().catch(error => console.error('Remote A4 print job failed', error));
+      }, error => console.error('Unable to listen for remote A4 print jobs', error));
+    }
+
+    async function processQueuedRemoteA4PrintJobs() {
+      if (remoteA4PrintQueueBusy) return;
+      const snapshot = await hawalliA4PrintJobsRef().once('value');
+      const jobs = snapshot.val() || {};
+      for (const [jobId, job] of Object.entries(jobs)) {
+        if (job?.status !== 'queued') continue;
+        await processRemoteA4PrintJob(hawalliA4PrintJobsRef().child(jobId));
+        return;
+      }
+    }
+
+    async function processRemoteA4PrintJob(jobRef) {
+      if (remoteA4PrintQueueBusy || !window.figsDesktop?.isDesktopApp) return;
+      const station = (await hawalliA4PrintStationRef().once('value')).val();
+      if (station?.deviceId !== getDeviceId() || Number(station.leaseUntil || 0) < Date.now()) return;
+      const jobSnapshot = await jobRef.once('value');
+      const job = jobSnapshot.val();
+      if (!job || job.status !== 'queued' || !job.html) return;
+      remoteA4PrintQueueBusy = true;
+      const claim = await jobRef.transaction(current => {
+        if (!current || current.status !== 'queued') return;
+        return { ...current, status: 'printing', claimedBy: getDeviceId(), claimedAt: Date.now() };
+      });
+      if (!claim.committed) { remoteA4PrintQueueBusy = false; return; }
+      try {
+        await window.figsDesktop.printHtml({ html: job.html, type: 'a4', silent: true });
+        await jobRef.update({ status: 'printed', printedAt: Date.now(), printedBy: getDeviceId() });
+        await markHawalliA4PrintStationSuccessful();
+      } catch (error) {
+        await jobRef.update({ status: 'failed', failedAt: Date.now(), error: String(error?.message || error).slice(0, 180) });
+      } finally {
+        remoteA4PrintQueueBusy = false;
+        processQueuedRemoteA4PrintJobs().catch(error => console.error('Remote A4 print queue continuation failed', error));
+      }
+    }
+
+    async function sendA4Print({ html, branch, orderId = '', purpose = 'invoice' }) {
+      if (!window.figsDesktop?.isDesktopApp) return { remote: false, desktop: false };
+      const settings = await window.figsDesktop.getSettings();
+      const shouldSendToHawalli = settings?.a4Printer === REMOTE_HAWALLI_PRINTER && isMainBranch(branch);
+      if (shouldSendToHawalli) {
+        const jobRef = hawalliA4PrintJobsRef().push();
+        await jobRef.set({ status: 'queued', html, orderId, purpose, createdAt: Date.now(), requestedBy: getDeviceId(), requestedBranch: branch || '' });
+        return { remote: true, jobId: jobRef.key };
+      }
+      const result = await window.figsDesktop.printHtml({ html, type: 'a4', silent: true });
+      await markHawalliA4PrintStationSuccessful();
+      return { remote: false, ...result };
+    }
+
     function initCashierPresence() {
       const deviceId = getDeviceId();
       const deviceRef = db.ref(`devices/${deviceId}`);
@@ -2671,6 +2795,90 @@ function refreshUI() {
     }
 
     document.addEventListener('click', () => closeCashierActionMenus());
+
+    const ONLINE_ORDER_ACCEPT_URL = 'https://us-central1-menassafigs.cloudfunctions.net/acceptOnlineOrder';
+
+    function pendingWebsiteOrdersForCashier() {
+      if (!isMainBranch(currentBranch)) return [];
+      return allOnlineOrders
+        .filter(order => order && order.status !== 'accepted')
+        .sort((a, b) => Number(b.createdAtMs || b.timestamp || b.createdAt || 0) - Number(a.createdAtMs || a.timestamp || a.createdAt || 0));
+    }
+
+    function renderWebsiteOrdersBanner() {
+      const pendingOrders = pendingWebsiteOrdersForCashier();
+      if (!pendingOrders.length) return '';
+      return `
+        <section class="mb-5 rounded-xl border-2 border-red-300 bg-red-50 shadow-sm overflow-hidden" aria-label="طلبات الموقع">
+          <div class="flex items-center gap-3 bg-red-600 text-white px-5 py-3">
+            <span class="text-xl font-black">طلبات الموقع</span>
+            <span class="bg-white text-red-700 rounded-full px-3 py-1 font-black text-sm">${pendingOrders.length}</span>
+            <span class="text-sm font-semibold opacity-90">طلبات غير مقبولة</span>
+          </div>
+          <div class="p-3 space-y-2">
+            ${pendingOrders.map(order => `
+              <div class="flex flex-wrap items-center justify-between gap-3 bg-white border border-red-200 rounded-lg px-4 py-3">
+                <div class="font-black text-gray-900 text-lg">فاتورة الموقع <span class="text-red-700">#${escapeHtml(order.orderId || order.id)}</span></div>
+                <div class="flex gap-2">
+                  <button onclick="acceptAndPrintWebsiteOrder('${escapeHtml(order.id)}')" class="bg-red-600 text-white px-5 py-2 rounded-lg font-black hover:bg-red-700 transition">قبول وطباعة A4</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </section>`;
+    }
+
+    function websiteOrderMoney(value) {
+      return `${Number(value || 0).toFixed(3)} د.ك`;
+    }
+
+    function websiteOrderDate(value) {
+      const date = new Date(Number(value) || value || Date.now());
+      return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ar-KW-u-ca-gregory', { dateStyle: 'medium', timeStyle: 'short' });
+    }
+
+    function websiteOrderDeliveryText(order) {
+      if (order.mode === 'pickup') {
+        const branches = { hawalli: 'فرع حولي', yarmouk: 'فرع اليرموك', abu: 'فرع أبو الحصانية' };
+        return `استلام من ${branches[order.branchId] || order.branchId || 'الفرع'}`;
+      }
+      return `توصيل${order.areaName ? ` — ${order.areaName}` : ''}${order.address ? ` — ${order.address}` : ''}`;
+    }
+
+    function websiteOrderItemName(item) {
+      const options = Array.isArray(item?.options) ? item.options : [];
+      const optionText = options.map(option => option?.nameAr || option?.nameEn || option?.name || '').filter(Boolean).join('، ');
+      return `${escapeHtml(item?.name || item?.nameAr || item?.id || 'صنف')}${optionText ? `<small style="display:block;color:#64748b;margin-top:3px">${escapeHtml(optionText)}</small>` : ''}`;
+    }
+
+    function buildWebsiteOrderA4Html(order) {
+      const items = Array.isArray(order.items) ? order.items : Object.values(order.items || {});
+      const rows = items.map((item, index) => `<tr><td>${index + 1}</td><td>${websiteOrderItemName(item)}<small dir="ltr">${escapeHtml(item?.nameEn || '')}</small></td><td>${escapeHtml(item?.note || '—')}</td><td>${Number(item?.quantity || 0)}</td><td>${websiteOrderMoney(item?.unitPrice)}</td><td>${websiteOrderMoney(item?.total || Number(item?.unitPrice || 0) * Number(item?.quantity || 0))}</td></tr>`).join('');
+      const subtotal = Number.isFinite(Number(order.subtotal)) ? Number(order.subtotal) : Number(order.total || 0) - Number(order.deliveryFee || 0);
+      const logo = new URL('logo.png', window.location.href).href;
+      return `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>فاتورة ${escapeHtml(order.orderId || order.id)}</title><style>@page{size:A4;margin:10mm}*{box-sizing:border-box}body{font-family:Cairo,Arial,sans-serif;color:#0f172a;margin:0;font-size:13px}.invoice{border:1px solid #dbe3ef;border-radius:12px;padding:18px}.head{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #dc2626;padding-bottom:12px;margin-bottom:14px}.head img{width:72px;height:72px;object-fit:contain}.head h1{margin:0;color:#b91c1c;font-size:25px}.head p{margin:4px 0 0;color:#64748b}.meta{display:flex;justify-content:space-between;gap:20px;background:#f8fafc;border-radius:8px;padding:12px;margin-bottom:12px}.meta b,.meta strong{display:block;margin:2px 0}.company{text-align:left;line-height:1.7}.customer{background:#fff7ed;border-right:4px solid #ea580c;padding:9px 12px;margin-bottom:12px;font-weight:700}table{width:100%;border-collapse:collapse}th{background:#fee2e2;color:#7f1d1d}th,td{padding:8px;border:1px solid #e2e8f0;text-align:right;vertical-align:top}td:nth-child(1),td:nth-child(4),td:nth-child(5),td:nth-child(6){text-align:center}small{display:block;color:#64748b;font-size:10px}.total{margin-top:14px;margin-right:auto;width:260px;border:1px solid #fecaca;border-radius:8px;padding:10px;background:#fff}.total div{display:flex;justify-content:space-between;padding:4px 0}.total strong{border-top:2px solid #dc2626;margin-top:4px;padding-top:8px;color:#991b1b;font-size:16px}</style></head><body><main class="invoice"><header class="head"><div><h1>فاتورة شراء</h1><p>طلب من الموقع الإلكتروني</p></div><img src="${logo}" alt="Figs & Olives"></header><section class="meta"><div><b>رقم الفاتورة</b><strong>#${escapeHtml(order.orderId || order.id)}</strong><b>تاريخ الإصدار</b><strong>${escapeHtml(websiteOrderDate(order.createdAtMs || order.createdAt || order.timestamp))}</strong></div><div class="company">شركة صحي ولذيذ للتجهيزات الغذائية<br>حولي، شارع تونس، مجمع علي فهد الخالد، دور الميزانين<br><span dir="ltr">66906605 · 22085888</span></div></section><div class="customer">${escapeHtml(order.customerName || '—')} · <span dir="ltr">${escapeHtml(order.phone || '—')}</span> · ${escapeHtml(websiteOrderDeliveryText(order))}</div><table><thead><tr><th>#</th><th>الصنف</th><th>الملاحظات</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>${rows || '<tr><td colspan="6">لا توجد أصناف</td></tr>'}</tbody></table><section class="total"><div><span>قيمة المنتجات</span><b>${websiteOrderMoney(subtotal)}</b></div><div><span>سعر التوصيل</span><b>${websiteOrderMoney(order.deliveryFee)}</b></div><div><strong>الإجمالي</strong><strong>${websiteOrderMoney(order.total)}</strong></div></section></main></body></html>`;
+    }
+
+    async function acceptAndPrintWebsiteOrder(orderKey) {
+      const order = allOnlineOrders.find(item => item.id === orderKey);
+      if (!order || order.status === 'accepted') return;
+      const button = [...document.querySelectorAll('button')].find(item => item.getAttribute('onclick') === `acceptAndPrintWebsiteOrder('${orderKey}')`);
+      if (button) { button.disabled = true; button.textContent = 'جارٍ القبول…'; }
+      try {
+        const response = await fetch(ONLINE_ORDER_ACCEPT_URL, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ orderId: order.orderId })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.ok) throw new Error(result.error || 'تعذر قبول الطلب');
+        await sendA4Print({ html: buildWebsiteOrderA4Html(order), branch: currentBranch, orderId: order.orderId || order.id, purpose: 'website-order' });
+        showToast('تم قبول الطلب وإرساله لطابعة A4');
+      } catch (error) {
+        console.error('Unable to accept and print website order:', error);
+        showToast(error?.message || 'تعذر قبول أو طباعة طلب الموقع', true);
+        if (button) { button.disabled = false; button.textContent = 'قبول وطباعة A4'; }
+      }
+    }
 
     function renderCashier() {
       const app = document.getElementById('app');
@@ -2732,6 +2940,7 @@ function refreshUI() {
 	                ` : ''}
                 </div>
 	            </div>
+              ${renderWebsiteOrdersBanner()}
               ${currentBranch === 'اليرموك' && hasOpenDailySession() ? `
                 <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-5 text-blue-800 font-bold">
                   ${cashierT('dailyOpened')} ${formatTime(currentDailySession.openedAt)} | ${cashierT('openingAmount')}: ${formatNumberWithThreeDecimals(currentDailySession.openingAmount)} ${cashierT('kd')}

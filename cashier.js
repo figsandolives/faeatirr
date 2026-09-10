@@ -2566,15 +2566,16 @@ function refreshUI() {
       }
     }
 
-    async function processRemoteReceiptJob(snapshot) {
+    async function processRemoteReceiptJob(jobRef) {
       if (remoteReceiptQueueBusy || !window.figsDesktop?.isDesktopApp) return;
       const station = (await hawalliPrintStationRef().once('value')).val();
       if (station?.deviceId !== getDeviceId() || Number(station.leaseUntil || 0) < Date.now()) return;
-      const job = snapshot.val();
+      const jobSnapshot = await jobRef.once('value');
+      const job = jobSnapshot.val();
       if (!job || job.status !== 'queued' || !job.html) return;
       remoteReceiptQueueBusy = true;
       const now = Date.now();
-      const claim = await snapshot.ref.transaction(current => {
+      const claim = await jobRef.transaction(current => {
         if (!current || current.status !== 'queued') return;
         return { ...current, status: 'printing', claimedBy: getDeviceId(), claimedAt: now };
       });
@@ -2584,10 +2585,10 @@ function refreshUI() {
       }
       try {
         await window.figsDesktop.printHtml({ html: job.html, type: 'receipt', silent: true });
-        await snapshot.ref.update({ status: 'printed', printedAt: Date.now(), printedBy: getDeviceId() });
+        await jobRef.update({ status: 'printed', printedAt: Date.now(), printedBy: getDeviceId() });
         await markHawalliPrintStationSuccessful();
       } catch (error) {
-        await snapshot.ref.update({ status: 'failed', failedAt: Date.now(), error: String(error?.message || error).slice(0, 180) });
+        await jobRef.update({ status: 'failed', failedAt: Date.now(), error: String(error?.message || error).slice(0, 180) });
       } finally {
         remoteReceiptQueueBusy = false;
         processQueuedRemoteReceiptJobs().catch(error => console.error('Remote receipt queue continuation failed', error));

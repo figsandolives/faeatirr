@@ -81,6 +81,11 @@
     let allDailySessions = [];
     let allRegisteredDevices = [];
     let lastDeviceHeartbeatAt = 0;
+    const REMOTE_HAWALLI_PRINTER = 'remote:hawalli';
+    const HAWALLI_PRINT_STATION = 'hawalli';
+    const HAWALLI_PRINT_STATION_FLAG = 'hawalliReceiptPrinterStation';
+    let remoteReceiptQueueStarted = false;
+    let remoteReceiptQueueBusy = false;
     let currentCashier = null;
     let currentBranch = null;
     let currentDailySession = null;
@@ -2486,6 +2491,126 @@ function refreshUI() {
       return deviceId;
     }
 
+    function isMainBranch(branch) {
+      const normalized = normalizeCashierBranchName(branch || '');
+      return normalized === 'الفرع الرئيسي' || normalized === 'حولي';
+    }
+
+    function hawalliPrintStationRef() {
+      return db.ref(`remoteReceiptPrinterStations/${HAWALLI_PRINT_STATION}`);
+    }
+
+    function hawalliPrintJobsRef() {
+      return db.ref(`remoteReceiptPrintJobs/${HAWALLI_PRINT_STATION}`);
+    }
+
+    async function claimHawalliPrintStation() {
+      if (!window.figsDesktop?.isDesktopApp || !isMainBranch(currentBranch)) return false;
+      const deviceId = getDeviceId();
+      const now = Date.now();
+      const result = await hawalliPrintStationRef().transaction(current => {
+        if (current?.deviceId && current.deviceId !== deviceId && Number(current.leaseUntil || 0) > now) return;
+        return {
+          deviceId,
+          name: 'جهاز حولي',
+          branch: currentBranch,
+          online: true,
+          lastSeenAt: now,
+          leaseUntil: now + 90 * 1000,
+          lastSuccessfulPrintAt: Number(current?.lastSuccessfulPrintAt || now)
+        };
+      });
+      return Boolean(result.committed && result.snapshot.val()?.deviceId === deviceId);
+    }
+
+    async function heartbeatHawalliPrintStation() {
+      if (localStorage.getItem(HAWALLI_PRINT_STATION_FLAG) !== '1' || !isMainBranch(currentBranch)) return false;
+      const claimed = await claimHawalliPrintStation().catch(error => {
+        console.warn('Unable to claim Hawalli print station', error);
+        return false;
+      });
+      if (claimed) startRemoteReceiptQueue();
+      return claimed;
+    }
+
+    function startHawalliPrintStationHeartbeat() {
+      heartbeatHawalliPrintStation();
+      window.setInterval(heartbeatHawalliPrintStation, 30000);
+    }
+
+    async function markHawalliPrintStationSuccessful() {
+      if (!isMainBranch(currentBranch) || !window.figsDesktop?.isDesktopApp) return;
+      localStorage.setItem(HAWALLI_PRINT_STATION_FLAG, '1');
+      const claimed = await claimHawalliPrintStation();
+      if (!claimed) return;
+      await hawalliPrintStationRef().update({ lastSuccessfulPrintAt: Date.now(), online: true });
+      startRemoteReceiptQueue();
+    }
+
+    function startRemoteReceiptQueue() {
+      if (remoteReceiptQueueStarted) return;
+      remoteReceiptQueueStarted = true;
+      hawalliPrintJobsRef().on('child_added', () => {
+        processQueuedRemoteReceiptJobs().catch(error => console.error('Remote receipt job failed', error));
+      }, error => console.error('Unable to listen for remote receipt jobs', error));
+    }
+
+    async function processQueuedRemoteReceiptJobs() {
+      if (remoteReceiptQueueBusy) return;
+      const snapshot = await hawalliPrintJobsRef().once('value');
+      const jobs = snapshot.val() || {};
+      for (const [jobId, job] of Object.entries(jobs)) {
+        if (job?.status !== 'queued') continue;
+        await processRemoteReceiptJob(hawalliPrintJobsRef().child(jobId));
+        return;
+      }
+    }
+
+    async function processRemoteReceiptJob(snapshot) {
+      if (remoteReceiptQueueBusy || !window.figsDesktop?.isDesktopApp) return;
+      const station = (await hawalliPrintStationRef().once('value')).val();
+      if (station?.deviceId !== getDeviceId() || Number(station.leaseUntil || 0) < Date.now()) return;
+      const job = snapshot.val();
+      if (!job || job.status !== 'queued' || !job.html) return;
+      remoteReceiptQueueBusy = true;
+      const now = Date.now();
+      const claim = await snapshot.ref.transaction(current => {
+        if (!current || current.status !== 'queued') return;
+        return { ...current, status: 'printing', claimedBy: getDeviceId(), claimedAt: now };
+      });
+      if (!claim.committed) {
+        remoteReceiptQueueBusy = false;
+        return;
+      }
+      try {
+        await window.figsDesktop.printHtml({ html: job.html, type: 'receipt', silent: true });
+        await snapshot.ref.update({ status: 'printed', printedAt: Date.now(), printedBy: getDeviceId() });
+        await markHawalliPrintStationSuccessful();
+      } catch (error) {
+        await snapshot.ref.update({ status: 'failed', failedAt: Date.now(), error: String(error?.message || error).slice(0, 180) });
+      } finally {
+        remoteReceiptQueueBusy = false;
+        processQueuedRemoteReceiptJobs().catch(error => console.error('Remote receipt queue continuation failed', error));
+      }
+    }
+
+    async function sendThermalPrint({ html, branch, orderId = '', purpose = 'invoice' }) {
+      if (!window.figsDesktop?.isDesktopApp) return { remote: false, desktop: false };
+      const settings = await window.figsDesktop.getSettings();
+      const shouldSendToHawalli = settings?.receiptPrinter === REMOTE_HAWALLI_PRINTER && isMainBranch(branch);
+      if (shouldSendToHawalli) {
+        const jobRef = hawalliPrintJobsRef().push();
+        await jobRef.set({
+          status: 'queued', html, orderId, purpose,
+          createdAt: Date.now(), requestedBy: getDeviceId(), requestedBranch: branch || ''
+        });
+        return { remote: true, jobId: jobRef.key };
+      }
+      const result = await window.figsDesktop.printHtml({ html, type: 'receipt', silent: true });
+      await markHawalliPrintStationSuccessful();
+      return { remote: false, ...result };
+    }
+
     function initCashierPresence() {
       const deviceId = getDeviceId();
       const deviceRef = db.ref(`devices/${deviceId}`);
@@ -2513,6 +2638,7 @@ function refreshUI() {
           });
         }
       });
+      startHawalliPrintStationHeartbeat();
     }
 
     // ==================== CASHIER INTERFACE ====================
@@ -4964,7 +5090,7 @@ function showNumericKeypadForInvoice(index, inputField) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.innerHTML = `
-    <div class="modal-content p-0" data-order-id="${order.id || ''}" style="background: #f3f4f6; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;">
+    <div class="modal-content p-0" data-order-id="${order.id || ''}" data-order-branch="${escapeHtml(order.branch || currentBranch || '')}" style="background: #f3f4f6; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;">
       <div style="overflow-y: auto; padding: 16px 16px 8px; min-height: 0;">
         <div class="thermal-invoice" style="width: 72mm; margin: 0 auto; padding: 10px; background: white; border-radius: 8px;">
         <div style="text-align: center; border-bottom: 2px dashed #000; padding-bottom: 10px; margin-bottom: 10px;">
@@ -5373,10 +5499,15 @@ function showNumericKeypadForInvoice(index, inputField) {
     button.disabled = true;
     button.innerHTML = cashierT('printing');
     try {
-      await window.figsDesktop.printHtml({ html: printHtml, type: 'receipt', silent: true });
+      const result = await sendThermalPrint({
+        html: printHtml,
+        branch: button.closest('.modal-content')?.dataset.orderBranch || currentBranch,
+        orderId,
+        purpose: 'invoice'
+      });
       await markWhatsappOrderPrinted(orderId);
       button.closest('.modal-overlay')?.remove();
-      showToast('تم إرسال الفاتورة للطابعة');
+      showToast(result.remote ? 'تم إرسال الفاتورة إلى جهاز حولي للطباعة' : 'تم إرسال الفاتورة للطابعة');
       return;
     } catch (error) {
       console.error('Desktop receipt print failed:', error);
@@ -5977,7 +6108,9 @@ function showNumericKeypadForInvoice(index, inputField) {
       </div>`;
       const printHtml = buildThermalInvoicePrintHtml(content, await getInvoiceLogoDataUrl());
       try {
-        if (window.figsDesktop?.isDesktopApp) await window.figsDesktop.printHtml({ html: printHtml, type: 'receipt', silent: true });
+        if (window.figsDesktop?.isDesktopApp) {
+          await sendThermalPrint({ html: printHtml, branch: order.branch || currentBranch, orderId: order.id || '', purpose: 'preparation' });
+        }
         else {
           const printWindow = window.open('', '_blank', 'width=800,height=600');
           if (!printWindow) throw new Error('نافذة الطباعة غير متاحة');

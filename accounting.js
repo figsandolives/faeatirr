@@ -11840,10 +11840,10 @@ function openStickerMakerPrintModal() {
   overlay.className = 'overlay';
   overlay.style.cssText = 'z-index:10000; display:flex;';
   overlay.innerHTML = `
-    <div class="modal card" style="max-width:400px; text-align:start; width:min(400px, calc(100vw - 32px));">
+    <div class="modal card" role="dialog" aria-modal="true" style="max-width:400px; text-align:start; width:min(400px, calc(100vw - 32px)); position:relative; z-index:1; pointer-events:auto;">
       <h3>${window.i18n.t('sticker_quantity')}</h3>
       <label class="tag" for="stickerMakerCopiesDynamic">${window.i18n.t('sticker_quantity_help')}</label>
-      <input id="stickerMakerCopiesDynamic" class="input" inputmode="numeric" dir="ltr" autocomplete="off" placeholder="${window.i18n.t('sticker_quantity_placeholder')}" />
+      <input id="stickerMakerCopiesDynamic" class="input" type="text" inputmode="numeric" pattern="[0-9]*" tabindex="0" dir="ltr" autocomplete="off" placeholder="${window.i18n.t('sticker_quantity_placeholder')}" style="position:relative; z-index:2; pointer-events:auto;" />
       <p id="stickerMakerCopiesError" class="helper form-error" style="min-height:20px;"></p>
       <div class="row" style="justify-content:flex-end; margin-top:12px;">
         <button id="stickerMakerCopiesPrint" class="btn primary">${window.i18n.t('print')}</button>
@@ -11854,6 +11854,16 @@ function openStickerMakerPrintModal() {
   const input = overlay.querySelector('#stickerMakerCopiesDynamic');
   const error = overlay.querySelector('#stickerMakerCopiesError');
   const normalize = () => { input.value = normalizeDigits(input.value || '').replace(/[^0-9]/g, ''); };
+  // هذه النافذة فوق معاينة iframe، لذلك نثبت التركيز صراحةً عند النقر أو اللمس
+  // ولا نسمح لمستمع قارئ الباركود العام باعتراض مفاتيح حقل العدد.
+  const focusQuantityInput = (event) => {
+    event?.stopPropagation();
+    input.focus({ preventScroll: true });
+  };
+  input.addEventListener('pointerdown', focusQuantityInput, true);
+  input.addEventListener('mousedown', focusQuantityInput, true);
+  input.addEventListener('touchstart', focusQuantityInput, { capture: true, passive: true });
+  input.addEventListener('click', focusQuantityInput, true);
   input.addEventListener('input', normalize);
   input.addEventListener('keydown', (event) => {
     event.stopPropagation();
@@ -11882,7 +11892,7 @@ function openStickerMakerPrintModal() {
       alert(window.i18n.t('sticker_print_failed').replace('{message}', printError?.message || printError));
     });
   };
-  setTimeout(() => input.focus(), 40);
+  requestAnimationFrame(() => focusQuantityInput());
 }
 
 function bindStickerMakerModals() {

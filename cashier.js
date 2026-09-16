@@ -2915,32 +2915,36 @@ function refreshUI() {
         // The public tunnel only forwards the request to the user's local model;
         // no Google Translate or third-party AI key is used here.
         const items = missing.map((row, index) => ({ id: String(index), text: String(row.nameAr).trim() }));
-        const response = await fetch('https://curly-frog-42.loca.lt/api/chat', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'bypass-tunnel-reminder': 'true' },
-          body: JSON.stringify({
-            messages: [
+        let translatedByLocalAI = true;
+        try {
+          const response = await fetch('https://curly-frog-42.loca.lt/api/chat', {
+            method: 'POST', headers: { 'content-type': 'application/json', 'bypass-tunnel-reminder': 'true' },
+            body: JSON.stringify({ messages: [
               { role: 'system', content: 'Translate Arabic bakery product names into clear, natural English. Return JSON only with this exact shape: {"translations":[{"id":"item id","translation":"English translation"}]}. Return exactly one non-empty translation for every supplied item. Preserve every id exactly. Do not add any text outside the JSON.' },
               { role: 'user', content: JSON.stringify({ items }) }
-            ]
-          })
-        });
-        if (!response.ok) throw new Error('Local AI translation service unavailable');
-        const payload = await response.json();
-        let result = payload;
-        if (typeof payload?.message?.content === 'string') {
-          try { result = JSON.parse(payload.message.content); }
-          catch { throw new Error('Invalid local AI translation response'); }
+            ] })
+          });
+          if (!response.ok) throw new Error('Local AI translation service unavailable');
+          const payload = await response.json(); let result = payload;
+          if (typeof payload?.message?.content === 'string') result = JSON.parse(payload.message.content);
+          const translations = Array.isArray(result?.translations) ? result.translations : [];
+          const byId = new Map(translations.map((item, index) => [String(item?.id ?? index), String(item?.translation || '').trim()]));
+          missing.forEach((row, index) => { const translation = byId.get(String(index)); if (!translation) throw new Error('A bakery item was not translated'); row.nameEn = translation; });
+        } catch (localAIError) {
+          // Keep remote branches working when this computer's private tunnel is offline.
+          translatedByLocalAI = false;
+          await Promise.all(missing.map(async row => {
+            const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ar&tl=en&dt=t&q=${encodeURIComponent(row.nameAr)}`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('Translation fallback unavailable');
+            const data = await response.json();
+            const translation = (data?.[0] || []).map(part => part?.[0] || '').join('').trim();
+            if (!translation) throw new Error('Empty translation');
+            row.nameEn = translation;
+          }));
         }
-        const translations = Array.isArray(result?.translations) ? result.translations : [];
-        const byId = new Map(translations.map((item, index) => [String(item?.id ?? index), String(item?.translation || '').trim()]));
-        missing.forEach((row, index) => {
-          const translation = byId.get(String(index));
-          if (!translation) throw new Error('A bakery item was not translated');
-          row.nameEn = translation;
-        });
         bakingScheduleDrafts[bakingScheduleDay] = { rows }; queueBakingScheduleSave(bakingScheduleDay);
-        showToast(`تمت ترجمة ${missing.length} خانة`);
+        showToast(`تمت ترجمة ${missing.length} خانة${translatedByLocalAI ? '' : ' (بالخدمة الاحتياطية)'}`);
       } catch (error) { console.error('Baking schedule translation failed:', error); showToast('تعذرت الترجمة بالذكاء الاصطناعي المحلي، أعد المحاولة أو اكتب الترجمة يدوياً', true); }
       finally { bakingTranslationBusy = false; renderBakingSchedulePage(); }
     }
@@ -2998,7 +3002,7 @@ function refreshUI() {
     function bakingSchedulePrintHtml(dayKey, autoPrint = false) {
       const rows = getBakingRows(dayKey); const day = getBakingDay(dayKey); const previous = previousBakingDay(dayKey); let currentSection = '';
       const printedRows = rows.map((row, index) => { const section = row.section || 'breads'; const header = section !== currentSection ? `<tr class="section section-${section}"><td colspan="6">${BAKING_SECTIONS[section]?.[0] || ''}<span>${BAKING_SECTIONS[section]?.[1] || ''}</span></td></tr>` : ''; currentSection = section; return `${header}<tr><td>${index + 1}</td><td>${escapeHtml(row.nameAr)}</td><td dir="ltr">${escapeHtml(row.nameEn)}</td><td dir="ltr">${escapeHtml(formatBakingQuantity(row.surra))}</td><td dir="ltr">${escapeHtml(formatBakingQuantity(row.abu))}</td><td dir="ltr">${escapeHtml(formatBakingQuantity(row.yarmouk))}</td></tr>`; }).join('');
-      return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>جدول العجن - ${day[1]}</title><style>@page{size:A4 portrait;margin:6mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,'Cairo',sans-serif;color:#172033;font-size:12px}header{border-bottom:3px solid #b91c1c;padding:4px 0 10px;margin-bottom:9px}h1{margin:0;font-size:23px;line-height:1.35;text-align:center}p{margin:5px 0 0;color:#475569;text-align:center;font-size:13px;font-weight:600}table{width:100%;border-collapse:collapse;font-size:12px;line-height:1.25;table-layout:fixed}th{background:#172033!important;color:#fff!important;padding:9px 3px;text-align:center;font-size:12px;font-weight:800;vertical-align:middle}td{border:1px solid #aebdcb;padding:7px 4px;height:31px;text-align:center;vertical-align:middle;word-wrap:break-word;font-weight:600}th:nth-child(1),td:nth-child(1){width:3%;font-weight:800}th:nth-child(2),td:nth-child(2){width:36%;text-align:right;padding-right:7px}th:nth-child(3),td:nth-child(3){width:36%;text-align:left;padding-left:7px}th:nth-child(4),td:nth-child(4),th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){width:8.33%;white-space:nowrap;font-size:11px}.section td{color:#172033!important;font-size:15px;font-weight:900;text-align:center!important;padding:9px 6px;height:auto;border-color:#9eafbd}.section span{font-size:12px;font-weight:700;margin-right:10px;direction:ltr;display:inline-block}.section-breads td{background:#dbeafe!important}.section-pastries td{background:#fef3c7!important}.section-glutenFree td{background:#dcfce7!important}.section-special td{background:#ffe4e6!important}</style></head><body><header><h1>جدول العجن في يوم ${previous[1]} ليوم ${day[1]} <span dir="ltr">(${nextBakingDate(dayKey)})</span></h1><p>Baking schedule from ${previous[2]} for ${day[2]}</p></header><table><thead><tr><th>#</th><th>الصنف</th><th>Item</th><th>حولي<br>Hawally</th><th>أبو الحصانية<br>Abu Hasaniya</th><th>اليرموك<br>Yarmouk</th></tr></thead><tbody>${printedRows}</tbody></table>${autoPrint ? '<script>window.onload=()=>window.print()<\\/script>' : ''}</body></html>`;
+      return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>جدول العجن - ${day[1]}</title><style>@page{size:A4 portrait;margin:6mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,'Cairo',sans-serif;color:#172033;font-size:12px}header{border-bottom:3px solid #b91c1c;padding:4px 0 10px;margin-bottom:9px}h1{margin:0;font-size:23px;line-height:1.35;text-align:center}p{margin:5px 0 0;color:#475569;text-align:center;font-size:13px;font-weight:600}table{width:100%;border-collapse:collapse;font-size:12px;line-height:1.25;table-layout:fixed}th{background:#172033!important;color:#fff!important;padding:9px 3px;text-align:center;font-size:12px;font-weight:800;vertical-align:middle}td{border:1px solid #aebdcb;padding:7px 4px;height:31px;text-align:center;vertical-align:middle;word-wrap:break-word;font-weight:600}th:nth-child(1),td:nth-child(1){width:5%;white-space:nowrap;font-size:11px;font-weight:800}th:nth-child(2),td:nth-child(2){width:34%;text-align:right;padding-right:7px}th:nth-child(3),td:nth-child(3){width:34%;text-align:left;padding-left:7px}th:nth-child(4),td:nth-child(4),th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){width:9%;white-space:nowrap;font-size:11px}.section td{color:#172033!important;font-size:15px;font-weight:900;text-align:center!important;padding:9px 6px;height:auto;border-color:#9eafbd}.section span{font-size:12px;font-weight:700;margin-right:10px;direction:ltr;display:inline-block}.section-breads td{background:#dbeafe!important}.section-pastries td{background:#fef3c7!important}.section-glutenFree td{background:#dcfce7!important}.section-special td{background:#ffe4e6!important}</style></head><body><header><h1>جدول العجن في يوم ${previous[1]} ليوم ${day[1]} <span dir="ltr">(${nextBakingDate(dayKey)})</span></h1><p>Baking schedule from ${previous[2]} for ${day[2]}</p></header><table><thead><tr><th>#</th><th>الصنف</th><th>Item</th><th>حولي<br>Hawally</th><th>أبو الحصانية<br>Abu Hasaniya</th><th>اليرموك<br>Yarmouk</th></tr></thead><tbody>${printedRows}</tbody></table>${autoPrint ? '<script>window.onload=()=>window.print()<\\/script>' : ''}</body></html>`;
     }
     function showBakingApprovalResult() {
       const app = document.getElementById('app');

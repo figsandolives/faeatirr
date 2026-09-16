@@ -71,6 +71,7 @@
     let bakingScheduleSaveTimer = null;
     let bakingScheduleListenerStarted = false;
     let bakingDraggedRowId = '';
+    let bakingTranslationBusy = false;
     let currentAccountingSection = 'orders';
     let allProducts = [];
     let parsedExcelData = [];
@@ -2728,6 +2729,12 @@ function refreshUI() {
       try {
         await window.figsDesktop.printHtml({ html: job.html, type: 'a4', silent: true });
         await jobRef.update({ status: 'printed', printedAt: Date.now(), printedBy: getDeviceId() });
+        if (job.purpose === 'baking-schedule' && job.notify?.phone && job.notify?.text) {
+          fetch('http://127.0.0.1:5678/webhook/baking-schedule-printed', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone: job.notify.phone, text: job.notify.text, jobId: jobRef.key, printedAt: Date.now() })
+          }).catch(error => console.warn('Baking schedule WhatsApp workflow was unavailable:', error));
+        }
         await markHawalliA4PrintStationSuccessful();
       } catch (error) {
         await jobRef.update({ status: 'failed', failedAt: Date.now(), error: String(error?.message || error).slice(0, 180) });
@@ -2844,6 +2851,15 @@ function refreshUI() {
       const numberOnly = quantity.match(/^(\d+(?:\.\d+)?)\s*(?:kg|ك)?$/i);
       return numberOnly ? `${numberOnly[1]} kg` : quantity;
     }
+    function bakingCycleDate(day) {
+      const target = BAKING_DAYS.findIndex(item => item[0] === day);
+      const date = new Date();
+      date.setHours(0, 0, 0, 0);
+      date.setDate(date.getDate() + (((target - date.getDay() + 7) % 7) || 7));
+      return date.toISOString().slice(0, 10);
+    }
+    function bakingScheduleIsSent(day) { return bakingScheduleDrafts[day]?.approvedForDate === bakingCycleDate(day); }
+    function untranslatedBakingRows(day = bakingScheduleDay) { return getBakingRows(day).filter(row => !String(row.nameAr || '').trim() || !String(row.nameEn || '').trim()); }
     function getBakingDay(day) { return BAKING_DAYS.find(item => item[0] === day); }
     function nextBakingDate(day) {
       const target = BAKING_DAYS.findIndex(item => item[0] === day);
@@ -2887,6 +2903,46 @@ function refreshUI() {
       row[field] = ['surra', 'abu', 'yarmouk'].includes(field) ? convertToEnglishNumbers(value) : value;
       bakingScheduleDrafts[day] = { rows };
       queueBakingScheduleSave(day);
+    }
+    async function translateEmptyBakingNames() {
+      if (bakingTranslationBusy) return;
+      const rows = getBakingRows(bakingScheduleDay);
+      const missing = rows.filter(row => String(row.nameAr || '').trim() && !String(row.nameEn || '').trim());
+      if (!missing.length) { showToast('كل الأسماء مترجمة بالفعل'); return; }
+      bakingTranslationBusy = true; renderBakingSchedulePage();
+      try {
+        // Uses the same private, on-device Ollama translation service as Rakaez.
+        // The public tunnel only forwards the request to the user's local model;
+        // no Google Translate or third-party AI key is used here.
+        const items = missing.map((row, index) => ({ id: String(index), text: String(row.nameAr).trim() }));
+        const response = await fetch('https://curly-frog-42.loca.lt/api/chat', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            messages: [
+              { role: 'system', content: 'Translate Arabic bakery product names into clear, natural English. Return JSON only with this exact shape: {"translations":[{"id":"item id","translation":"English translation"}]}. Return exactly one non-empty translation for every supplied item. Preserve every id exactly. Do not add any text outside the JSON.' },
+              { role: 'user', content: JSON.stringify({ items }) }
+            ]
+          })
+        });
+        if (!response.ok) throw new Error('Local AI translation service unavailable');
+        const payload = await response.json();
+        let result = payload;
+        if (typeof payload?.message?.content === 'string') {
+          try { result = JSON.parse(payload.message.content); }
+          catch { throw new Error('Invalid local AI translation response'); }
+        }
+        const translations = Array.isArray(result?.translations) ? result.translations : [];
+        const byId = new Map(translations.map((item, index) => [String(item?.id ?? index), String(item?.translation || '').trim()]));
+        missing.forEach((row, index) => {
+          const translation = byId.get(String(index));
+          if (!translation) throw new Error('A bakery item was not translated');
+          row.nameEn = translation;
+        });
+        bakingScheduleDrafts[bakingScheduleDay] = { rows }; queueBakingScheduleSave(bakingScheduleDay);
+        showToast(`تمت ترجمة ${missing.length} خانة`);
+      } catch (error) { console.error('Baking schedule translation failed:', error); showToast('تعذرت الترجمة بالذكاء الاصطناعي المحلي، أعد المحاولة أو اكتب الترجمة يدوياً', true); }
+      finally { bakingTranslationBusy = false; renderBakingSchedulePage(); }
     }
     function addBakingRow(day, afterId = '', section = 'breads') {
       const rows = getBakingRows(day);
@@ -2933,7 +2989,36 @@ function refreshUI() {
       const quantity = ['surra', 'abu', 'yarmouk'].includes(field);
       const value = escapeHtml(quantity ? formatBakingQuantity(row[field]) : (row[field] || ''));
       if (!bakingScheduleEditing) return `<span class="baking-cell-value ${className}">${value || '—'}</span>`;
-      return `<input class="baking-edit-input ${className}" dir="${quantity ? 'ltr' : 'auto'}" value="${value}" ${quantity ? "inputmode=\"text\"" : ''} oninput="${quantity ? 'this.value = convertToEnglishNumbers(this.value); ' : ''}bakingInput('${day}', '${row.id}', '${field}', this.value)">`;
+      if (quantity) {
+        const numberValue = escapeHtml(formatBakingQuantity(row[field]).replace(/\s*kg$/i, ''));
+        return `<span class="baking-quantity-editor"><input class="baking-edit-input ${className}" dir="ltr" value="${numberValue}" inputmode="decimal" oninput="this.value = convertToEnglishNumbers(this.value); bakingInput('${day}', '${row.id}', '${field}', this.value)"><b>kg</b></span>`;
+      }
+      return `<input class="baking-edit-input ${className}" dir="auto" value="${value}" oninput="bakingInput('${day}', '${row.id}', '${field}', this.value)">`;
+    }
+    function bakingSchedulePrintHtml(dayKey, autoPrint = false) {
+      const rows = getBakingRows(dayKey); const day = getBakingDay(dayKey); const previous = previousBakingDay(dayKey); let currentSection = '';
+      const printedRows = rows.map((row, index) => { const section = row.section || 'breads'; const header = section !== currentSection ? `<tr class="section section-${section}"><td colspan="6">${BAKING_SECTIONS[section]?.[0] || ''}<span>${BAKING_SECTIONS[section]?.[1] || ''}</span></td></tr>` : ''; currentSection = section; return `${header}<tr><td>${index + 1}</td><td>${escapeHtml(row.nameAr)}</td><td dir="ltr">${escapeHtml(row.nameEn)}</td><td dir="ltr">${escapeHtml(formatBakingQuantity(row.surra))}</td><td dir="ltr">${escapeHtml(formatBakingQuantity(row.abu))}</td><td dir="ltr">${escapeHtml(formatBakingQuantity(row.yarmouk))}</td></tr>`; }).join('');
+      return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>جدول العجن - ${day[1]}</title><style>@page{size:A4 portrait;margin:6mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,'Cairo',sans-serif;color:#172033;font-size:12px}header{border-bottom:3px solid #b91c1c;padding:4px 0 10px;margin-bottom:9px}h1{margin:0;font-size:23px;line-height:1.35;text-align:center}p{margin:5px 0 0;color:#475569;text-align:center;font-size:13px;font-weight:600}table{width:100%;border-collapse:collapse;font-size:12px;line-height:1.25;table-layout:fixed}th{background:#172033!important;color:#fff!important;padding:9px 3px;text-align:center;font-size:12px;font-weight:800;vertical-align:middle}td{border:1px solid #aebdcb;padding:7px 4px;height:31px;text-align:center;vertical-align:middle;word-wrap:break-word;font-weight:600}th:nth-child(1),td:nth-child(1){width:3%;font-weight:800}th:nth-child(2),td:nth-child(2){width:36%;text-align:right;padding-right:7px}th:nth-child(3),td:nth-child(3){width:36%;text-align:left;padding-left:7px}th:nth-child(4),td:nth-child(4),th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){width:8.33%;white-space:nowrap;font-size:11px}.section td{color:#172033!important;font-size:15px;font-weight:900;text-align:center!important;padding:9px 6px;height:auto;border-color:#9eafbd}.section span{font-size:12px;font-weight:700;margin-right:10px;direction:ltr;display:inline-block}.section-breads td{background:#dbeafe!important}.section-pastries td{background:#fef3c7!important}.section-glutenFree td{background:#dcfce7!important}.section-special td{background:#ffe4e6!important}</style></head><body><header><h1>جدول العجن في يوم ${previous[1]} ليوم ${day[1]} <span dir="ltr">(${nextBakingDate(dayKey)})</span></h1><p>Baking schedule from ${previous[2]} for ${day[2]}</p></header><table><thead><tr><th>#</th><th>الصنف</th><th>Item</th><th>حولي<br>Hawally</th><th>أبو الحصانية<br>Abu Hasaniya</th><th>اليرموك<br>Yarmouk</th></tr></thead><tbody>${printedRows}</tbody></table>${autoPrint ? '<script>window.onload=()=>window.print()<\\/script>' : ''}</body></html>`;
+    }
+    function showBakingApprovalResult() {
+      const app = document.getElementById('app');
+      app.innerHTML = `<main class="baking-page baking-status-page" dir="rtl"><section class="baking-status-card"><div class="baking-status-icon">✓</div><h1>تم تسليم جدول العجن بنجاح</h1><p>تم إرسال أمر الطباعة إلى جهاز الطابعة A4 في الفرع الرئيسي.</p><button onclick="closeBakingSchedulePage()" class="baking-exit-button">خروج / Exit</button></section></main>`;
+    }
+    async function approveAndSendBakingSchedule() {
+      const untranslated = untranslatedBakingRows();
+      if (untranslated.length) { const row = untranslated[0]; showToast(`لا يمكن الاعتماد: النص «${row.nameAr || row.nameEn || 'سطر جديد'}» يحتاج ترجمة.`, true); return; }
+      const day = getBakingDay(bakingScheduleDay); const previous = previousBakingDay(bakingScheduleDay);
+      if (!confirm(`تأكيد اعتماد وإرسال جدول ${day[1]} للطابعة A4 في الفرع الرئيسي؟`)) return;
+      const app = document.getElementById('app');
+      app.innerHTML = `<main class="baking-page baking-status-page" dir="rtl"><section class="baking-status-card"><div class="baking-loader"></div><h1>جارٍ إرسال جدول العجن…</h1><p>يتم تجهيز أمر الطباعة للطابعة A4 في الفرع الرئيسي.</p></section></main>`;
+      try {
+        const jobRef = hawalliA4PrintJobsRef().push();
+        const message = `The baking schedule for ${day[2]}, prepared on ${previous[2]}, has been approved and printed. Please collect it from the printer.`;
+        await jobRef.set({ status: 'queued', html: bakingSchedulePrintHtml(bakingScheduleDay), purpose: 'baking-schedule', createdAt: Date.now(), requestedBy: getDeviceId(), requestedBranch: currentBranch || '', scheduleDay: bakingScheduleDay, notify: { phone: '639127105760', text: message } });
+        bakingScheduleDrafts[bakingScheduleDay] = { rows: getBakingRows(bakingScheduleDay), approvedForDate: bakingCycleDate(bakingScheduleDay), approvedAt: Date.now(), approvalJobId: jobRef.key };
+        await db.ref(`bakingSchedules/drafts/${bakingScheduleDay}`).set(bakingScheduleDrafts[bakingScheduleDay]);
+        showBakingApprovalResult();
+      } catch (error) { console.error('Unable to approve baking schedule:', error); showToast('تعذر إرسال جدول العجن للطابعة', true); renderBakingSchedulePage(); }
     }
     function renderBakingSchedulePage() {
       const app = document.getElementById('app');
@@ -2949,7 +3034,8 @@ function refreshUI() {
         currentSection = section;
         return `${heading}<tr ondragover="allowBakingRowDrop(event)" ondragleave="event.currentTarget.classList.remove('baking-drop-target')" ondrop="dropBakingRow(event, '${bakingScheduleDay}', '${row.id}')"><td class="baking-row-no">${index + 1}</td><td>${bakingCell(bakingScheduleDay, row, 'nameAr', 'baking-name-ar')}</td><td>${bakingCell(bakingScheduleDay, row, 'nameEn', 'baking-name-en')}</td><td>${bakingCell(bakingScheduleDay, row, 'surra')}</td><td>${bakingCell(bakingScheduleDay, row, 'abu')}</td><td>${bakingCell(bakingScheduleDay, row, 'yarmouk')}</td><td class="baking-add-cell">${bakingScheduleEditing ? `<div class="baking-row-controls"><button class="baking-drag-handle" draggable="true" ondragstart="startBakingRowDrag(event, '${row.id}')" ondragend="endBakingRowDrag(event)" title="اسحب لتغيير ترتيب السطر">↕</button><button class="baking-row-add" title="إضافة سطر بعد هذا السطر" onclick="addBakingRow('${bakingScheduleDay}', '${row.id}', '${section}')">＋</button><button class="baking-row-delete" title="حذف السطر" onclick="deleteBakingRow('${bakingScheduleDay}', '${row.id}')">−</button></div>` : ''}</td></tr>`;
       }).join('');
-      app.innerHTML = `<main class="baking-page" dir="rtl"><header class="baking-topbar"><button onclick="bakingScheduleView = 'picker'; bakingScheduleEditing = false; renderBakingSchedulePage()" class="baking-back">← رجوع / Back</button><div class="baking-title"><p class="baking-eyebrow">BAKING SCHEDULE · ${day[2].toUpperCase()}</p><h1>جدول العجن في يوم ${previous[1]} ليوم ${day[1]} <span dir="ltr">(${nextBakingDate(bakingScheduleDay)})</span></h1><p>Baking schedule from ${previous[2]} for ${day[2]}</p></div><div class="baking-actions"><button onclick="toggleBakingScheduleEdit()" class="baking-edit-toggle ${bakingScheduleEditing ? 'is-active' : ''}">${bakingScheduleEditing ? '✓ تم / Done' : '✎ تعديل / Edit'}</button><button onclick="printBakingSchedule()" class="baking-print">🖨 طباعة / Print</button></div></header><section class="baking-sheet"><div class="baking-sheet-meta"><span>الجدول ثنائي اللغة / Bilingual schedule</span><span>${bakingScheduleEditing ? 'اسحب ↕ لإعادة الترتيب · وضع التعديل مفعل / Drag ↕ to reorder' : 'اضغط تعديل لتغيير الخلايا / Press Edit to change cells'}</span></div><div class="baking-table-wrap"><table class="baking-table"><thead><tr><th>#</th><th>الصنف<br><small>Arabic item</small></th><th>Item<br><small>English</small></th><th>حولي<br><small>Hawally</small></th><th>أبو الحصانية<br><small>Abu Hasaniya</small></th><th>اليرموك<br><small>Yarmouk</small></th><th></th></tr></thead><tbody>${body}${bakingScheduleEditing ? `<tr class="baking-final-drop" ondragover="allowBakingRowDrop(event)" ondragleave="event.currentTarget.classList.remove('baking-drop-target')" ondrop="dropBakingRow(event, '${bakingScheduleDay}', '', 'after')"><td colspan="7">أفلت هنا لنقل السطر إلى النهاية / Drop here to move to the end</td></tr>` : ''}</tbody></table></div>${bakingScheduleEditing ? `<button class="baking-special-add" onclick="addSpecialBakingOrder()"><b>＋</b> إضافة طلب خاص <small>/ Add special order</small></button>` : ''}</section></main>`;
+      const sent = bakingScheduleIsSent(bakingScheduleDay);
+      app.innerHTML = `<main class="baking-page" dir="rtl"><header class="baking-topbar"><button onclick="bakingScheduleView = 'picker'; bakingScheduleEditing = false; renderBakingSchedulePage()" class="baking-back">← رجوع / Back</button><div class="baking-title"><p class="baking-eyebrow">BAKING SCHEDULE · ${day[2].toUpperCase()}</p><h1>جدول العجن في يوم ${previous[1]} ليوم ${day[1]} <span dir="ltr">(${nextBakingDate(bakingScheduleDay)})</span></h1><p>Baking schedule from ${previous[2]} for ${day[2]}</p></div><div class="baking-actions"><button onclick="toggleBakingScheduleEdit()" class="baking-edit-toggle ${bakingScheduleEditing ? 'is-active' : ''}">${bakingScheduleEditing ? '✓ تم / Done' : '✎ تعديل / Edit'}</button>${sent ? `<span class="baking-sent-status">✓ تم إرسال جدول العجن</span>` : `<button onclick="approveAndSendBakingSchedule()" class="baking-print">اعتماد وإرسال</button>`}</div></header><section class="baking-sheet"><div class="baking-sheet-meta"><span>الجدول ثنائي اللغة / Bilingual schedule</span><span>${bakingScheduleEditing ? 'اسحب ↕ لإعادة الترتيب · وضع التعديل مفعل / Drag ↕ to reorder' : 'اضغط تعديل لتغيير الخلايا / Press Edit to change cells'}</span></div><div class="baking-table-wrap"><table class="baking-table"><thead><tr><th>#</th><th>الصنف<br><small>Arabic item</small></th><th>Item<br><small>English</small>${bakingScheduleEditing ? `<button class="baking-translate-all" onclick="translateEmptyBakingNames()" ${bakingTranslationBusy ? 'disabled' : ''}>${bakingTranslationBusy ? 'جارٍ…' : 'ترجمة الكل'}</button>` : ''}</th><th>حولي<br><small>Hawally</small></th><th>أبو الحصانية<br><small>Abu Hasaniya</small></th><th>اليرموك<br><small>Yarmouk</small></th><th></th></tr></thead><tbody>${body}${bakingScheduleEditing ? `<tr class="baking-final-drop" ondragover="allowBakingRowDrop(event)" ondragleave="event.currentTarget.classList.remove('baking-drop-target')" ondrop="dropBakingRow(event, '${bakingScheduleDay}', '', 'after')"><td colspan="7">أفلت هنا لنقل السطر إلى النهاية / Drop here to move to the end</td></tr>` : ''}</tbody></table></div>${bakingScheduleEditing ? `<button class="baking-special-add" onclick="addSpecialBakingOrder()"><b>＋</b> إضافة طلب خاص <small>/ Add special order</small></button>` : ''}</section></main>`;
     }
     function printBakingSchedule() {
       const rows = getBakingRows(bakingScheduleDay); const untranslated = rows.filter(row => !String(row.nameAr || '').trim() || !String(row.nameEn || '').trim());

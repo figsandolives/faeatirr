@@ -2917,7 +2917,7 @@ function refreshUI() {
         const items = missing.map((row, index) => ({ id: String(index), text: String(row.nameAr).trim() }));
         const response = await fetch('https://curly-frog-42.loca.lt/api/chat', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', 'bypass-tunnel-reminder': 'true' },
           body: JSON.stringify({
             messages: [
               { role: 'system', content: 'Translate Arabic bakery product names into clear, natural English. Return JSON only with this exact shape: {"translations":[{"id":"item id","translation":"English translation"}]}. Return exactly one non-empty translation for every supplied item. Preserve every id exactly. Do not add any text outside the JSON.' },

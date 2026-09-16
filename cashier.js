@@ -61,6 +61,15 @@
 
     // Global State
     let currentScreen = 'home';
+    // Baking schedules are deliberately kept separate from the approved version.
+    // At this stage the draft is shared live between devices; an approved snapshot
+    // can later be introduced without losing the working schedules.
+    let bakingScheduleDrafts = {};
+    let bakingScheduleView = 'picker';
+    let bakingScheduleDay = '';
+    let bakingScheduleEditing = false;
+    let bakingScheduleSaveTimer = null;
+    let bakingScheduleListenerStarted = false;
     let currentAccountingSection = 'orders';
     let allProducts = [];
     let parsedExcelData = [];
@@ -564,6 +573,7 @@
       if (invoicePage) showInvoiceProductsPage();
       const shortagePage = document.getElementById('shortageDraftPage');
       if (shortagePage) renderShortageDraftPage();
+      if (currentScreen === 'bakingSchedule') renderBakingSchedulePage();
       applyCashierLegacyTranslations();
     }
 	    const INVENTORY_BRANCHES = [
@@ -1891,6 +1901,8 @@ function setupRealtimeListeners() {
 	      : [];
 	    refreshUI();
 	  });
+
+      setupBakingScheduleListener();
 	}
 
 // 2. دالة تحديث واجهة المستخدم بدون ريفريش
@@ -1908,6 +1920,8 @@ function refreshUI() {
 
   if (currentScreen === 'cashier') {
     renderCashier();
+  } else if (currentScreen === 'bakingSchedule') {
+    if (!bakingScheduleEditing) renderBakingSchedulePage();
   } else if (currentScreen === 'accounting') {
     renderAccounting(currentAccountingSection);
   }
@@ -2766,6 +2780,139 @@ function refreshUI() {
       startHawalliPrintStationHeartbeat();
     }
 
+    // ==================== BAKING SCHEDULES ====================
+
+    const BAKING_DAYS = [
+      ['sunday', 'الأحد', 'Sunday'], ['monday', 'الاثنين', 'Monday'], ['tuesday', 'الثلاثاء', 'Tuesday'],
+      ['wednesday', 'الأربعاء', 'Wednesday'], ['thursday', 'الخميس', 'Thursday'], ['friday', 'الجمعة', 'Friday'], ['saturday', 'السبت', 'Saturday']
+    ];
+    const BAKING_SECTIONS = {
+      breads: ['الخبز اليومي', 'Daily breads'], pastries: ['الفطائر والخبز الصغير', 'Pastries & small bread'],
+      glutenFree: ['الجلوتن فري والكيتو', 'Gluten-free & keto'], special: ['طلبات خاصة', 'Special orders']
+    };
+    const bakingRow = (id, nameAr, nameEn, surra = '', abu = '', yarmouk = '', section = 'breads') => ({ id, nameAr, nameEn, surra, abu, yarmouk, section });
+    const DEFAULT_BAKING_SCHEDULES = {
+      sunday: [
+        bakingRow('sun-1', 'الحنطة البيضاء بماء التين والزيتون وورق الزيتون', 'White wheat with fig water, olive oil & olive leaves', 'نصف', 'نصف', 'نصف'),
+        bakingRow('sun-2', 'الشوفان بحبة البركة والسمسم', 'Oats with nigella seeds & sesame', '1', '1', 'نصف'), bakingRow('sun-3', 'الحنطة السادة', 'Plain wheat bread', 'نصف', '1', 'نصف'),
+        bakingRow('sun-4', 'الحبوب الأربعة المبرعمة', 'Four sprouted grains bread', 'نصف', 'نصف', 'نصف'), bakingRow('sun-5', 'الأعشاب الأربعة المستنبتة', 'Four sprouted herbs bread', 'نصف', 'نصف', 'نصف'),
+        bakingRow('sun-6', 'خبز الشعير السادة', 'Plain barley bread', '2', '2', '2'), bakingRow('sun-7', 'خبزة الحبوب العشرة', 'Ten grains bread', 'نصف', 'نصف', 'نصف'),
+        bakingRow('sun-8', 'خبز القمح السادة', 'Plain wheat bread', '2', '2', '1'), bakingRow('sun-9', 'الروبة الخفيفة', 'Light yogurt bread', '2', '1', '1'),
+        bakingRow('sun-10', 'خبز الرطب', 'Rutab bread', '0', '0', '0'), bakingRow('sun-11', 'شمندر', 'Beetroot bread', 'نصف', 'نصف', 'نصف'),
+        bakingRow('sun-12', 'كركم', 'Turmeric bread', 'نصف', 'نصف', 'نصف'), bakingRow('sun-13', 'خضار', 'Vegetable bread', 'نصف', 'نصف', 'نصف'),
+        bakingRow('sun-p1', 'فطائر السرة', 'Surra pastries', '4 kg', '', '', 'pastries'), bakingRow('sun-p2', 'فطائر أبو الحصانية', 'Abu Hasaniya pastries', '', '4 kg', '', 'pastries'), bakingRow('sun-p3', 'فطائر اليرموك', 'Yarmouk pastries', '', '', '4 kg', 'pastries'), bakingRow('sun-p4', 'خبز صغير', 'Small bread', '3 kg', '', '', 'pastries'),
+        bakingRow('sun-g1', 'خبز الأرز السادة', 'Plain rice bread', '5 kg', '5 kg', '5 kg', 'glutenFree'), bakingRow('sun-g2', 'خبز الكيتو', 'Keto bread', '6 kg', '6 kg', '6 kg', 'glutenFree')
+      ],
+      monday: [
+        bakingRow('mon-1', 'خبز الشوفان السادة', 'Plain oats bread', '1', 'نصف', 'نصف'), bakingRow('mon-2', 'خبز التين والزيتون', 'Fig & olive bread', '1', 'نصف', 'نصف'), bakingRow('mon-3', 'شوفان بحبة البركة والسمسم', 'Oats with nigella seeds & sesame', '1', '1', '1'), bakingRow('mon-4', 'الجاودر السادة', 'Plain rye bread', '1', 'نصف', 'نصف'), bakingRow('mon-5', 'الشعير السادة', 'Plain barley bread', '2', '2', '2'), bakingRow('mon-6', 'القمح السادة', 'Plain wheat bread', '1', '2', '1'), bakingRow('mon-7', 'الشعير الخفيف بالروبة', 'Light barley yogurt bread', '2', '1', 'نصف'), bakingRow('mon-8', 'الحبوب الخمسة المبرعمة', 'Five sprouted grains bread', 'نصف', 'نصف', 'نصف'), bakingRow('mon-9', 'الأعشاب الخمسة المستنبتة', 'Five sprouted herbs bread', 'نصف', 'نصف', 'نصف'), bakingRow('mon-10', 'خبزة الحبوب العشرة', 'Ten grains bread', '1', 'نصف', 'نصف'), bakingRow('mon-11', 'الحنطة السادة', 'Plain wheat bread', '1', '1', '1'), bakingRow('mon-12', 'الرطب', 'Rutab bread', '0', '0', '0'), bakingRow('mon-13', 'كركم', 'Turmeric bread', 'نصف', 'نصف', 'نصف'), bakingRow('mon-14', 'خضار', 'Vegetable bread', 'نصف', 'نصف', 'نصف'), bakingRow('mon-15', 'شمندر', 'Beetroot bread', 'نصف', 'نصف', 'نصف'), bakingRow('mon-16', 'خبز المناعة', 'Immunity bread', '2', 'نصف', ''), bakingRow('mon-17', 'خبز البروتين', 'Protein bread', '1', '', ''),
+        bakingRow('mon-p1', 'فطائر السرة', 'Surra pastries', '2 kg', '', '', 'pastries'), bakingRow('mon-p2', 'فطائر أبو الحصانية', 'Abu Hasaniya pastries', '', '4 kg', '', 'pastries'), bakingRow('mon-p3', 'فطائر اليرموك', 'Yarmouk pastries', '', '', '4 kg', 'pastries'), bakingRow('mon-p4', 'الخبز الصغير', 'Small bread', '2 kg', '', '', 'pastries'), bakingRow('mon-g1', 'خبز الأرز الأسمر السادة', 'Plain brown rice bread', '5 kg', '5 kg', '5 kg', 'glutenFree'), bakingRow('mon-g2', 'خبز الكيتو', 'Keto bread', '5 kg', '5 kg', '5 kg', 'glutenFree')
+      ],
+      tuesday: [
+        bakingRow('tue-1', 'التين والزيتون', 'Fig & olive bread', 'نصف', 'نصف', 'نصف'), bakingRow('tue-2', 'شوفان كامل بحبة البركة والسمسم', 'Whole oats with nigella seeds & sesame', '1', '2', '1'), bakingRow('tue-3', 'القمح بالزيتون وورق الزيتون', 'Wheat with olive oil & olive leaves', '0', '0', '0'), bakingRow('tue-4', 'خبز الشعير السادة', 'Plain barley bread', '2', '2', '2'), bakingRow('tue-5', 'القمح السادة', 'Plain wheat bread', '1', '2', '1'), bakingRow('tue-6', 'خبز الحبوب الستة', 'Six grains bread', 'نصف', 'نصف', 'نصف'), bakingRow('tue-7', 'خبز الأعشاب الستة', 'Six herbs bread', 'نصف', 'نصف', 'نصف'), bakingRow('tue-8', 'شوفان خفيف بالروبة', 'Light oats yogurt bread', '1', '2', '1'), bakingRow('tue-9', 'خبزة الحبوب العشرة', 'Ten grains bread', 'نصف', 'نصف', 'نصف'), bakingRow('tue-10', 'شمندر', 'Beetroot bread', '1', 'نصف', 'نصف'), bakingRow('tue-11', 'خضار', 'Vegetable bread', 'نصف', 'نصف', 'نصف'), bakingRow('tue-12', 'كركم', 'Turmeric bread', 'نصف', 'نصف', 'نصف'), bakingRow('tue-13', 'خبز المناعة', 'Immunity bread', '1', '1', ''),
+        bakingRow('tue-p1', 'فطائر السرة', 'Surra pastries', '5 kg', '', '', 'pastries'), bakingRow('tue-p2', 'فطائر أبو الحصانية', 'Abu Hasaniya pastries', '', '5 kg', '', 'pastries'), bakingRow('tue-p3', 'فطائر اليرموك', 'Yarmouk pastries', '', '', '5 kg', 'pastries'), bakingRow('tue-p4', 'الخبز الصغير', 'Small bread', '4 kg', '4 kg', '4 kg', 'pastries'), bakingRow('tue-g1', 'خبز الأرز الأسمر', 'Brown rice bread', '5 kg', '5 kg', '5 kg', 'glutenFree'), bakingRow('tue-g2', 'خبز الكيتو', 'Keto bread', '5 kg', '5 kg', '5 kg', 'glutenFree')
+      ],
+      wednesday: [
+        bakingRow('wed-1', 'القمح المبرعم بالزيتون الفلسطيني والتين', 'Sprouted wheat with Palestinian olives & figs', '1', 'نصف', 'نصف'), bakingRow('wed-2', 'شوفان كامل بحبة البركة والسمسم', 'Whole oats with nigella seeds & sesame', '1', '2', '1 kg'), bakingRow('wed-3', 'الشعير السادة', 'Plain barley bread', '2', '2', '1'), bakingRow('wed-4', 'القمح السادة', 'Plain wheat bread', '1', '2', '1'), bakingRow('wed-5', 'خبز الحبوب السبعة المبرعمة', 'Seven sprouted grains bread', 'نصف', 'نصف', 'نصف'), bakingRow('wed-6', 'خبز الأعشاب السبعة المستنبتة', 'Seven sprouted herbs bread', 'نصف', 'نصف', 'نصف'), bakingRow('wed-7', 'شوفان خفيف بالروبة', 'Light oats yogurt bread', '2', '2', '1'), bakingRow('wed-8', 'خبزة الحبوب العشرة', 'Ten grains bread', 'نصف', 'نصف', 'نصف'), bakingRow('wed-9', 'شمندر', 'Beetroot bread', '1', 'نصف', 'نصف'), bakingRow('wed-10', 'خضار', 'Vegetable bread', 'نصف', 'نصف', 'نصف'), bakingRow('wed-11', 'كركم', 'Turmeric bread', '1', 'نصف', 'نصف'),
+        bakingRow('wed-p1', 'فطائر السرة', 'Surra pastries', '4 kg', '', '', 'pastries'), bakingRow('wed-p2', 'فطائر أبو الحصانية', 'Abu Hasaniya pastries', '', '4 kg', '', 'pastries'), bakingRow('wed-p3', 'فطائر اليرموك', 'Yarmouk pastries', '', '', '4 kg', 'pastries'), bakingRow('wed-p4', 'الخبز الصغير', 'Small bread', '4 dozen', '4 dozen', '', 'pastries'), bakingRow('wed-g1', 'خبز الأرز السادة', 'Plain rice bread', '5 kg', '5 kg', '5 kg', 'glutenFree'), bakingRow('wed-g2', 'خبز الكيتو', 'Keto bread', '5 kg', '5 kg', '5 kg', 'glutenFree')
+      ],
+      thursday: [
+        bakingRow('thu-1', 'القمح السادة', 'Plain wheat bread', '2', '1', '1'), bakingRow('thu-2', 'خبز الكينوا المبرعمة بالتين والزيتون', 'Sprouted quinoa bread with figs & olives', 'نصف', 'نصف', 'نصف'), bakingRow('thu-3', 'الشوفان الكامل بحبة البركة والسمسم', 'Whole oats with nigella seeds & sesame', '2', '1', '1'), bakingRow('thu-4', 'الشعير السادة', 'Plain barley bread', '2', '2', '1'), bakingRow('thu-5', 'الحبوب العشرة', 'Ten grains bread', 'نصف', 'نصف', 'نصف'), bakingRow('thu-6', 'الحبوب الخمسة المبرعمة', 'Five sprouted grains bread', 'نصف', 'نصف', 'نصف'), bakingRow('thu-7', 'الأعشاب الخمسة', 'Five herbs bread', 'نصف', 'نصف', 'نصف'), bakingRow('thu-8', 'الشوفان السادة', 'Plain oats bread', '2', '1', '1'), bakingRow('thu-9', 'الشوفان بالروبة الخفيفة', 'Oats with light yogurt', '1', '1', '1'), bakingRow('thu-10', 'خبز رفع المناعة', 'Immunity bread', '1', '0', '0'), bakingRow('thu-11', 'شمندر', 'Beetroot bread', '1', 'نصف', '0'), bakingRow('thu-12', 'كركم', 'Turmeric bread', '1 kg', 'نصف', '0'), bakingRow('thu-13', 'خضار', 'Vegetable bread', 'نصف', 'نصف', '0'),
+        bakingRow('thu-p1', 'فطائر السرة', 'Surra pastries', '4 kg', '', '', 'pastries'), bakingRow('thu-p2', 'فطائر أبو الحصانية', 'Abu Hasaniya pastries', '', '4 kg', '', 'pastries'), bakingRow('thu-p3', 'فطائر اليرموك', 'Yarmouk pastries', '', '', '4 kg', 'pastries'), bakingRow('thu-p4', 'الخبز الصغير', 'Small bread', '4 kg', '4 kg', '', 'pastries'), bakingRow('thu-g1', 'خبز الأرز الأسمر السادة', 'Plain brown rice bread', '5 kg', '5 kg', '5 kg', 'glutenFree'), bakingRow('thu-g2', 'خبز اللوز', 'Almond bread', '5 kg', '5 kg', '5 kg', 'glutenFree')
+      ],
+      friday: [
+        bakingRow('fri-1', 'خبز الشعير السادة', 'Plain barley bread', '2', '2', ''), bakingRow('fri-2', 'خبز الشوفان بحبة البركة والسمسم', 'Oats bread with nigella seeds & sesame', '1', '2', ''), bakingRow('fri-3', 'الجاودر بالتين والزيتون', 'Rye bread with figs & olives', '1', '1', ''), bakingRow('fri-4', 'خبز القمح السادة', 'Plain wheat bread', '2', '2', ''), bakingRow('fri-5', 'الروبة بالشوفان', 'Oats yogurt bread', '1', '1', ''), bakingRow('fri-6', 'الخبز الصغير', 'Small bread', '3', '2', ''), bakingRow('fri-7', 'فطائر السرة وأبو الحصانية', 'Surra & Abu Hasaniya pastries', '4', '4', '', 'pastries'), bakingRow('fri-g1', 'خبز الأرز الأسمر', 'Brown rice bread', '5 kg', '5 kg', '', 'glutenFree'), bakingRow('fri-g2', 'خبز الكيتو', 'Keto bread', '5 kg', '5 kg', '', 'glutenFree')
+      ],
+      saturday: [
+        bakingRow('sat-1', 'الجاودر بالتين والزيتون', 'Rye bread with figs & olives', 'نصف', 'نصف', 'نصف'), bakingRow('sat-2', 'الشوفان بحبة البركة والسمسم', 'Oats with nigella seeds & sesame', '1', '1', '2'), bakingRow('sat-3', 'الدخن السادة', 'Plain millet bread', '1', '1', '1'), bakingRow('sat-4', 'القمح السادة', 'Plain wheat bread', '2', '1', '1'), bakingRow('sat-5', 'الشعير السادة', 'Plain barley bread', '2', '2', '2'), bakingRow('sat-6', 'الحبوب العشرة', 'Ten grains bread', 'نصف', 'نصف', '1'), bakingRow('sat-7', 'خبزة الأعشاب الثلاثة', 'Three herbs bread', 'نصف', '2', '1'), bakingRow('sat-8', 'الروبة الخفيفة', 'Light yogurt bread', '2', '2', '1'), bakingRow('sat-9', 'خبز الحبوب الثلاثة المبرعمة', 'Three sprouted grains bread', 'نصف', '2', '1'), bakingRow('sat-10', 'خبز البروتين', 'Protein bread', 'نصف', '0', '0'), bakingRow('sat-11', 'خبز المناعة', 'Immunity bread', 'نصف', 'نصف', 'نصف'), bakingRow('sat-12', 'خبز الرطب', 'Rutab bread', '0', '0', '0'), bakingRow('sat-13', 'شمندر', 'Beetroot bread', '1', 'نصف', 'نصف'), bakingRow('sat-14', 'كركم', 'Turmeric bread', '1', 'نصف', 'نصف'), bakingRow('sat-15', 'خضار', 'Vegetable bread', 'نصف', 'نصف', 'نصف'),
+        bakingRow('sat-p1', 'فطائر السرة', 'Surra pastries', '4 kg', '', '', 'pastries'), bakingRow('sat-p2', 'فطائر أبو الحصانية', 'Abu Hasaniya pastries', '', '4 kg', '', 'pastries'), bakingRow('sat-p3', 'فطائر اليرموك', 'Yarmouk pastries', '', '', '4 kg', 'pastries'), bakingRow('sat-p4', 'خبز صغير', 'Small bread', '2 kg', '2 kg', '', 'pastries'), bakingRow('sat-g1', 'خبزة الكيتو', 'Keto bread', '5 kg', '5 kg', '5 kg', 'glutenFree'), bakingRow('sat-g2', 'خبز الأرز', 'Rice bread', '5 kg', '5 kg', '5 kg', 'glutenFree')
+      ]
+    };
+
+    function copyBakingRows(rows) { return JSON.parse(JSON.stringify(rows || [])); }
+    function getBakingRows(day) { return bakingScheduleDrafts[day]?.rows ? bakingScheduleDrafts[day].rows : copyBakingRows(DEFAULT_BAKING_SCHEDULES[day] || []); }
+    function getBakingDay(day) { return BAKING_DAYS.find(item => item[0] === day); }
+    function nextBakingDate(day) {
+      const target = BAKING_DAYS.findIndex(item => item[0] === day);
+      const date = new Date();
+      const delta = ((target - date.getDay() + 7) % 7) || 7;
+      date.setDate(date.getDate() + delta);
+      return date.toLocaleDateString('en-GB', { calendar: 'gregory', day: '2-digit', month: '2-digit', year: 'numeric' });
+    }
+    function previousBakingDay(day) { const index = BAKING_DAYS.findIndex(item => item[0] === day); return BAKING_DAYS[(index + 6) % 7]; }
+    async function setupBakingScheduleListener() {
+      if (bakingScheduleListenerStarted) return;
+      bakingScheduleListenerStarted = true;
+      try {
+        if (!firebase.auth().currentUser) await firebase.auth().signInAnonymously();
+      } catch (error) {
+        // Existing cashier sessions may already be authorised by the project rules.
+        console.warn('Anonymous authentication for baking schedules was unavailable:', error);
+      }
+      db.ref('bakingSchedules/drafts').on('value', snapshot => {
+        bakingScheduleDrafts = snapshot.val() || {};
+        if (currentScreen === 'bakingSchedule' && !bakingScheduleEditing) renderBakingSchedulePage();
+      }, error => { console.error('Unable to load baking schedules:', error); showToast('تعذر تحميل جدول العجن من Firebase', true); });
+    }
+    function queueBakingScheduleSave(day) {
+      clearTimeout(bakingScheduleSaveTimer);
+      bakingScheduleSaveTimer = setTimeout(async () => {
+        try {
+          const draft = bakingScheduleDrafts[day];
+          await db.ref(`bakingSchedules/drafts/${day}`).set({ ...draft, updatedAt: Date.now(), updatedBy: currentCashier?.name || '' });
+        } catch (error) { console.error('Unable to save baking schedule:', error); showToast('تعذر حفظ تعديلات جدول العجن', true); }
+      }, 450);
+    }
+    function openBakingSchedulePage() { closeCashierActionMenus(); bakingScheduleView = 'picker'; bakingScheduleDay = ''; bakingScheduleEditing = false; currentScreen = 'bakingSchedule'; renderBakingSchedulePage(); }
+    function openBakingScheduleDay(day) { bakingScheduleView = 'day'; bakingScheduleDay = day; bakingScheduleEditing = false; renderBakingSchedulePage(); }
+    function closeBakingSchedulePage() { currentScreen = 'cashier'; bakingScheduleView = 'picker'; bakingScheduleEditing = false; renderCashier(); }
+    function toggleBakingScheduleEdit() { bakingScheduleEditing = !bakingScheduleEditing; renderBakingSchedulePage(); }
+    function bakingInput(day, rowId, field, value) {
+      const rows = getBakingRows(day);
+      const row = rows.find(item => item.id === rowId);
+      if (!row) return;
+      row[field] = ['surra', 'abu', 'yarmouk'].includes(field) ? convertToEnglishNumbers(value) : value;
+      bakingScheduleDrafts[day] = { rows };
+      queueBakingScheduleSave(day);
+    }
+    function addBakingRow(day, afterId = '', section = 'breads') {
+      const rows = getBakingRows(day);
+      const row = bakingRow(`custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, '', '', '', '', '', section);
+      const index = rows.findIndex(item => item.id === afterId);
+      rows.splice(index >= 0 ? index + 1 : rows.length, 0, row);
+      bakingScheduleDrafts[day] = { rows }; queueBakingScheduleSave(day); renderBakingSchedulePage();
+    }
+    function addSpecialBakingOrder() { addBakingRow(bakingScheduleDay, '', 'special'); }
+    function bakingCell(day, row, field, className = '') {
+      const value = escapeHtml(row[field] || '');
+      if (!bakingScheduleEditing) return `<span class="baking-cell-value ${className}">${value || '—'}</span>`;
+      const quantity = ['surra', 'abu', 'yarmouk'].includes(field);
+      return `<input class="baking-edit-input ${className}" dir="${quantity ? 'ltr' : 'auto'}" value="${value}" ${quantity ? "inputmode=\"text\"" : ''} oninput="${quantity ? 'this.value = convertToEnglishNumbers(this.value); ' : ''}bakingInput('${day}', '${row.id}', '${field}', this.value)">`;
+    }
+    function renderBakingSchedulePage() {
+      const app = document.getElementById('app');
+      if (bakingScheduleView !== 'day') {
+        app.innerHTML = `<main class="baking-page" dir="rtl"><header class="baking-topbar"><button onclick="closeBakingSchedulePage()" class="baking-back">← رجوع / Back</button><div><p class="baking-eyebrow">BAKING CONTROL</p><h1>جدول العجن <span>/ Baking Schedule</span></h1></div></header><section class="baking-day-picker">${BAKING_DAYS.map(([id, ar, en]) => `<button onclick="openBakingScheduleDay('${id}')" class="baking-day-button"><strong>${ar}</strong><span>${en}</span><b>←</b></button>`).join('')}</section></main>`;
+        return;
+      }
+      const day = getBakingDay(bakingScheduleDay); const previous = previousBakingDay(bakingScheduleDay); const rows = getBakingRows(bakingScheduleDay);
+      let currentSection = '';
+      const body = rows.map((row, index) => {
+        const section = row.section || 'breads';
+        const heading = section !== currentSection ? `<tr class="baking-section"><td colspan="7">${BAKING_SECTIONS[section]?.[0] || BAKING_SECTIONS.breads[0]} <small>${BAKING_SECTIONS[section]?.[1] || BAKING_SECTIONS.breads[1]}</small></td></tr>` : '';
+        currentSection = section;
+        return `${heading}<tr><td class="baking-row-no">${index + 1}</td><td>${bakingCell(bakingScheduleDay, row, 'nameAr', 'baking-name-ar')}</td><td>${bakingCell(bakingScheduleDay, row, 'nameEn', 'baking-name-en')}</td><td>${bakingCell(bakingScheduleDay, row, 'surra')}</td><td>${bakingCell(bakingScheduleDay, row, 'abu')}</td><td>${bakingCell(bakingScheduleDay, row, 'yarmouk')}</td><td class="baking-add-cell">${bakingScheduleEditing ? `<button class="baking-row-add" title="إضافة سطر بعد هذا السطر" onclick="addBakingRow('${bakingScheduleDay}', '${row.id}', '${section}')">＋</button>` : ''}</td></tr>`;
+      }).join('');
+      app.innerHTML = `<main class="baking-page" dir="rtl"><header class="baking-topbar"><button onclick="bakingScheduleView = 'picker'; bakingScheduleEditing = false; renderBakingSchedulePage()" class="baking-back">← رجوع / Back</button><div class="baking-title"><p class="baking-eyebrow">BAKING SCHEDULE · ${day[2].toUpperCase()}</p><h1>جدول العجن في يوم ${previous[1]} ليوم ${day[1]}</h1><p>Baking schedule from ${previous[2]} for ${day[2]} · <b dir="ltr">${nextBakingDate(bakingScheduleDay)}</b></p></div><div class="baking-actions"><button onclick="toggleBakingScheduleEdit()" class="baking-edit-toggle ${bakingScheduleEditing ? 'is-active' : ''}">${bakingScheduleEditing ? '✓ تم / Done' : '✎ تعديل / Edit'}</button><button onclick="printBakingSchedule()" class="baking-print">🖨 طباعة / Print</button></div></header><section class="baking-sheet"><div class="baking-sheet-meta"><span>الجدول ثنائي اللغة / Bilingual schedule</span><span>${bakingScheduleEditing ? 'وضع التعديل مفعل / Editing enabled' : 'اضغط تعديل لتغيير الخلايا / Press Edit to change cells'}</span></div><div class="baking-table-wrap"><table class="baking-table"><thead><tr><th>#</th><th>الصنف<br><small>Arabic item</small></th><th>Item<br><small>English</small></th><th>السرة<br><small>Surra</small></th><th>أبو الحصانية<br><small>Abu Hasaniya</small></th><th>اليرموك<br><small>Yarmouk</small></th><th></th></tr></thead><tbody>${body}</tbody></table></div>${bakingScheduleEditing ? `<button class="baking-special-add" onclick="addSpecialBakingOrder()"><b>＋</b> إضافة طلب خاص <small>/ Add special order</small></button>` : ''}</section></main>`;
+    }
+    function printBakingSchedule() {
+      const rows = getBakingRows(bakingScheduleDay); const untranslated = rows.filter(row => !String(row.nameAr || '').trim() || !String(row.nameEn || '').trim());
+      if (untranslated.length) { const row = untranslated[0]; showToast(`لا يمكن الطباعة: النص «${row.nameAr || row.nameEn || 'سطر جديد'}» يحتاج ترجمة ${row.nameAr ? 'إنجليزية' : 'عربية'}.`, true); return; }
+      const day = getBakingDay(bakingScheduleDay); const previous = previousBakingDay(bakingScheduleDay); let currentSection = '';
+      const printedRows = rows.map((row, index) => { const section = row.section || 'breads'; const header = section !== currentSection ? `<tr class="section"><td colspan="6">${BAKING_SECTIONS[section]?.[0] || ''} <span>${BAKING_SECTIONS[section]?.[1] || ''}</span></td></tr>` : ''; currentSection = section; return `${header}<tr><td>${index + 1}</td><td>${escapeHtml(row.nameAr)}</td><td dir="ltr">${escapeHtml(row.nameEn)}</td><td dir="ltr">${escapeHtml(row.surra || '')}</td><td dir="ltr">${escapeHtml(row.abu || '')}</td><td dir="ltr">${escapeHtml(row.yarmouk || '')}</td></tr>`; }).join('');
+      const printWindow = window.open('', '_blank'); if (!printWindow) { showToast('يرجى السماح بالنوافذ المنبثقة للطباعة', true); return; }
+      printWindow.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>جدول العجن - ${day[1]}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,'Cairo',sans-serif;color:#172033}header{border-bottom:3px solid #dc2626;padding-bottom:12px;margin-bottom:15px;display:flex;justify-content:space-between}h1{margin:0;font-size:24px}p{margin:5px 0;color:#475569}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#1e3a5f;color:#fff;padding:9px;text-align:center}td{border:1px solid #cbd5e1;padding:8px;text-align:center}td:nth-child(2){text-align:right}.section td{background:#e8f0fa;color:#173b68;font-weight:bold;text-align:right}.section span{font-weight:normal;margin-right:10px}</style></head><body><header><div><h1>جدول العجن في يوم ${previous[1]} ليوم ${day[1]}</h1><p>Baking schedule from ${previous[2]} for ${day[2]}</p></div><strong dir="ltr">${nextBakingDate(bakingScheduleDay)}</strong></header><table><thead><tr><th>#</th><th>الصنف</th><th>Item</th><th>السرة<br>Surra</th><th>أبو الحصانية<br>Abu Hasaniya</th><th>اليرموك<br>Yarmouk</th></tr></thead><tbody>${printedRows}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`); printWindow.document.close();
+    }
+
     // ==================== CASHIER INTERFACE ====================
     
     function setDailyInvoiceSearchTerm(value) {
@@ -2929,6 +3076,7 @@ function refreshUI() {
                     <div class="relative">
                       <button onclick="toggleCashierActionMenu(event, 'newInvoiceActionMenu')" aria-label="خيارات الفاتورة الجديدة" class="bg-gray-700 text-white px-4 py-3 rounded-lg font-bold text-xl hover:bg-gray-800 transition">⋮</button>
                       <div id="newInvoiceActionMenu" class="cashier-action-menu hidden absolute left-0 mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden z-50">
+                        <button onclick="openBakingSchedulePage()" class="block w-full text-right px-4 py-3 bg-red-600 text-white font-bold hover:bg-red-700 border-b border-red-700">جدول العجن</button>
                         <button onclick="openOnlineOrderPreparationPicker(); closeCashierActionMenus();" class="block w-full text-right px-4 py-3 text-orange-700 font-bold hover:bg-orange-50">إبلاغ عن طلب أونلاين</button>
                       </div>
                     </div>

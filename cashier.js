@@ -72,6 +72,7 @@
     let bakingScheduleListenerStarted = false;
     let bakingDraggedRowId = '';
     let bakingTranslationBusy = false;
+    let bakingScheduleHistoryRecords = [];
     let currentAccountingSection = 'orders';
     let allProducts = [];
     let parsedExcelData = [];
@@ -576,6 +577,7 @@
       const shortagePage = document.getElementById('shortageDraftPage');
       if (shortagePage) renderShortageDraftPage();
       if (currentScreen === 'bakingSchedule') renderBakingSchedulePage();
+      if (currentScreen === 'bakingScheduleHistory') renderBakingScheduleHistoryPage();
       applyCashierLegacyTranslations();
     }
 	    const INVENTORY_BRANCHES = [
@@ -1924,6 +1926,8 @@ function refreshUI() {
     renderCashier();
   } else if (currentScreen === 'bakingSchedule') {
     if (!bakingScheduleEditing) renderBakingSchedulePage();
+  } else if (currentScreen === 'bakingScheduleHistory') {
+    renderBakingScheduleHistoryPage();
   } else if (currentScreen === 'accounting') {
     renderAccounting(currentAccountingSection);
   }
@@ -2999,6 +3003,40 @@ function refreshUI() {
       }
       return `<input class="baking-edit-input ${className}" dir="auto" value="${value}" oninput="bakingInput('${day}', '${row.id}', '${field}', this.value)">`;
     }
+    function bakingHistoryDate(timestamp) {
+      const value = Number(timestamp || 0); const date = new Date(value);
+      return value && !Number.isNaN(date.getTime()) ? date.toLocaleString('ar-KW-u-ca-gregory', { calendar: 'gregory', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+    }
+    function bakingHistoryRecordLabel(record) {
+      const day = getBakingDay(record.scheduleDay || '');
+      return day ? `جدول عجن يوم ${day[1]}` : 'جدول عجن';
+    }
+    async function openBakingScheduleHistoryPage() {
+      closeCashierActionMenus(); currentScreen = 'bakingScheduleHistory';
+      document.getElementById('app').innerHTML = `<main class="baking-page baking-status-page" dir="rtl"><section class="baking-status-card"><div class="baking-loader"></div><h1>جارٍ تحميل طلبات العجن السابقة…</h1></section></main>`;
+      try {
+        const snapshot = await hawalliA4PrintJobsRef().once('value');
+        bakingScheduleHistoryRecords = Object.entries(snapshot.val() || {}).map(([id, record]) => ({ id, ...record })).filter(record => record.purpose === 'baking-schedule').sort((a, b) => Number(b.approvedAt || b.createdAt || b.printedAt || 0) - Number(a.approvedAt || a.createdAt || a.printedAt || 0));
+      } catch (error) { console.error('Unable to load baking schedule history:', error); bakingScheduleHistoryRecords = []; showToast('تعذر تحميل طلبات العجن السابقة', true); }
+      renderBakingScheduleHistoryPage();
+    }
+    function closeBakingScheduleHistoryPage() { currentScreen = 'cashier'; renderCashier(); }
+    function renderBakingScheduleHistoryPage() {
+      if (currentScreen !== 'bakingScheduleHistory') return;
+      const entries = bakingScheduleHistoryRecords.map(record => {
+        const employee = record.requestedByName || record.approvedByName || record.employeeName || 'غير مسجل';
+        const status = record.status === 'printed' ? 'تمت الطباعة' : record.status === 'failed' ? 'تعذر الطباعة' : 'تم الإرسال';
+        return `<article class="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4 justify-between"><div class="min-w-0"><div class="flex flex-wrap items-center gap-2 mb-2"><span class="text-xs font-bold px-3 py-1 rounded-full ${record.status === 'printed' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}">${status}</span><span class="text-xs text-slate-500">${escapeHtml(bakingHistoryDate(record.approvedAt || record.createdAt || record.printedAt))}</span></div><h2 class="text-xl font-extrabold text-slate-800">${escapeHtml(bakingHistoryRecordLabel(record))}</h2><p class="mt-2 text-slate-600">الموظف الذي قام بالاعتماد: <b>${escapeHtml(employee)}</b></p>${record.targetDate ? `<p class="text-sm text-slate-500 mt-1">تاريخ جدول العجن: <span dir="ltr">${escapeHtml(record.targetDate)}</span></p>` : ''}</div><button onclick="printPreviousBakingSchedule('${record.id}')" class="bg-red-600 hover:bg-red-700 text-white font-bold px-5 py-3 rounded-xl whitespace-nowrap">🖨️ طباعة</button></article>`;
+      }).join('');
+      document.getElementById('app').innerHTML = `<main class="min-h-screen bg-slate-100 p-4 sm:p-8" dir="rtl"><section class="max-w-5xl mx-auto"><header class="flex flex-col sm:flex-row gap-4 justify-between sm:items-center mb-7"><div><p class="text-xs tracking-widest text-slate-500 font-bold mb-2">BAKING SCHEDULE HISTORY</p><h1 class="text-3xl font-extrabold text-slate-900">طلبات العجن السابقة</h1><p class="text-slate-600 mt-2">مرتبة من الأحدث إلى الأقدم</p></div><button onclick="closeBakingScheduleHistoryPage()" class="bg-slate-700 hover:bg-slate-800 text-white px-5 py-3 rounded-xl font-bold">← رجوع للكاشير</button></header><div class="space-y-3">${entries || `<section class="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-500 font-bold">لا توجد طلبات عجن مقدمة حتى الآن.</section>`}</div></section></main>`;
+    }
+    function printPreviousBakingSchedule(jobId) {
+      const record = bakingScheduleHistoryRecords.find(item => item.id === jobId);
+      if (!record?.html) { showToast('ملف طباعة هذا الجدول غير متوفر', true); return; }
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) { showToast('السماح بفتح نافذة الطباعة مطلوب', true); return; }
+      printWindow.document.write(record.html); printWindow.document.close(); printWindow.focus(); setTimeout(() => printWindow.print(), 350);
+    }
     function bakingSchedulePrintHtml(dayKey, autoPrint = false) {
       const rows = getBakingRows(dayKey); const day = getBakingDay(dayKey); const previous = previousBakingDay(dayKey); let currentSection = '';
       const printedRows = rows.map((row, index) => { const section = row.section || 'breads'; const header = section !== currentSection ? `<tr class="section section-${section}"><td colspan="6">${BAKING_SECTIONS[section]?.[0] || ''}<span>${BAKING_SECTIONS[section]?.[1] || ''}</span></td></tr>` : ''; currentSection = section; return `${header}<tr><td>${index + 1}</td><td>${escapeHtml(row.nameAr)}</td><td dir="ltr">${escapeHtml(row.nameEn)}</td><td dir="ltr">${escapeHtml(formatBakingQuantity(row.surra))}</td><td dir="ltr">${escapeHtml(formatBakingQuantity(row.abu))}</td><td dir="ltr">${escapeHtml(formatBakingQuantity(row.yarmouk))}</td></tr>`; }).join('');
@@ -3017,9 +3055,12 @@ function refreshUI() {
       app.innerHTML = `<main class="baking-page baking-status-page" dir="rtl"><section class="baking-status-card"><div class="baking-loader"></div><h1>جارٍ إرسال جدول العجن…</h1><p>يتم تجهيز أمر الطباعة للطابعة A4 في الفرع الرئيسي.</p></section></main>`;
       try {
         const jobRef = hawalliA4PrintJobsRef().push();
+        const approvedAt = Date.now();
+        const employeeName = currentCashier?.name || currentCashier?.fullName || currentCashier?.username || 'غير مسجل';
+        const printHtml = bakingSchedulePrintHtml(bakingScheduleDay);
         const message = `The baking schedule for ${day[2]}, prepared on ${previous[2]}, has been approved and printed. Please collect it from the printer.`;
-        await jobRef.set({ status: 'queued', html: bakingSchedulePrintHtml(bakingScheduleDay), purpose: 'baking-schedule', createdAt: Date.now(), requestedBy: getDeviceId(), requestedBranch: currentBranch || '', scheduleDay: bakingScheduleDay, notify: { phone: '639127105760', text: message } });
-        bakingScheduleDrafts[bakingScheduleDay] = { rows: getBakingRows(bakingScheduleDay), approvedForDate: bakingCycleDate(bakingScheduleDay), approvedAt: Date.now(), approvalJobId: jobRef.key };
+        await jobRef.set({ status: 'queued', html: printHtml, purpose: 'baking-schedule', createdAt: approvedAt, approvedAt, requestedBy: getDeviceId(), requestedByName: employeeName, requestedBranch: currentBranch || '', scheduleDay: bakingScheduleDay, targetDate: bakingCycleDate(bakingScheduleDay), notify: { phone: '639127105760', text: message } });
+        bakingScheduleDrafts[bakingScheduleDay] = { rows: getBakingRows(bakingScheduleDay), approvedForDate: bakingCycleDate(bakingScheduleDay), approvedAt, approvalJobId: jobRef.key };
         await db.ref(`bakingSchedules/drafts/${bakingScheduleDay}`).set(bakingScheduleDrafts[bakingScheduleDay]);
         showBakingApprovalResult();
       } catch (error) { console.error('Unable to approve baking schedule:', error); showToast('تعذر إرسال جدول العجن للطابعة', true); renderBakingSchedulePage(); }
@@ -3214,6 +3255,7 @@ function refreshUI() {
                       <button onclick="toggleCashierActionMenu(event, 'newInvoiceActionMenu')" aria-label="خيارات الفاتورة الجديدة" class="bg-gray-700 text-white px-4 py-3 rounded-lg font-bold text-xl hover:bg-gray-800 transition">⋮</button>
                       <div id="newInvoiceActionMenu" class="cashier-action-menu hidden absolute left-0 mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden z-50">
                         <button onclick="openBakingSchedulePage()" class="block w-full text-right px-4 py-3 bg-red-600 text-white font-bold hover:bg-red-700 border-b border-red-700">جدول العجن</button>
+                        <button onclick="openBakingScheduleHistoryPage()" class="block w-full text-right px-4 py-3 text-slate-800 font-bold hover:bg-slate-100 border-b border-gray-100">طلبات العجن السابقة</button>
                         <button onclick="openOnlineOrderPreparationPicker(); closeCashierActionMenus();" class="block w-full text-right px-4 py-3 text-orange-700 font-bold hover:bg-orange-50">إبلاغ عن طلب أونلاين</button>
                       </div>
                     </div>

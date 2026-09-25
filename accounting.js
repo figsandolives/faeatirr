@@ -126,6 +126,7 @@ const state = {
   },
   onlineOrderFilters: {
     branchId: 'all',
+    catalogType: 'all',
     orderType: 'all',
     dateFrom: '',
     dateTo: '',
@@ -6531,6 +6532,11 @@ function setupOnlineOrdersSection() {
         <input id="onlineOrderDateFrom" class="input" type="date" style="max-width: 180px;" placeholder="${window.i18n.t('filter_from')}" />
         <input id="onlineOrderDateTo" class="input" type="date" style="max-width: 180px;" placeholder="${window.i18n.t('filter_to')}" />
         <select id="onlineOrderBranchFilter" class="input" style="max-width: 180px;"></select>
+        <select id="onlineOrderCatalogFilter" class="input" style="max-width: 180px;">
+          <option value="all">${window.i18n.t('all_catalogs')}</option>
+          <option value="bakery">${window.i18n.t('bakery_orders')}</option>
+          <option value="restaurant">${window.i18n.t('restaurant_orders')}</option>
+        </select>
         <select id="onlineOrderTypeFilter" class="input" style="max-width: 180px;">
           <option value="all">${window.i18n.t('order_types')}</option>
           <option value="delivery">توصيل</option>
@@ -6554,6 +6560,7 @@ function setupOnlineOrdersSection() {
           <th>${window.i18n.t('customer_phone')}</th>
           <th>${window.i18n.t('date_time')}</th>
           <th>${window.i18n.t('branch')}</th>
+          <th>${window.i18n.t('catalog_type')}</th>
           <th>${window.i18n.t('order_type')}</th>
           <th>${window.i18n.t('net_total')}</th>
           <th>${window.i18n.t('delivery_fee')}</th>
@@ -6573,6 +6580,8 @@ function setupOnlineOrdersSection() {
   section.querySelector('#onlineOrderDateFrom').addEventListener('change', (event) => { filters.dateFrom = event.target.value; resetPaginationPage(filters); renderOnlineOrders(); });
   section.querySelector('#onlineOrderDateTo').addEventListener('change', (event) => { filters.dateTo = event.target.value; resetPaginationPage(filters); renderOnlineOrders(); });
   section.querySelector('#onlineOrderBranchFilter').addEventListener('change', (event) => { filters.branchId = event.target.value; resetPaginationPage(filters); renderOnlineOrders(); });
+  section.querySelector('#onlineOrderCatalogFilter').value = filters.catalogType || 'all';
+  section.querySelector('#onlineOrderCatalogFilter').addEventListener('change', (event) => { filters.catalogType = event.target.value; resetPaginationPage(filters); renderOnlineOrders(); });
   section.querySelector('#onlineOrderTypeFilter').addEventListener('change', (event) => { filters.orderType = event.target.value; resetPaginationPage(filters); renderOnlineOrders(); });
   bindDebouncedQueryInput(section.querySelector('#onlineOrderSearch'), (value) => { filters.query = String(value || '').trim().toLowerCase(); resetPaginationPage(filters); renderOnlineOrders(); });
   section.querySelector('#onlineOrdersPageSize').addEventListener('change', (event) => { filters.pageSize = Number(event.target.value || 10); resetPaginationPage(filters); renderOnlineOrders(); });
@@ -6588,9 +6597,23 @@ function getOnlineOrders() {
     .sort((a, b) => getOrderTimestamp(b) - getOrderTimestamp(a));
 }
 
+function getOnlineOrderCatalogType(order) {
+  if (order?.catalogType === 'restaurant') return 'restaurant';
+  // Orders created before `catalogType` was stored used an R-prefixed number
+  // for the restaurant workflow, so keep historical branch reports accurate.
+  return /^R/i.test(String(getOrderInvoiceNumber(order) || '')) ? 'restaurant' : 'bakery';
+}
+
+function getOnlineOrderCatalogLabel(order) {
+  return getOnlineOrderCatalogType(order) === 'restaurant'
+    ? window.i18n.t('restaurant')
+    : window.i18n.t('bakery');
+}
+
 function onlineOrderMatchesFilters(order) {
   const filters = state.onlineOrderFilters;
   if (filters.branchId !== 'all' && String(order.branchId || '') !== filters.branchId) return false;
+  if (filters.catalogType !== 'all' && getOnlineOrderCatalogType(order) !== filters.catalogType) return false;
   if (filters.orderType !== 'all' && String(order.mode || order.orderType || '').toLowerCase() !== filters.orderType) return false;
   const timestamp = getOrderTimestamp(order);
   if (filters.dateFrom && timestamp < new Date(`${filters.dateFrom}T00:00:00`).getTime()) return false;
@@ -6625,7 +6648,7 @@ function renderOnlineOrders() {
   const selectAll = document.getElementById('selectAllOnlineOrders');
   if (!filtered.length) {
     if (selectAll) selectAll.checked = false;
-    table.innerHTML = `<tr><td colspan="13">${window.i18n.t('no_data')}</td></tr>`;
+    table.innerHTML = `<tr><td colspan="14">${window.i18n.t('no_data')}</td></tr>`;
     return;
   }
   pagination.items.forEach((order) => {
@@ -6638,6 +6661,7 @@ function renderOnlineOrders() {
       <td>${escapeHtml(getOrderCustomerPhone(order))}</td>
       <td>${formatDate(getOrderTimestamp(order))}</td>
       <td>${escapeHtml(getOrderBranchName(order))}</td>
+      <td><span class="tag">${escapeHtml(getOnlineOrderCatalogLabel(order))}</span></td>
       <td>${escapeHtml(getOrderTypeLabel(order))}</td>
       <td>${formatMoney(getOrderItemsSubtotal(order))}</td>
       <td>${formatMoney(getOrderDeliveryFee(order))}</td>
@@ -6664,7 +6688,7 @@ function toggleSelectAllOnlineOrders(checked) {
 
 function exportOnlineOrders() {
   const rows = getSelectedOnlineOrders().map((order) => ({
-    [window.i18n.t('invoice_number')]: getOrderInvoiceNumber(order), [window.i18n.t('customer_name')]: getOrderCustomerName(order), [window.i18n.t('delivery_zone')]: getOrderZoneName(order), [window.i18n.t('customer_phone')]: getOrderCustomerPhone(order), [window.i18n.t('date_time')]: formatDate(getOrderTimestamp(order)), [window.i18n.t('branch')]: getOrderBranchName(order), [window.i18n.t('order_type')]: getOrderTypeLabel(order), [window.i18n.t('net_total')]: formatMoney(getOrderItemsSubtotal(order)), [window.i18n.t('delivery_fee')]: formatMoney(getOrderDeliveryFee(order)), [window.i18n.t('grand_total')]: formatMoney(getOrderGrandTotal(order)), [window.i18n.t('payment_method')]: getOrderPaymentLabel(order)
+    [window.i18n.t('invoice_number')]: getOrderInvoiceNumber(order), [window.i18n.t('customer_name')]: getOrderCustomerName(order), [window.i18n.t('delivery_zone')]: getOrderZoneName(order), [window.i18n.t('customer_phone')]: getOrderCustomerPhone(order), [window.i18n.t('date_time')]: formatDate(getOrderTimestamp(order)), [window.i18n.t('branch')]: getOrderBranchName(order), [window.i18n.t('catalog_type')]: getOnlineOrderCatalogLabel(order), [window.i18n.t('order_type')]: getOrderTypeLabel(order), [window.i18n.t('net_total')]: formatMoney(getOrderItemsSubtotal(order)), [window.i18n.t('delivery_fee')]: formatMoney(getOrderDeliveryFee(order)), [window.i18n.t('grand_total')]: formatMoney(getOrderGrandTotal(order)), [window.i18n.t('payment_method')]: getOrderPaymentLabel(order)
   }));
   if (rows.length) exportToExcel(rows, 'online-orders-report.xlsx');
 }
@@ -6673,7 +6697,7 @@ function printOnlineOrders() {
   const orders = getSelectedOnlineOrders();
   if (!orders.length) return;
   const totals = orders.reduce((sum, order) => ({ net: sum.net + getOrderItemsSubtotal(order), delivery: sum.delivery + getOrderDeliveryFee(order), total: sum.total + getOrderGrandTotal(order) }), { net: 0, delivery: 0, total: 0 });
-  printA4Report(window.i18n.t('online_orders'), [{ label: window.i18n.t('filter_from'), value: state.onlineOrderFilters.dateFrom || '-' }, { label: window.i18n.t('filter_to'), value: state.onlineOrderFilters.dateTo || '-' }], [window.i18n.t('invoice_number'), window.i18n.t('customer_name'), window.i18n.t('customer_phone'), window.i18n.t('delivery_zone'), window.i18n.t('branch'), window.i18n.t('order_type'), window.i18n.t('net_total'), window.i18n.t('delivery_fee'), window.i18n.t('grand_total'), window.i18n.t('date_time')], orders.map((order) => [getOrderInvoiceNumber(order), getOrderCustomerName(order), getOrderCustomerPhone(order), getOrderZoneName(order), getOrderBranchName(order), getOrderTypeLabel(order), formatMoney(getOrderItemsSubtotal(order)), formatMoney(getOrderDeliveryFee(order)), formatMoney(getOrderGrandTotal(order)), formatDate(getOrderTimestamp(order))]), [{ label: window.i18n.t('net_total'), value: formatMoney(totals.net) }, { label: window.i18n.t('delivery_fee'), value: formatMoney(totals.delivery) }, { label: window.i18n.t('grand_total'), value: formatMoney(totals.total) }]);
+  printA4Report(window.i18n.t('online_orders'), [{ label: window.i18n.t('filter_from'), value: state.onlineOrderFilters.dateFrom || '-' }, { label: window.i18n.t('filter_to'), value: state.onlineOrderFilters.dateTo || '-' }, { label: window.i18n.t('catalog_type'), value: state.onlineOrderFilters.catalogType === 'all' ? window.i18n.t('all_catalogs') : (state.onlineOrderFilters.catalogType === 'restaurant' ? window.i18n.t('restaurant') : window.i18n.t('bakery')) }], [window.i18n.t('invoice_number'), window.i18n.t('customer_name'), window.i18n.t('customer_phone'), window.i18n.t('delivery_zone'), window.i18n.t('branch'), window.i18n.t('catalog_type'), window.i18n.t('order_type'), window.i18n.t('net_total'), window.i18n.t('delivery_fee'), window.i18n.t('grand_total'), window.i18n.t('date_time')], orders.map((order) => [getOrderInvoiceNumber(order), getOrderCustomerName(order), getOrderCustomerPhone(order), getOrderZoneName(order), getOrderBranchName(order), getOnlineOrderCatalogLabel(order), getOrderTypeLabel(order), formatMoney(getOrderItemsSubtotal(order)), formatMoney(getOrderDeliveryFee(order)), formatMoney(getOrderGrandTotal(order)), formatDate(getOrderTimestamp(order))]), [{ label: window.i18n.t('net_total'), value: formatMoney(totals.net) }, { label: window.i18n.t('delivery_fee'), value: formatMoney(totals.delivery) }, { label: window.i18n.t('grand_total'), value: formatMoney(totals.total) }]);
 }
 
 function setupCustomersSection() {
@@ -12910,7 +12934,13 @@ function getOrderCustomerPhone(order) {
 
 function getOrderBranchName(order) {
   const branches = state.cache.branches || {};
-  return order?.branchName || order?.branch || getLocalizedName(branches[order?.branchId]) || order?.branchId || '-';
+  const branchId = String(order?.branchId || '');
+  const platformBranchNames = {
+    hawalli: 'فرع حولي',
+    yarmouk: 'فرع اليرموك',
+    abu: 'فرع أبو الحصانية'
+  };
+  return order?.branchName || order?.branch || getLocalizedName(branches[branchId]) || platformBranchNames[branchId] || branchId || '-';
 }
 
 function getOrderCashierName(order) {

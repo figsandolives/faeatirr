@@ -1606,81 +1606,22 @@
       return db.ref(`${INVOICE_SEQUENCE_ROOT}/${branch}`);
     }
 
-    // The legacy counter is the single atomic allocator because older cashier
-    // versions still use it. V2 only stores stable order assignments. Seeding the
-    // allocator from both encoded/unencoded V2 keys prevents a stale sequence from
-    // ever moving invoice numbers backwards during migrations or cached releases.
-    async function generateInvoiceNumber(branch, orderId = '') {
-      const sequenceRef = getInvoiceSequenceRef(branch);
-      const unencodedSequenceRef = getUnencodedInvoiceSequenceRef(branch);
-      const legacyCounterRef = getLegacyInvoiceCounterRef(branch);
-      const [sequenceSnapshot, unencodedSequenceSnapshot] = await Promise.all([
-        sequenceRef.once('value'),
-        unencodedSequenceRef.once('value')
-      ]);
-      const sequence = sequenceSnapshot.val() || {};
-      const unencodedSequence = unencodedSequenceSnapshot.val() || {};
-      const existingAssignment = Number(sequence.assignments?.[orderId]) ||
-        Number(unencodedSequence.assignments?.[orderId]) || 0;
-      if (orderId && existingAssignment > 0) {
-        return String(existingAssignment).padStart(getInvoicePaddingLength(branch), '0');
-      }
-
-      const highestKnownSequence = Math.max(
-        Number(sequence.counter) || 0,
-        Number(unencodedSequence.counter) || 0
-      );
-      const counterResult = await legacyCounterRef.transaction(current =>
-        Math.max(Number(current) || 0, highestKnownSequence) + 1
-      );
-      if (!counterResult.committed) throw new Error('تعذر حجز رقم الفاتورة');
-      const allocatedNumber = Number(counterResult.snapshot.val());
-      if (!allocatedNumber) throw new Error('تعذر قراءة رقم الفاتورة المحجوز');
-
-      const sequenceResult = await sequenceRef.transaction(current => {
-        const state = current && typeof current === 'object' ? current : {};
-        state.assignments = state.assignments && typeof state.assignments === 'object' ? state.assignments : {};
-        if (orderId && Number(state.assignments[orderId]) > 0) return state;
-        state.counter = Math.max(Number(state.counter) || 0, allocatedNumber);
-        if (orderId) state.assignments[orderId] = allocatedNumber;
-        state.updatedAt = Date.now();
-        return state;
-      });
-      if (!sequenceResult.committed) throw new Error('تعذر حفظ رقم الفاتورة');
-      const savedSequence = sequenceResult.snapshot.val() || {};
-      const assignedNumber = orderId
-        ? Number(savedSequence.assignments?.[orderId])
-        : allocatedNumber;
-      if (!assignedNumber) throw new Error('تعذر قراءة رقم الفاتورة المحجوز');
-      return String(assignedNumber).padStart(getInvoicePaddingLength(branch), '0');
-    }
-
     async function normalizeWhatsappInvoiceNumber(order) {
-      if (!order?.id || order.source !== 'whatsapp-ai' || !order.branch) return order;
-      const sequenceRef = getInvoiceSequenceRef(order.branch);
-      const sequenceSnapshot = await sequenceRef.once('value');
-      const sequence = sequenceSnapshot.val() || {};
-      const currentNumber = Number(order.invoiceNumber);
-      const assignedNumber = Number(sequence.assignments?.[order.id]);
-      const stableCounter = Number(sequence.counter) || 0;
-      if (!assignedNumber && (!currentNumber || currentNumber <= stableCounter)) return order;
-      if (assignedNumber && currentNumber === assignedNumber && order.invoiceSequenceVersion === 'v2') return order;
-
-      const stableInvoiceNumber = await generateInvoiceNumber(order.branch, order.id);
-      const updates = {
-        invoiceNumber: stableInvoiceNumber,
-        invoiceSequenceVersion: 'v2',
-        invoiceNumberBeforeNormalization: String(order.invoiceNumber || ''),
-        invoiceNumberNormalizedAt: Date.now()
-      };
-      await db.ref(`orders/${order.id}`).update(updates);
-      Object.assign(order, updates);
+      if (!order?.id || order.source !== 'whatsapp-ai' || !order.branch || InvoiceCancellation.isCancelled(order)) return order;
+      const snapshot = await getInvoiceSequenceRef(order.branch).once('value');
+      const sequence = snapshot.val() || {};
+      const assigned = Number(sequence.assignments?.[order.id]);
+      const current = Number(order.invoiceNumber);
+      if (!assigned && (!current || current <= (Number(sequence.counter) || 0))) return order;
+      if (assigned === current) return order;
+      const saved = await InvoiceSave.commit(db, { id: order.id, order }, { normalize: true });
+      Object.assign(order, saved);
       return order;
     }
 
     async function normalizePendingWhatsappInvoiceNumbers(orders = allOrders) {
       const whatsappOrders = (Array.isArray(orders) ? orders : [])
-        .filter(order => order?.source === 'whatsapp-ai')
+        .filter(order => order?.source === 'whatsapp-ai' && !InvoiceCancellation.isCancelled(order))
         .sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
       for (const order of whatsappOrders) {
         await normalizeWhatsappInvoiceNumber(order);
@@ -2221,14 +2162,13 @@ function refreshUI() {
       }
     }
 
-    async function deleteOrder(id) {
+    async function cancelOrderInvoice(id) {
       try {
-        await db.ref(`orders/${id}`).remove();
+        await InvoiceCancellation.cancel(db, id, currentCashier);
         await loadData();
         return true;
       } catch (error) {
-        console.error('Error deleting order:', error);
-        showToast('خطأ في حذف الطلب', true);
+        showToast(error.message || 'تعذر إلغاء الفاتورة', true);
         return false;
       }
     }
@@ -2500,6 +2440,7 @@ function refreshUI() {
         currentDailySession = null;
       }
       renderCashier();
+      pendingInvoiceBlocksNewSale();
       setupRealtimeListeners();
 	      // يظهر شريط طلبات الموقع فور دخول كاشير الفرع الرئيسي، دون الحاجة
 	      // إلى فتح نافذة إبلاغ الطلبات أولاً.
@@ -2915,28 +2856,41 @@ function refreshUI() {
       if (!missing.length) { showToast('كل الأسماء مترجمة بالفعل'); return; }
       bakingTranslationBusy = true; renderBakingSchedulePage();
       try {
-        // Uses the same private, on-device Ollama translation service as Rakaez.
-        // The public tunnel only forwards the request to the user's local model;
-        // no Google Translate or third-party AI key is used here.
+        // The VPS routes translation through n8n to its own Ollama instance.
+        // This remains available when the cashier owner's computer is offline.
         const items = missing.map((row, index) => ({ id: String(index), text: String(row.nameAr).trim() }));
-        let translatedByLocalAI = true;
+        let translatedByServerAI = true;
         try {
-          const response = await fetch('https://curly-frog-42.loca.lt/api/chat', {
-            method: 'POST', headers: { 'content-type': 'application/json', 'bypass-tunnel-reminder': 'true' },
-            body: JSON.stringify({ messages: [
-              { role: 'system', content: 'Translate Arabic bakery product names into clear, natural English. Return JSON only with this exact shape: {"translations":[{"id":"item id","translation":"English translation"}]}. Return exactly one non-empty translation for every supplied item. Preserve every id exactly. Do not add any text outside the JSON.' },
-              { role: 'user', content: JSON.stringify({ items }) }
-            ] })
-          });
-          if (!response.ok) throw new Error('Local AI translation service unavailable');
-          const payload = await response.json(); let result = payload;
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 300000);
+          let payload;
+          try {
+            const response = await fetch('https://162-35-27-249.sslip.io/api/chat', {
+              method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
+              body: JSON.stringify({
+                model: 'qwen3.5:9b', stream: false, think: false, format: 'json',
+                options: { temperature: 0.05, num_ctx: 4096, num_predict: Math.min(2400, Math.max(240, items.length * 120)) },
+                messages: [
+                  { role: 'system', content: 'Translate Arabic bakery product names into clear, natural English. Return JSON only with this exact shape: {"translations":[{"id":"item id","translation":"English translation"}]}. Return exactly one non-empty translation for every supplied item. Preserve every id exactly. Do not add any text outside the JSON.' },
+                  { role: 'user', content: JSON.stringify({ items }) }
+                ]
+              })
+            });
+            if (!response.ok) throw new Error('Server AI translation service unavailable');
+            payload = await response.json();
+            if (payload?.error || payload?.ok === false) throw new Error('Server AI translation failed');
+          } finally {
+            clearTimeout(timeout);
+          }
+          let result = payload;
           if (typeof payload?.message?.content === 'string') result = JSON.parse(payload.message.content);
           const translations = Array.isArray(result?.translations) ? result.translations : [];
-          const byId = new Map(translations.map((item, index) => [String(item?.id ?? index), String(item?.translation || '').trim()]));
-          missing.forEach((row, index) => { const translation = byId.get(String(index)); if (!translation) throw new Error('A bakery item was not translated'); row.nameEn = translation; });
-        } catch (localAIError) {
-          // Keep remote branches working when this computer's private tunnel is offline.
-          translatedByLocalAI = false;
+          const byId = new Map(translations.map(item => [String(item?.id ?? ''), typeof item?.translation === 'string' ? item.translation.trim() : '']));
+          if (items.some(item => !byId.get(item.id))) throw new Error('A bakery item was not translated');
+          missing.forEach((row, index) => { row.nameEn = byId.get(String(index)); });
+        } catch (serverAIError) {
+          // Preserve the existing fallback for temporary server failures.
+          translatedByServerAI = false;
           await Promise.all(missing.map(async row => {
             const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ar&tl=en&dt=t&q=${encodeURIComponent(row.nameAr)}`;
             const response = await fetch(url);
@@ -2948,8 +2902,8 @@ function refreshUI() {
           }));
         }
         bakingScheduleDrafts[bakingScheduleDay] = { rows }; queueBakingScheduleSave(bakingScheduleDay);
-        showToast(`تمت ترجمة ${missing.length} خانة${translatedByLocalAI ? '' : ' (بالخدمة الاحتياطية)'}`);
-      } catch (error) { console.error('Baking schedule translation failed:', error); showToast('تعذرت الترجمة بالذكاء الاصطناعي المحلي، أعد المحاولة أو اكتب الترجمة يدوياً', true); }
+        showToast(`تمت ترجمة ${missing.length} خانة${translatedByServerAI ? '' : ' (بالخدمة الاحتياطية)'}`);
+      } catch (error) { console.error('Baking schedule translation failed:', error); showToast('تعذرت الترجمة من الخادم، أعد المحاولة أو اكتب الترجمة يدوياً', true); }
       finally { bakingTranslationBusy = false; renderBakingSchedulePage(); }
     }
     function addBakingRow(day, afterId = '', section = 'breads') {
@@ -3306,7 +3260,7 @@ function refreshUI() {
                     <tbody>
   ${cashierPagedOrders.map(order => `
     <tr>
-      <td>${order.invoiceNumber}${whatsappPendingBadge(order)}</td>
+      <td>${order.invoiceNumber}${InvoiceCancellation.badge(order)}${whatsappPendingBadge(order)}</td>
       <td>${order.customerName}</td>
       <td>${formatDate(order.timestamp)} ${formatTime(order.timestamp)}</td>
       <td>${getOrderGrandTotal(order).toFixed(3)} ${cashierT('kd')}</td>
@@ -3932,6 +3886,7 @@ function refreshUI() {
     }
 
     function startTableInvoice(tableId) {
+      if (invoiceSaveInProgress || pendingInvoiceBlocksNewSale()) return;
       const table = getCashierTableById(tableId);
       if (!table) {
         showToast('الطاولة غير موجودة', true);
@@ -3950,6 +3905,7 @@ function refreshUI() {
     }
 
     function continueTableInvoice(tableId) {
+      if (invoiceSaveInProgress || pendingInvoiceBlocksNewSale()) return;
       const table = getCashierTableById(tableId);
       if (!table) {
         showToast('الطاولة غير موجودة', true);
@@ -3973,6 +3929,7 @@ function refreshUI() {
     }
 
     function showNewInvoicePage() {
+      if (invoiceSaveInProgress || pendingInvoiceBlocksNewSale()) return;
       currentOrder = createEmptyCurrentOrder({ orderType: null });
 
       showInvoiceCustomerSelection(true);
@@ -4035,6 +3992,7 @@ function refreshUI() {
     }
     
     async function closeInvoicePage(skipTableDraft = false) {
+      if (invoiceSaveInProgress && !skipTableDraft) return;
       if (!skipTableDraft) {
         try {
           await saveCurrentTableDraft();
@@ -4204,9 +4162,30 @@ function refreshUI() {
       const [hourPart, minutePart = '00'] = timeValue.split(':');
       const hour = parseInt(hourPart, 10);
       if (isNaN(hour)) return timeValue;
-      const period = hour >= 12 ? 'مساءً' : 'صباحاً';
+      // الساعة 12 هي وقت الظهر، وليست صباحاً أو مساءً.
+      const period = hour === 12 ? 'ظهراً' : (hour > 12 ? 'مساءً' : 'صباحاً');
       const displayHour = hour % 12 || 12;
       return `${displayHour}:${minutePart} ${period}`;
+    }
+
+    function keepDeliveryNoonAtTwelve(input) {
+      if (!input?.value) return;
+      const [hourPart, minutePart = '00'] = input.value.split(':');
+      // في حقل الوقت الأصلي تمثّل 00:xx الساعة 12 صباحاً. لا نسمح بها
+      // لوقت التوصيل حتى تبقى الساعة 12 دائماً ظهراً إلى أن يغيّر المستخدم الساعة.
+      if (parseInt(hourPart, 10) === 0) input.value = `12:${minutePart}`;
+    }
+
+    function bindDeliveryNoonRule(inputId, afterChange) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      const enforceNoon = () => {
+        keepDeliveryNoonAtTwelve(input);
+        afterChange?.();
+      };
+      input.addEventListener('input', enforceNoon);
+      input.addEventListener('change', enforceNoon);
+      enforceNoon();
     }
 
     function getDeliveryAreaFromAddress(address) {
@@ -4675,6 +4654,8 @@ function showNumericKeypadForInvoice(index, inputField) {
       ['deliveryDateInput', 'deliveryFromInput', 'deliveryToInput'].forEach(id => {
         document.getElementById(id)?.addEventListener('input', updateDeliveryScheduleText);
       });
+      bindDeliveryNoonRule('deliveryFromInput', updateDeliveryScheduleText);
+      bindDeliveryNoonRule('deliveryToInput', updateDeliveryScheduleText);
       if (currentOrder.orderType) selectOrderType(currentOrder.orderType);
       if (currentOrder.orderType === 'delivery') selectDeliveryTiming(currentOrder.deliveryTimingType || 'within2');
     }
@@ -5502,80 +5483,161 @@ function showNumericKeypadForInvoice(index, inputField) {
       return (await saveCustomer(customer)) ? customer : null;
     }
     
-    async function printAndSaveInvoice() {
-      // Invoice numbering follows the cashier branch; pickup branch is saved separately.
-      await normalizePendingWhatsappInvoiceNumbers(allOrders);
-      const orderId = generateId();
-      const invoiceNumber = await generateInvoiceNumber(currentBranch, orderId);
-      const timestamp = Date.now();
-      
-      // Clean items to ensure all fields have valid values
-      const cleanedItems = currentOrder.items.map(item => ({
-        productId: item.productId || '',
-        productName: item.productName || '',
-        productNameEn: item.productNameEn || '', 
-        price: item.price || 0,
-        quantity: item.quantity || 0,
-        total: item.total || 0,
-        unit: item.unit || '',
-        notes: item.notes || ''
-      }));
-      
-      const order = {
-        invoiceNumber,
-        invoiceSequenceVersion: 'v2',
-        timestamp,
-        createdAt: timestamp,
-        cashier: currentCashier.name || '',
-        cashierCode: currentCashier.code || '',
-        branch: currentBranch || '',
-        branchId: currentOrder.tableBranchId || getCurrentCashierBranchId() || '',
-        dailySessionId: currentBranch === 'اليرموك' && currentDailySession ? currentDailySession.id : '',
-        customerName: currentOrder.customer.name || '',
-        phoneNumber: currentOrder.customer.phone || '',
-        orderType: currentOrder.orderType || '',
-        paymentMethod: currentOrder.paymentMethod || '',
-        pickupBranch: currentOrder.pickupBranch || '',
-        address: currentOrder.orderType === 'delivery' && currentOrder.selectedAddress
-          ? `${currentOrder.selectedAddress.area || ''}${currentOrder.selectedAddress.details ? ` - ${currentOrder.selectedAddress.details}` : ''}`.trim()
-          : '',
-        deliveryDate: currentOrder.deliveryDate || '',
-        // A future delivery is shown in accounting and inventory on its
-        // delivery date, not on the date the cashier created it.
-        accountingDate: getAccountingDateForNewOrder(currentOrder.deliveryDate),
-        isInvoiceDeferred: Boolean(getAccountingDateForNewOrder(currentOrder.deliveryDate)),
-        deliveryTimeFrom: currentOrder.deliveryTimeFrom || '',
-        deliveryTimeTo: currentOrder.deliveryTimeTo || '',
-        items: cleanedItems,
-        deliveryPrice: currentOrder.deliveryPrice || 0,
-        cashReceived: currentOrder.cashReceived || 0,
-        cashChange: currentOrder.cashChange || 0,
-        notes: currentOrder.notes || '',
-        tableId: currentOrder.tableId || '',
-        tableNumber: currentOrder.tableNumber || '',
-        tableBranchId: currentOrder.tableBranchId || '',
-        tableLocation: currentOrder.tableLocation || '',
-        tableOpenedAt: currentOrder.tableOpenedAt || '',
-        tableClosedAt: currentOrder.tableNumber ? timestamp : '',
-        total: currentOrder.items.reduce((sum, item) => sum + item.total, 0) + (currentOrder.deliveryPrice || 0)
-      };
-      
+    let invoiceSaveInProgress = false;
+
+    function getPendingInvoiceStorageKey() {
+      if (!currentBranch || !currentCashier?.code) throw new Error('يجب تسجيل الدخول بحساب الكاشير أولاً');
+      return InvoiceSave.pendingKey(currentBranch, currentCashier.code);
+    }
+
+    function pendingInvoiceBlocksNewSale() {
       try {
-        await db.ref(`orders/${orderId}`).set({ ...order, id: orderId });
-        await clearTableDraft(currentOrder);
-        await loadData();
-        
-        await closeInvoicePage(true);
-        showThermalInvoice(order);
-        // لا ننتظر الإرسال حتى لا تتعطل شاشة الكاشير أو الطباعة عند تأخر واتساب.
-        sendCashierInvoiceToWhatsApp(order);
-        showToast('تم حفظ الفاتورة بنجاح');
+        const pending = InvoiceSave.recall(localStorage, getPendingInvoiceStorageKey());
+        if (!pending) return false;
+        showPendingInvoiceRecovery(pending);
+        return true;
       } catch (error) {
-        console.error('Error saving order:', error);
-        showToast('خطأ في حفظ الفاتورة', true);
+        showToast(error.message, true);
+        return true;
       }
     }
-    
+
+    function showPendingInvoiceRecovery(pending) {
+      if (document.getElementById('pendingInvoiceRecovery')) return;
+      const modal = document.createElement('div');
+      modal.id = 'pendingInvoiceRecovery';
+      modal.className = 'modal-overlay';
+      modal.innerHTML = `<div class="modal-content p-6 w-full max-w-lg" dir="rtl">
+        <h2 class="text-xl font-bold mb-4">استكمال محاولة البيع السابقة</h2>
+        <p class="mb-3">توجد محاولة لم يكتمل تأكيد حفظها. سنراجع نفس المحاولة ونستكملها دون إنشاء فاتورة ثانية.</p>
+        <p class="mb-4">العميل: ${escapeHtml(pending.order.customerName || '')} — المبلغ: ${escapeHtml(String(pending.order.total))} د.ك</p>
+        <button onclick="resumePendingInvoiceSave()" class="w-full bg-blue-600 text-white p-3 rounded font-bold">تحقق واستكمل نفس الفاتورة</button>
+        <button onclick="this.closest('.modal-overlay').remove()" class="w-full mt-3 bg-gray-200 p-3 rounded">إغلاق</button>
+      </div>`;
+      document.body.appendChild(modal);
+    }
+
+    async function resumePendingInvoiceSave() {
+      if (invoiceSaveInProgress) return;
+      try {
+        const pending = InvoiceSave.recall(localStorage, getPendingInvoiceStorageKey());
+        if (!pending) return;
+        currentOrder = createEmptyCurrentOrder({ ...pending.draft, invoiceSaveAttemptId: pending.id });
+        document.getElementById('pendingInvoiceRecovery')?.remove();
+        await printAndSaveInvoice();
+      } catch (error) { showToast(error.message, true); }
+    }
+
+    function setInvoiceSaveBusy(busy) {
+      document.getElementById('invoiceSaveBusy')?.remove();
+      if (!busy) return;
+      const modal = document.createElement('div');
+      modal.id = 'invoiceSaveBusy';
+      modal.className = 'modal-overlay';
+      modal.style.zIndex = '100000';
+      modal.innerHTML = '<div class="modal-content p-8 text-center" dir="rtl"><h2 class="text-xl font-bold">جارٍ حفظ الفاتورة…</h2><p class="mt-3">ننتظر تأكيد قاعدة البيانات. عند انقطاع الاتصال ستبقى محاولة البيع محفوظة للاستكمال.</p></div>';
+      document.body.appendChild(modal);
+    }
+
+    async function printAndSaveInvoice() {
+      if (invoiceSaveInProgress) return;
+      invoiceSaveInProgress = true;
+      let pending = null;
+      let key = '';
+      let savedOrder = null;
+      try {
+        key = getPendingInvoiceStorageKey();
+        pending = InvoiceSave.recall(localStorage, key, currentOrder.invoiceSaveAttemptId || '');
+        if (pending && currentOrder.invoiceSaveAttemptId !== pending.id) {
+          showPendingInvoiceRecovery(pending);
+          return;
+        }
+        if (!pending) {
+          currentOrder.invoiceSaveAttemptId = currentOrder.invoiceSaveAttemptId || generateId();
+          const orderId = currentOrder.invoiceSaveAttemptId;
+          const timestamp = Date.now();
+          const cleanedItems = currentOrder.items.map(item => ({
+            productId: item.productId || '', productName: item.productName || '',
+            productNameEn: item.productNameEn || '', price: item.price || 0,
+            quantity: item.quantity || 0, total: item.total || 0,
+            unit: item.unit || '', notes: item.notes || ''
+          }));
+          const order = {
+            timestamp,
+            createdAt: timestamp,
+            cashier: currentCashier.name || '',
+            cashierCode: currentCashier.code || '',
+            branch: currentBranch || '',
+            branchId: currentOrder.tableBranchId || getCurrentCashierBranchId() || '',
+            dailySessionId: currentBranch === 'اليرموك' && currentDailySession ? currentDailySession.id : '',
+            customerName: currentOrder.customer.name || '',
+            phoneNumber: currentOrder.customer.phone || '',
+            orderType: currentOrder.orderType || '',
+            paymentMethod: currentOrder.paymentMethod || '',
+            pickupBranch: currentOrder.pickupBranch || '',
+            address: currentOrder.orderType === 'delivery' && currentOrder.selectedAddress
+              ? `${currentOrder.selectedAddress.area || ''}${currentOrder.selectedAddress.details ? ` - ${currentOrder.selectedAddress.details}` : ''}`.trim()
+              : '',
+            deliveryDate: currentOrder.deliveryDate || '',
+            // A future delivery is shown in accounting and inventory on its
+            // delivery date, not on the date the cashier created it.
+            accountingDate: getAccountingDateForNewOrder(currentOrder.deliveryDate),
+            isInvoiceDeferred: Boolean(getAccountingDateForNewOrder(currentOrder.deliveryDate)),
+            deliveryTimeFrom: currentOrder.deliveryTimeFrom || '',
+            deliveryTimeTo: currentOrder.deliveryTimeTo || '',
+            items: cleanedItems,
+            deliveryPrice: currentOrder.deliveryPrice || 0,
+            cashReceived: currentOrder.cashReceived || 0,
+            cashChange: currentOrder.cashChange || 0,
+            notes: currentOrder.notes || '',
+            tableId: currentOrder.tableId || '',
+            tableNumber: currentOrder.tableNumber || '',
+            tableBranchId: currentOrder.tableBranchId || '',
+            tableLocation: currentOrder.tableLocation || '',
+            tableOpenedAt: currentOrder.tableOpenedAt || '',
+            tableClosedAt: currentOrder.tableNumber ? timestamp : '',
+            total: currentOrder.items.reduce((sum, item) => sum + item.total, 0) + (currentOrder.deliveryPrice || 0)
+          };
+      
+          pending = InvoiceSave.prepare(order, orderId, currentOrder);
+          InvoiceSave.remember(localStorage, key, pending);
+        }
+        setInvoiceSaveBusy(true);
+        pending.history = [...(pending.history || []), {event: 'started', timestamp: Date.now()}].slice(-30);
+        InvoiceSave.remember(localStorage, key, pending);
+        void InvoiceSave.log(db, pending.id, pending.order, 'started');
+        savedOrder = await InvoiceSave.commit(db, pending);
+        void InvoiceSave.log(db, pending.id, pending.order, 'confirmed');
+        // A later UI, draft cleanup or WhatsApp error must never report that this sale failed.
+        pending.confirmedInvoiceNumber = savedOrder.invoiceNumber;
+        try { InvoiceSave.remember(localStorage, key, pending); } catch (error) { console.error(error); }
+        try { await loadData(); } catch (error) { console.error('Saved invoice; refresh failed:', error); }
+        // Remove the pending attempt only after the database acknowledged the save.
+        InvoiceSave.forget(localStorage, key, pending.id);
+        await closeInvoicePage(true);
+        if (InvoiceCancellation.isCancelled(savedOrder)) {
+          showToast(`الفاتورة #${savedOrder.invoiceNumber} محفوظة سابقاً وملغية؛ لم ننشئ فاتورة بديلة`, true);
+          return;
+        }
+        showThermalInvoice(savedOrder);
+        void sendCashierInvoiceToWhatsApp(savedOrder).catch(error => console.error('Saved invoice; WhatsApp failed:', error));
+        showToast(`تم تأكيد حفظ الفاتورة #${savedOrder.invoiceNumber}`);
+      } catch (error) {
+        console.error('Invoice save attempt:', error);
+        if (pending) {
+          pending.history = [...(pending.history || []), {event: savedOrder ? 'display-error' : 'failed', timestamp: Date.now(), error: String(error.message || error)}].slice(-30);
+          try { InvoiceSave.remember(localStorage, key, pending); } catch (storageError) { console.error(storageError); }
+          void InvoiceSave.log(db, pending.id, pending.order, savedOrder ? 'display-error' : 'failed', error.message || error);
+        }
+        showToast(savedOrder
+          ? `الفاتورة #${savedOrder.invoiceNumber} محفوظة؛ تعذر إكمال العرض. استكمل نفس المحاولة أو أعد طباعة الفاتورة من القائمة.`
+          : (pending ? 'لم يتأكد حفظ الفاتورة. اضغط فاتورة جديدة للتحقق واستكمال نفس المحاولة. ' : 'تعذر تجهيز الفاتورة للحفظ. ') + (error.message || ''), true);
+      } finally {
+        invoiceSaveInProgress = false;
+        setInvoiceSaveBusy(false);
+      }
+    }
+
     function getInvoiceBusinessHeader(order = {}) {
       const branchIdentity = [
         order.branch,
@@ -5637,7 +5699,7 @@ function showNumericKeypadForInvoice(index, inputField) {
         
         <div style="margin-bottom: 8px; border-bottom: 1px dashed #ccc; padding-bottom: 5px; font-size: 11px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-            <span>رقم الفاتورة: <strong>#${order.invoiceNumber}</strong></span>
+            <span>رقم الفاتورة: <strong>#${order.invoiceNumber}</strong>${InvoiceCancellation.badge(order)}</span>
             <span>التاريخ: ${formatDate(order.timestamp)}</span>
           </div>
           <div style="display: flex; justify-content: space-between;">
@@ -5734,7 +5796,7 @@ function showNumericKeypadForInvoice(index, inputField) {
 
         <div style="text-align: center; margin-top: 15px; border-top: 1px dashed #ccc; padding-top: 10px;">
           <div style="font-size: 11px; font-weight: bold;">شكراً لزيارتكم!</div>
-          <div style="font-size: 9px; color: #666; margin-top: 3px;">صحتك أغلى ما تملك،، فتناول شيئاً صحياً.</div>
+          <div style="font-size: 9px; color: #666; margin-top: 3px;">صحتك أغلى ما تملك،، فتناول طعاماً صحياً.</div>
         </div>
         </div>
       </div>
@@ -6229,14 +6291,16 @@ function showNumericKeypadForInvoice(index, inputField) {
     }
 
     function buildDailyBalanceSummary(session, orders, payments) {
+      const cancelledOrders = orders.filter(InvoiceCancellation.isCancelled);
+      const activeOrders = orders.filter(order => !InvoiceCancellation.isCancelled(order));
       const totals = { cash: 0, online: 0, knet: 0 };
-      orders.forEach(order => {
+      activeOrders.forEach(order => {
         const total = parseFloat(order.total) || 0;
         if (order.paymentMethod === 'cash') totals.cash += total;
         if (order.paymentMethod === 'online') totals.online += total;
         if (order.paymentMethod === 'knet') totals.knet += total;
       });
-      const deliveryOrders = orders.filter(order => order.orderType === 'delivery');
+      const deliveryOrders = activeOrders.filter(order => order.orderType === 'delivery');
       const deliveredDeliveryOrders = deliveryOrders.filter(order => (order.courierName || '').trim());
       const pendingDeliveryOrders = deliveryOrders.filter(order => !(order.courierName || '').trim());
       const sessionDate = getLocalDateValueFromTimestamp(session?.openedAt || Date.now());
@@ -6246,6 +6310,7 @@ function showNumericKeypadForInvoice(index, inputField) {
         orders,
         deliveryOrders,
         deliveredDeliveryOrders,
+        cancelledOrders,
         sameDayPendingDeliveryOrders,
         futurePendingDeliveryOrders,
         totals,
@@ -6354,7 +6419,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       const paymentsTotal = summary.payments.reduce((sum, payment) => sum + (parseFloat(payment.amount) || 0), 0);
       const deliveryRows = summary.deliveredDeliveryOrders.map(order => `
         <tr>
-          <td>${order.invoiceNumber || '-'}</td>
+          <td>${order.invoiceNumber || '-'}${InvoiceCancellation.badge(order)}</td>
           <td>${getPaymentMethodLabel(order.paymentMethod, false)}</td>
           <td>${formatNumberWithThreeDecimals(order.total)}</td>
           <td>${formatNumberWithThreeDecimals(order.deliveryPrice || order.deliveryFee || 0)}</td>
@@ -6363,7 +6428,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       `).join('');
       const sameDayPendingRows = summary.sameDayPendingDeliveryOrders.map(order => `
         <tr>
-          <td>${order.invoiceNumber || '-'}</td>
+          <td>${order.invoiceNumber || '-'}${InvoiceCancellation.badge(order)}</td>
           <td>${getPaymentMethodLabel(order.paymentMethod, false)}</td>
           <td>${formatNumberWithThreeDecimals(order.total)}</td>
           <td>${formatNumberWithThreeDecimals(order.deliveryPrice || order.deliveryFee || 0)}</td>
@@ -6372,7 +6437,7 @@ function showNumericKeypadForInvoice(index, inputField) {
       `).join('');
       const futurePendingRows = summary.futurePendingDeliveryOrders.map(order => `
         <tr>
-          <td>${order.invoiceNumber || '-'}</td>
+          <td>${order.invoiceNumber || '-'}${InvoiceCancellation.badge(order)}</td>
           <td>${getPaymentMethodLabel(order.paymentMethod, false)}</td>
           <td>${formatNumberWithThreeDecimals(order.total)}</td>
           <td>${getDeliveryDateAndTimeText(order)}</td>
@@ -6431,6 +6496,7 @@ function showNumericKeypadForInvoice(index, inputField) {
           <div class="row"><span>رقم أول فاتورة:</span><span class="bold">${summary.firstInvoice}</span></div>
           <div class="row"><span>رقم آخر فاتورة:</span><span class="bold">${summary.lastInvoice}</span></div>
 
+          ${(summary.cancelledOrders || []).length ? `<h2>الفواتير الملغية</h2>${summary.cancelledOrders.map(order => `<div>#${escapeHtml(order.invoiceNumber)}${InvoiceCancellation.badge(order)}</div>`).join('')}` : ''}
           <h2>فواتير التوصيل المسلمة للمندوب</h2>
           <table>
             <thead>
@@ -7389,7 +7455,7 @@ function renderAccountingContent(section) {
     function buildOrderTableRow(order) {
       return `
         <tr class="order-row" data-order-id="${order.id || ''}" data-search="${escapeHtml(`${order.invoiceNumber || ''} ${order.customerName || ''} ${order.phoneNumber || ''}`)}" data-cashier="${escapeHtml(order.cashierCode || '')}" data-branch="${escapeHtml(order.branch || '')}" data-timestamp="${order.timestamp || 0}">
-          <td>${order.invoiceNumber || 'N/A'}${whatsappPendingBadge(order)}</td>
+          <td>${order.invoiceNumber || 'N/A'}${InvoiceCancellation.badge(order)}${whatsappPendingBadge(order)}</td>
           <td>${escapeHtml(order.customerName || 'N/A')}</td>
           <td>${escapeHtml(order.phoneNumber || 'N/A')}</td>
           <td>${formatDate(order.timestamp)}</td>
@@ -7400,7 +7466,7 @@ function renderAccountingContent(section) {
           <td>
             <button onclick="viewOrder('${order.id}')" class="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition">عرض</button>
             <button onclick="editOrder('${order.id}')" class="bg-yellow-600 text-white px-3 py-1 rounded text-sm hover:bg-yellow-700 transition">تعديل</button>
-            <button onclick="confirmDeleteOrder('${order.id}')" class="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 transition">حذف</button>
+            <button ${InvoiceCancellation.isCancelled(order) ? 'disabled' : ''} onclick="confirmCancelOrder('${order.id}')" class="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 transition">إلغاء الفاتورة</button>
           </td>
         </tr>
       `;
@@ -7523,7 +7589,7 @@ function renderAccountingContent(section) {
 
     function renderDiscountRequestsSection() {
       const discountedOrders = allOrders
-        .filter(order => (parseFloat(order.discountAmount) || 0) > 0)
+        .filter(order => !InvoiceCancellation.isCancelled(order) && (parseFloat(order.discountAmount) || 0) > 0)
         .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
       return `
@@ -7562,7 +7628,7 @@ function renderAccountingContent(section) {
                     const finalTotal = parseFloat(order.total) || Math.max(0, itemsSubTotal + deliveryPrice - discountAmount);
                     return `
                       <tr>
-                        <td>${order.invoiceNumber || '-'}</td>
+                        <td>${order.invoiceNumber || '-'}${InvoiceCancellation.badge(order)}</td>
                         <td>${order.timestamp ? `${formatDate(order.timestamp)} ${formatTime(order.timestamp)}` : '-'}</td>
                         <td>${order.customerName || '-'}</td>
                         <td>${order.phoneNumber || '-'}</td>
@@ -7955,7 +8021,7 @@ function renderAccountingContent(section) {
       <div class="invoice-page">
         <div class="header">
           <h1>🍕 ${order.branch || 'المطعم'}</h1>
-          <p>فاتورة رقم: <strong>#${order.invoiceNumber}</strong></p>
+          <p>فاتورة رقم: <strong>#${order.invoiceNumber}</strong>${InvoiceCancellation.badge(order)}</p>
           <p>${new Date(order.timestamp).toLocaleString('ar-SA')}</p>
         </div>
         
@@ -8044,7 +8110,7 @@ function renderAccountingContent(section) {
       modal.className = 'modal-overlay';
       modal.innerHTML = `
         <div class="modal-content p-8 w-full max-w-2xl">
-          <h2 class="text-2xl font-bold text-blue-600 mb-6">تفاصيل الطلب</h2>
+          <h2 class="text-2xl font-bold text-blue-600 mb-6">تفاصيل الطلب</h2>${InvoiceCancellation.badge(order)}
           
           <div class="bg-gray-50 p-4 rounded-lg mb-6">
             <div class="grid grid-cols-2 gap-4">
@@ -8088,15 +8154,18 @@ function renderAccountingContent(section) {
       document.body.appendChild(modal);
     }
 
-    function confirmDeleteOrder(orderId) {
+    function confirmCancelOrder(orderId) {
+      if (!currentCashier?.name) { showToast('سجّل الدخول بحساب شخصي في المحاسبة لإلغاء الفاتورة', true); return; }
+      if (InvoiceCancellation.isCancelled(allOrders.find(order => order.id === orderId))) { showToast('الفاتورة ملغية بالفعل', true); return; }
       const modal = document.createElement('div');
+      modal.id = 'invoiceCancellationConfirm';
       modal.className = 'modal-overlay';
       modal.innerHTML = `
         <div class="modal-content p-8 w-96 text-center">
-          <h2 class="text-2xl font-bold text-red-600 mb-4">تأكيد الحذف</h2>
-          <p class="text-gray-600 mb-6">هل أنت متأكد من حذف هذا الطلب؟</p>
+          <h2 class="text-2xl font-bold text-red-600 mb-4">تأكيد إلغاء الفاتورة</h2>
+          <p class="text-gray-600 mb-6">هل تريد إلغاء الفاتورة؟ ستبقى محفوظة مع اسمك ووقت الإلغاء.</p>
           <div class="flex gap-3">
-            <button onclick="deleteOrderConfirmed('${orderId}')" class="flex-1 bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700 transition">نعم</button>
+            <button onclick="cancelOrderConfirmed('${orderId}')" class="flex-1 bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700 transition">نعم</button>
             <button onclick="this.closest('.modal-overlay').remove()" class="flex-1 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">لا</button>
           </div>
         </div>
@@ -8104,12 +8173,14 @@ function renderAccountingContent(section) {
       document.body.appendChild(modal);
     }
 
-    async function deleteOrderConfirmed(orderId) {
-      const success = await deleteOrder(orderId);
+    async function cancelOrderConfirmed(orderId) {
+      const success = await cancelOrderInvoice(orderId);
       if (success) {
-        document.querySelector('.modal-overlay').remove();
-        renderAccounting('orders');
-        showToast('تم حذف الطلب بنجاح');
+        document.getElementById('invoiceCancellationConfirm')?.remove();
+        closeCashierQuickEditOrder();
+        if (currentScreen === 'cashier') renderCashier();
+        else renderAccounting('orders');
+        showToast('تم إلغاء الفاتورة مع الاحتفاظ بسجلها');
       }
     }
 
@@ -8663,6 +8734,7 @@ function renderAccountingContent(section) {
       const reportMap = {};
 
       allOrders.forEach(order => {
+        if (InvoiceCancellation.isCancelled(order)) return;
         const orderTimestamp = parseInt(order.timestamp, 10) || 0;
         if (fromTimestamp && orderTimestamp < fromTimestamp) return;
         if (toTimestamp && orderTimestamp > toTimestamp) return;
@@ -9356,19 +9428,18 @@ function renderAccountingContent(section) {
 
     async function updateOrdersForCustomer(phone, updates) {
       if (!phone) return 0;
-      const matchingOrders = allOrders.filter(order => (order.phoneNumber || '') === phone);
-      if (!matchingOrders.length) return 0;
-      const payload = {};
-      matchingOrders.forEach(order => {
-        payload[`orders/${order.id}`] = {
-          ...order,
-          ...updates,
-          updatedAt: Date.now()
-        };
-      });
-      await db.ref().update(payload);
-      matchingOrders.forEach(order => Object.assign(order, updates, { updatedAt: Date.now() }));
-      return matchingOrders.length;
+      const matchingOrders = allOrders.filter(order => order.phoneNumber === phone && !InvoiceCancellation.isCancelled(order));
+      let count = 0;
+      for (const order of matchingOrders) {
+        try {
+          const saved = await InvoiceCancellation.edit(db, order.id, { ...updates, updatedAt: Date.now() });
+          Object.assign(order, saved);
+          count++;
+        } catch (error) {
+          if (!InvoiceCancellation.isCancelled((await db.ref(`orders/${order.id}`).once('value')).val())) throw error;
+        }
+      }
+      return count;
     }
 
     function confirmDeleteCustomer(customerId) {
@@ -15006,6 +15077,7 @@ async function editOrder(orderId) {
     return;
   }
   
+  if (InvoiceCancellation.isCancelled(order)) { showToast('لا يمكن تعديل فاتورة ملغية', true); return; }
   currentEditingOrder = JSON.parse(JSON.stringify(order)); // نسخة للتعديل
   
   const modal = document.getElementById('editOrderModal');
@@ -15240,7 +15312,7 @@ async function saveOrderEdit() {
   try {
     // 3. الحفظ المباشر في Firebase باستخدام الكائن db المعرف في كودك
     const orderId = currentEditingOrder.id;
-    await db.ref(`orders/${orderId}`).set(currentEditingOrder);
+    await InvoiceCancellation.edit(db, orderId, currentEditingOrder);
 
     // 4. تحديث البيانات محلياً في القائمة العامة
     await loadData(); 
@@ -15412,6 +15484,7 @@ function openCashierQuickEditOrder(orderId) {
     return;
   }
 
+  if (InvoiceCancellation.isCancelled(order)) { showToast(InvoiceCancellation.description(order), true); return; }
   const existingModal = document.getElementById('cashierQuickEditModal');
   if (existingModal) existingModal.remove();
 
@@ -15508,7 +15581,8 @@ function openCashierQuickEditOrder(orderId) {
 
       <div class="flex gap-3 mt-7">
         <button onclick="saveCashierQuickEditOrder('${order.id}')" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition">حفظ</button>
-        <button onclick="closeCashierQuickEditOrder()" class="flex-1 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">إلغاء</button>
+        <button onclick="confirmCancelOrder('${order.id}')" class="flex-1 bg-red-600 text-white px-4 py-3 rounded-lg font-bold">إلغاء الفاتورة</button>
+        <button onclick="closeCashierQuickEditOrder()" class="flex-1 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-300 transition">إغلاق</button>
       </div>
     </div>
   `;
@@ -15530,6 +15604,8 @@ function openCashierQuickEditOrder(orderId) {
   ['cashierEditDeliveryDate', 'cashierEditDeliveryFrom', 'cashierEditDeliveryTo'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', updateCashierQuickEditDeliveryPreview);
   });
+  bindDeliveryNoonRule('cashierEditDeliveryFrom', updateCashierQuickEditDeliveryPreview);
+  bindDeliveryNoonRule('cashierEditDeliveryTo', updateCashierQuickEditDeliveryPreview);
   updateCashierQuickEditDeliveryPreview();
 }
 
@@ -15551,6 +15627,7 @@ async function saveCashierQuickEditOrder(orderId) {
     return;
   }
 
+  if (InvoiceCancellation.isCancelled(order)) { showToast('لا يمكن تعديل فاتورة ملغية', true); return; }
   const customerName = document.getElementById('cashierEditCustomerName')?.value.trim() || '';
   const paymentMethod = document.getElementById('cashierEditPaymentMethod')?.value || '';
   if (!customerName) {
@@ -15641,7 +15718,7 @@ async function saveCashierQuickEditOrder(orderId) {
       const area = getDeliveryAreaFromAddress(updates.address);
       await saveDeliveryPriceForBranchArea(area, updates.deliveryPrice || 0, order.branch || currentBranch);
     }
-    await db.ref(`orders/${orderId}`).update(updates);
+    await InvoiceCancellation.edit(db, orderId, updates);
     const localOrder = allOrders.find(item => item.id === orderId) || order;
     Object.assign(localOrder, updates);
     closeCashierQuickEditOrder();
@@ -15661,6 +15738,11 @@ function closeCashierQuickEditOrder() {
 
 
     // Initialize App
+    window.addEventListener('beforeunload', event => {
+      if (!invoiceSaveInProgress) return;
+      event.preventDefault();
+      event.returnValue = '';
+    });
     document.addEventListener('keydown', handleGlobalBarcodeKeydown, true);
     initCashierPresence();
     renderHome();

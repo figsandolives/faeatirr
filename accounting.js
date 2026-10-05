@@ -1120,7 +1120,7 @@ const els = {
   orderEditOverlay: document.getElementById('orderEditOverlay'),
   orderEditForm: document.getElementById('orderEditForm'),
   orderEditCancel: document.getElementById('orderEditCancel'),
-  orderDeleteBtn: document.getElementById('orderDeleteBtn'),
+  orderCancelInvoiceBtn: document.getElementById('orderCancelInvoiceBtn'),
   orderEditError: document.getElementById('orderEditError'),
   orderItemsList: document.getElementById('orderItemsList'),
   orderAddProduct: document.getElementById('orderAddProduct'),
@@ -1265,6 +1265,7 @@ function bindOrderEditForm() {
           quantity: qty > 0 ? qty : 1,
           qty: qty > 0 ? qty : 1,
           unit: product.unit || 'حبة',
+          notes: '',
           total: Number((Number(product.price || 0) * (qty > 0 ? qty : 1)).toFixed(3))
         });
       }
@@ -1283,8 +1284,8 @@ function bindOrderEditForm() {
     });
   }
 
-  if (els.orderDeleteBtn) {
-    els.orderDeleteBtn.addEventListener('click', () => deleteOrder());
+  if (els.orderCancelInvoiceBtn) {
+    els.orderCancelInvoiceBtn.addEventListener('click', () => cancelOrderInvoice());
   }
 }
 
@@ -2950,7 +2951,7 @@ function getReportBucketIndex(timestamp, range) {
 }
 
 function getOrdersInRange(start, end, branchId = 'all') {
-  const orders = state.cache.orders || {};
+  const orders = InvoiceCancellation.activeEntries(state.cache.orders);
   return Object.entries(orders)
     .map(([id, order]) => ({ id, ...order, createdAt: getOrderTimestamp(order) }))
     .filter((order) => {
@@ -2969,6 +2970,7 @@ function getOrderItemCost(item) {
 }
 
 function calcOrderItemsCost(order) {
+  if (InvoiceCancellation.isCancelled(order)) return 0;
   return getOrderItems(order).reduce((sum, item) => {
     const qty = Number(item.qty || 0);
     const cost = getOrderItemCost(item);
@@ -4654,7 +4656,7 @@ function getReportRangeFromDates(fromDate, toDate) {
 
 function getOrdersForCashierReport(fromDate, toDate, branchId = 'all') {
   const { start, end } = getReportRangeFromDates(fromDate, toDate);
-  return Object.entries(state.cache.orders || {})
+  return Object.entries(InvoiceCancellation.activeEntries(state.cache.orders))
     .map(([id, order]) => ({ id, ...order, createdAt: getOrderTimestamp(order) }))
     .filter((order) => {
       const createdAt = getOrderTimestamp(order);
@@ -6688,7 +6690,10 @@ function toggleSelectAllOnlineOrders(checked) {
 
 function exportOnlineOrders() {
   const rows = getSelectedOnlineOrders().map((order) => ({
-    [window.i18n.t('invoice_number')]: getOrderInvoiceNumber(order), [window.i18n.t('customer_name')]: getOrderCustomerName(order), [window.i18n.t('delivery_zone')]: getOrderZoneName(order), [window.i18n.t('customer_phone')]: getOrderCustomerPhone(order), [window.i18n.t('date_time')]: formatDate(getOrderTimestamp(order)), [window.i18n.t('branch')]: getOrderBranchName(order), [window.i18n.t('catalog_type')]: getOnlineOrderCatalogLabel(order), [window.i18n.t('order_type')]: getOrderTypeLabel(order), [window.i18n.t('net_total')]: formatMoney(getOrderItemsSubtotal(order)), [window.i18n.t('delivery_fee')]: formatMoney(getOrderDeliveryFee(order)), [window.i18n.t('grand_total')]: formatMoney(getOrderGrandTotal(order)), [window.i18n.t('payment_method')]: getOrderPaymentLabel(order)
+    [window.i18n.t('invoice_number')]: getOrderInvoiceNumber(order),
+      'حالة الفاتورة': InvoiceCancellation.isCancelled(order) ? 'ملغية' : 'فعالة',
+      'ألغيت بواسطة': order.cancelledByName || '',
+      'وقت الإلغاء': order.cancelledAt ? formatDate(order.cancelledAt) : '', [window.i18n.t('customer_name')]: getOrderCustomerName(order), [window.i18n.t('delivery_zone')]: getOrderZoneName(order), [window.i18n.t('customer_phone')]: getOrderCustomerPhone(order), [window.i18n.t('date_time')]: formatDate(getOrderTimestamp(order)), [window.i18n.t('branch')]: getOrderBranchName(order), [window.i18n.t('catalog_type')]: getOnlineOrderCatalogLabel(order), [window.i18n.t('order_type')]: getOrderTypeLabel(order), [window.i18n.t('net_total')]: formatMoney(getOrderItemsSubtotal(order)), [window.i18n.t('delivery_fee')]: formatMoney(getOrderDeliveryFee(order)), [window.i18n.t('grand_total')]: formatMoney(getOrderGrandTotal(order)), [window.i18n.t('payment_method')]: getOrderPaymentLabel(order)
   }));
   if (rows.length) exportToExcel(rows, 'online-orders-report.xlsx');
 }
@@ -7568,7 +7573,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
   const defaultPrice = itemData
     ? (itemType === 'product' ? Number(itemData.price || 0) : Number(itemData.cost || 0))
     : null;
-  const orders = state.cache.orders || {};
+  const orders = InvoiceCancellation.activeEntries(state.cache.orders);
   const ordersByNumber = {};
   Object.entries(orders).forEach(([id, order]) => {
     const key = normalizeDigits(String(order.orderNumber ?? order.invoiceNumber ?? id)).trim();
@@ -10425,7 +10430,7 @@ function getProductStock(product, branchId) {
 }
 
 function getSalesMap() {
-  const orders = state.cache.orders || {};
+  const orders = InvoiceCancellation.activeEntries(state.cache.orders);
   const map = {};
   Object.values(orders).forEach((order) => {
     if (!order.items) return;
@@ -11867,7 +11872,11 @@ function openStickerMakerPrintModal() {
     <div class="modal card" role="dialog" aria-modal="true" style="max-width:400px; text-align:start; width:min(400px, calc(100vw - 32px)); position:relative; z-index:1; pointer-events:auto;">
       <h3>${window.i18n.t('sticker_quantity')}</h3>
       <label class="tag" for="stickerMakerCopiesDynamic">${window.i18n.t('sticker_quantity_help')}</label>
-      <input id="stickerMakerCopiesDynamic" class="input" type="text" inputmode="numeric" pattern="[0-9]*" tabindex="0" dir="ltr" autocomplete="off" placeholder="${window.i18n.t('sticker_quantity_placeholder')}" style="position:relative; z-index:2; pointer-events:auto;" />
+      <div class="row" style="gap:8px; align-items:center; direction:ltr;">
+        <button id="stickerMakerCopiesDecrease" class="btn ghost" type="button" aria-label="تقليل عدد الستيكرات" style="min-width:44px; padding-inline:12px;">−</button>
+        <input id="stickerMakerCopiesDynamic" class="input" type="text" inputmode="numeric" pattern="[0-9]*" tabindex="0" dir="ltr" autocomplete="off" value="1" placeholder="${window.i18n.t('sticker_quantity_placeholder')}" style="position:relative; z-index:2; pointer-events:auto; text-align:center;" />
+        <button id="stickerMakerCopiesIncrease" class="btn ghost" type="button" aria-label="زيادة عدد الستيكرات" style="min-width:44px; padding-inline:12px;">+</button>
+      </div>
       <p id="stickerMakerCopiesError" class="helper form-error" style="min-height:20px;"></p>
       <div class="row" style="justify-content:flex-end; margin-top:12px;">
         <button id="stickerMakerCopiesPrint" class="btn primary">${window.i18n.t('print')}</button>
@@ -11878,6 +11887,13 @@ function openStickerMakerPrintModal() {
   const input = overlay.querySelector('#stickerMakerCopiesDynamic');
   const error = overlay.querySelector('#stickerMakerCopiesError');
   const normalize = () => { input.value = normalizeDigits(input.value || '').replace(/[^0-9]/g, ''); };
+  const changeCopies = (difference) => {
+    normalize();
+    const current = Math.max(1, Number.parseInt(input.value, 10) || 1);
+    input.value = String(Math.max(1, current + difference));
+    error.textContent = '';
+    input.focus({ preventScroll: true });
+  };
   // هذه النافذة فوق معاينة iframe، لذلك نثبت التركيز صراحةً عند النقر أو اللمس
   // ولا نسمح لمستمع قارئ الباركود العام باعتراض مفاتيح حقل العدد.
   const focusQuantityInput = (event) => {
@@ -11897,6 +11913,9 @@ function openStickerMakerPrintModal() {
     }
   }, true);
   input.addEventListener('keyup', (event) => event.stopPropagation(), true);
+  input.addEventListener('keypress', (event) => event.stopPropagation(), true);
+  overlay.querySelector('#stickerMakerCopiesDecrease').onclick = () => changeCopies(-1);
+  overlay.querySelector('#stickerMakerCopiesIncrease').onclick = () => changeCopies(1);
   overlay.querySelector('#stickerMakerCopiesCancel').onclick = () => overlay.remove();
   overlay.querySelector('#stickerMakerCopiesPrint').onclick = () => {
     normalize();
@@ -12984,6 +13003,7 @@ function getOrderPaymentLabel(order) {
 }
 
 function getOrderDeliveryFee(order) {
+  if (InvoiceCancellation.isCancelled(order)) return 0;
   return Number(order?.deliveryFee ?? order?.deliveryPrice ?? order?.deliveryCharge ?? 0) || 0;
 }
 
@@ -13017,17 +13037,20 @@ function getOrderItems(order) {
 }
 
 function getOrderItemsSubtotal(order) {
+  if (InvoiceCancellation.isCancelled(order)) return 0;
   const items = getOrderItems(order);
   const itemsTotal = items.reduce((sum, item) => sum + Number(item.total || (item.quantity * item.price) || 0), 0);
   return Number(order?.subTotal ?? order?.subtotal ?? order?.itemsNetTotal ?? order?.netTotal ?? itemsTotal) || 0;
 }
 
 function getOrderGrandTotal(order) {
+  if (InvoiceCancellation.isCancelled(order)) return 0;
   const fallback = getOrderItemsSubtotal(order) + getOrderDeliveryFee(order);
   return Number(order?.total ?? order?.grandTotal ?? fallback) || 0;
 }
 
 function getOrderDiscountAmount(order) {
+  if (InvoiceCancellation.isCancelled(order)) return 0;
   return Number(order?.discountAmount ?? order?.discountTotal ?? order?.discount ?? 0) || 0;
 }
 
@@ -20872,7 +20895,7 @@ function submitDiscountForm() {
 }
 
 function buildDiscountOrderRows(discountId, discount, fromDate = '', toDate = '') {
-  const orders = Object.entries(state.cache.orders || {}).map(([id, order]) => ({ id, ...order }));
+  const orders = Object.entries(InvoiceCancellation.activeEntries(state.cache.orders)).map(([id, order]) => ({ id, ...order }));
   const byDate = orders.filter((order) => isTimestampInDateRange(order.createdAt, fromDate, toDate));
 
   if (discountId === MANAGER_DISCOUNT_ID || discount?.type === 'manager') {
@@ -21584,7 +21607,7 @@ function renderOrders() {
     const netTotal = getOrderItemsSubtotal(order);
     row.innerHTML = `
       <td><input type="checkbox" data-id="${order.id}" ${state.selectedOrders.has(order.id) ? 'checked' : ''} /></td>
-      <td>${getOrderInvoiceNumber(order)}</td>
+      <td>${escapeHtml(getOrderInvoiceNumber(order))}${InvoiceCancellation.badge(order)}</td>
       <td><button class="btn ghost small" data-action="customer">${escapeHtml(customerName || '-')}</button></td>
       <td>${escapeHtml(getOrderZoneName(order) || '-')}</td>
       <td>${escapeHtml(getOrderCustomerPhone(order) || '-')}</td>
@@ -21695,6 +21718,9 @@ function exportOrders() {
   const rows = orders.map((order) => {
     return {
       [window.i18n.t('invoice_number')]: getOrderInvoiceNumber(order),
+      'حالة الفاتورة': InvoiceCancellation.isCancelled(order) ? 'ملغية' : 'فعالة',
+      'ألغيت بواسطة': order.cancelledByName || '',
+      'وقت الإلغاء': order.cancelledAt ? formatDate(order.cancelledAt) : '',
       [window.i18n.t('customer_name')]: getOrderCustomerName(order),
       [window.i18n.t('delivery_zone')]: getOrderZoneName(order),
       [window.i18n.t('customer_phone')]: getOrderCustomerPhone(order),
@@ -21745,7 +21771,7 @@ function printOrders() {
 
   const rows = orders.map((order) => {
     return [
-      getOrderInvoiceNumber(order),
+      [getOrderInvoiceNumber(order), InvoiceCancellation.description(order)].filter(Boolean).join(' — '),
       getOrderCustomerName(order),
       getOrderCustomerPhone(order),
       getOrderZoneName(order),
@@ -21777,7 +21803,7 @@ function printOrders() {
 
 function buildOrderInvoiceHtml(order) {
   const items = getOrderItems(order);
-  const invoiceNumber = escapeHtml(getOrderInvoiceNumber(order));
+  const invoiceNumber = escapeHtml([getOrderInvoiceNumber(order), InvoiceCancellation.description(order)].filter(Boolean).join(' — '));
   const deliveryFee = getOrderDeliveryFee(order);
   const subtotal = getOrderItemsSubtotal(order);
   const grandTotal = getOrderGrandTotal(order);
@@ -21833,7 +21859,7 @@ function buildOrderInvoiceHtml(order) {
           <tbody>
             ${items.length ? items.map((item) => `
               <tr>
-                <td>${escapeHtml(item.productName || item.name || '-')}</td>
+                <td>${escapeHtml(item.productName || item.name || '-')}${item.notes || item.note ? `<div style="margin-top: 4px; color: #1d4ed8; font-size: 11px;">📝 ${escapeHtml(item.notes || item.note)}</div>` : ''}</td>
                 <td>${escapeHtml(formatNumber(item.quantity || 0))} ${escapeHtml(item.unit || '')}</td>
                 <td>${formatMoney(item.price || 0)}</td>
                 <td>${formatMoney(item.total || 0)}</td>
@@ -21890,6 +21916,7 @@ function downloadOrderInvoicePdf(order) {
 
 function openOrderEditModal(order) {
   if (!els.orderEditOverlay) return;
+  if (InvoiceCancellation.isCancelled(order)) { alert(InvoiceCancellation.description(order)); return; }
   state.editingOrder = {
     ...order,
     items: getOrderItems(order).map((item) => ({ ...item }))
@@ -22012,7 +22039,7 @@ function renderOrderItemsEditor() {
     const price = Number(item.price || 0) || 0;
     const total = Number(item.total ?? (qty * price)) || 0;
     return `
-      <div class="order-edit-row" data-index="${index}" style="display: flex; gap: 10px; align-items: center; background: ${index % 2 ? '#f8fafc' : '#f1f5f9'}; padding: 12px; border-radius: 10px; margin-bottom: 10px;">
+      <div class="order-edit-row" data-index="${index}" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: ${index % 2 ? '#f8fafc' : '#f1f5f9'}; padding: 12px; border-radius: 10px; margin-bottom: 10px;">
         <div style="flex: 1; min-width: 180px; font-weight: 800; color: #111827;">
           ${escapeHtml(item.productName || item.name || item.productId || '-')}
           ${item.productNameEn ? `<div style="font-size: 12px; color: #6b7280; font-weight: 600;">${escapeHtml(item.productNameEn)}</div>` : ''}
@@ -22022,6 +22049,7 @@ function renderOrderItemsEditor() {
         <input type="number" min="0" step="0.001" value="${price}" style="width: 100px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; text-align: center;" data-field="price" />
         <span style="width: 100px; color: #2563eb; font-weight: 800; text-align: center;">${formatMoney(total)}</span>
         <button type="button" data-action="remove" style="background: #dc2626; color: white; border: none; padding: 10px 14px; border-radius: 8px; font-weight: 800; cursor: pointer;">حذف</button>
+        <textarea rows="2" data-field="notes" placeholder="ملاحظة على هذا الصنف..." style="flex-basis: 100%; width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; resize: vertical; font-family: inherit;">${escapeHtml(item.notes || item.note || '')}</textarea>
       </div>
     `;
   }).join('');
@@ -22094,6 +22122,9 @@ function renderOrderItemsEditor() {
     });
     wrapper.querySelector('[data-field="unit"]').addEventListener('change', (e) => {
       state.editingOrder.items[index].unit = e.target.value;
+    });
+    wrapper.querySelector('[data-field="notes"]').addEventListener('input', (e) => {
+      state.editingOrder.items[index].notes = e.target.value;
     });
     wrapper.querySelector('[data-action="remove"]').addEventListener('click', () => {
       state.editingOrder.items.splice(index, 1);
@@ -22286,7 +22317,7 @@ function saveOrderEdits() {
     updatedAt: Date.now()
   };
 
-  db.ref(`orders/${state.editingOrder.id}`).update(updatePayload)
+  InvoiceCancellation.edit(db, state.editingOrder.id, updatePayload)
     .then(() => {
       closeOrderEditModal();
     })
@@ -22295,14 +22326,19 @@ function saveOrderEdits() {
     });
 }
 
-function deleteOrder() {
+async function cancelOrderInvoice() {
   if (!state.editingOrder) return;
-  if (!confirm(window.i18n.t('confirm_delete'))) return;
-  db.ref(`orders/${state.editingOrder.id}`).remove()
-    .then(() => closeOrderEditModal())
-    .catch(() => {
-      els.orderEditError.textContent = window.i18n.t('error');
-    });
+  if (!confirm('هل تريد إلغاء هذه الفاتورة؟ ستبقى في الكشوفات مع اسمك ووقت الإلغاء.')) return;
+  const button = els.orderCancelInvoiceBtn;
+  if (button) button.disabled = true;
+  try {
+    await InvoiceCancellation.cancel(db, state.editingOrder.id, state.user);
+    closeOrderEditModal();
+  } catch (error) {
+    els.orderEditError.textContent = error.message;
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function openCustomerOrders(customerId) {
@@ -22314,7 +22350,7 @@ function openCustomerOrders(customerId) {
 
   const rows = orders.map((order) => `
     <tr>
-      <td>${order.orderNumber || '-'}</td>
+      <td>${escapeHtml(getOrderInvoiceNumber(order))}${InvoiceCancellation.badge(order)}</td>
       <td>${formatDate(order.createdAt)}</td>
       <td>${formatMoney(order.total || 0)}</td>
       <td>${order.branchName || '-'}</td>
@@ -22347,6 +22383,7 @@ function openOrderDetail(order) {
     .map((item) => `<li>${item.name} - ${item.qty} x ${formatMoney(item.price)}</li>`)
     .join('');
   els.detailBody.innerHTML = `
+    ${InvoiceCancellation.badge(order)}
     <p><strong>${window.i18n.t('order_number')}:</strong> ${order.orderNumber || '-'}</p>
     <p><strong>${window.i18n.t('branch')}:</strong> ${getLocalizedName(state.cache.branches?.[order.branchId]) || order.branchName || '-'}</p>
     <p><strong>${window.i18n.t('cashier')}:</strong> ${order.cashierName || '-'}</p>
@@ -22726,6 +22763,7 @@ function getOrderDeliveryAddressLabel(order) {
 function getCustomerFavoriteProduct(rows) {
   const counts = {};
   rows.forEach((order) => {
+    if (InvoiceCancellation.isCancelled(order)) return;
     getOrderItems(order).forEach((item) => {
       const productId = item.productId || item.itemId || item.id || '';
       const itemId = productId || item.name;
@@ -22763,7 +22801,7 @@ function printCustomerDetailsReport(customer, rows, totals) {
   const bodyRows = rows.map((order) => {
     const productsAmount = Number(order.subtotal ?? order.netTotal ?? ((order.total || 0) - (order.deliveryFee || 0)));
     return [
-      order.orderNumber || '-',
+      [getOrderInvoiceNumber(order), InvoiceCancellation.description(order)].filter(Boolean).join(' — '),
       getLocalizedName(state.cache.branches?.[order.branchId]) || order.branchName || '-',
       order.cashierName || '-',
       getOrderTypeLabelForOrder(order),
@@ -22804,6 +22842,7 @@ function renderCustomerDetailsView(section, customerId) {
   const rows = getCustomerOrdersForDetails(customerId, fromDate, toDate);
   const favoriteProduct = getCustomerFavoriteProduct(rows);
   const totals = rows.reduce((acc, order) => {
+    if (InvoiceCancellation.isCancelled(order)) return acc;
     const productsAmount = Number(order.subtotal ?? order.netTotal ?? ((order.total || 0) - (order.deliveryFee || 0)));
     acc.products += productsAmount;
     acc.delivery += Number(order.deliveryFee || 0);
@@ -22879,7 +22918,7 @@ function renderCustomerDetailsView(section, customerId) {
         const addressLabel = getOrderDeliveryAddressLabel(order);
         return `
           <tr>
-            <td>${order.orderNumber || '-'}</td>
+            <td>${escapeHtml(getOrderInvoiceNumber(order))}${InvoiceCancellation.badge(order)}</td>
             <td>${getLocalizedName(state.cache.branches?.[order.branchId]) || order.branchName || '-'}</td>
             <td>${order.cashierName || '-'}</td>
             <td>${orderTypeName}</td>
@@ -22934,7 +22973,8 @@ function renderCustomerDetailsView(section, customerId) {
       const dataRows = rows.map((order) => {
         const productsAmount = Number(order.subtotal ?? order.netTotal ?? ((order.total || 0) - (order.deliveryFee || 0)));
         return {
-          [window.i18n.t('invoice_number')]: order.orderNumber || '-',
+          [window.i18n.t('invoice_number')]: getOrderInvoiceNumber(order),
+          'حالة الفاتورة': InvoiceCancellation.description(order) || 'فعالة',
           [window.i18n.t('branch')]: getLocalizedName(state.cache.branches?.[order.branchId]) || order.branchName || '-',
           [window.i18n.t('cashier')]: order.cashierName || '-',
           [window.i18n.t('order_type')]: getOrderTypeLabelForOrder(order),
@@ -22968,6 +23008,7 @@ function renderCustomerFavoriteProductDetailsView(section, customerId, productId
   const fromDate = state.customerFilters.dateFrom || '';
   const toDate = state.customerFilters.dateTo || '';
   const orders = getCustomerOrdersForDetails(customerId, fromDate, toDate).filter((order) => {
+    if (InvoiceCancellation.isCancelled(order)) return false;
     return getOrderItems(order).some((item) => String(item.productId || item.itemId || item.id || '') === String(productId));
   });
   const rows = orders.map((order) => {
@@ -23153,7 +23194,7 @@ function renderCustomersSection() {
 
   const customers = state.cache.customers || {};
   const zones = state.cache.deliveryZones || {};
-  const allOrders = Object.entries(state.cache.orders || {}).map(([id, data]) => ({ id, ...data }));
+  const allOrders = Object.entries(InvoiceCancellation.activeEntries(state.cache.orders)).map(([id, data]) => ({ id, ...data }));
   const rangeOrders = allOrders.filter((order) => isTimestampInDateRange(
     order.createdAt,
     state.customerFilters.dateFrom,
@@ -23625,7 +23666,7 @@ function getFilteredCustomerEntriesForView() {
   ensureCustomerFiltersState();
   const customers = state.cache.customers || {};
   const zones = state.cache.deliveryZones || {};
-  const allOrders = Object.entries(state.cache.orders || {}).map(([id, data]) => ({ id, ...data }));
+  const allOrders = Object.entries(InvoiceCancellation.activeEntries(state.cache.orders)).map(([id, data]) => ({ id, ...data }));
   const useDateRange = Boolean(state.customerFilters.dateFrom || state.customerFilters.dateTo);
   const rangeOrders = allOrders.filter((order) => isTimestampInDateRange(
     getOrderTimestamp(order),
@@ -23741,7 +23782,7 @@ function exportCustomers() {
   ensureCustomerFiltersState();
   const customers = state.cache.customers || {};
   const zones = state.cache.deliveryZones || {};
-  const allOrders = Object.entries(state.cache.orders || {}).map(([id, data]) => ({ id, ...data }));
+  const allOrders = Object.entries(InvoiceCancellation.activeEntries(state.cache.orders)).map(([id, data]) => ({ id, ...data }));
   const useDateRange = Boolean(state.customerFilters.dateFrom || state.customerFilters.dateTo);
   const filteredOrders = allOrders.filter((order) => isTimestampInDateRange(
     order.createdAt,
@@ -24379,7 +24420,7 @@ function getConfiguredTables() {
 
 function buildTableStatsMap(fromDate, toDate) {
   const map = {};
-  Object.values(state.cache.orders || {}).forEach((order) => {
+  Object.values(InvoiceCancellation.activeEntries(state.cache.orders)).forEach((order) => {
     const tableNumber = String(order.tableNumber || '').trim();
     const branchId = String(order.branchId || '').trim();
     if (!tableNumber || !branchId) return;

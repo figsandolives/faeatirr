@@ -627,7 +627,7 @@
         <p id="orderEditError" class="helper form-error"></p>
         <div style="display: flex; gap: 10px; margin-top: 30px;">
           <button type="submit" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;" data-i18n="save"></button>
-          <button type="button" id="orderDeleteBtn" style="background: #dc2626; color: white; padding: 15px 24px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;" data-i18n="delete"></button>
+          <button type="button" id="orderCancelInvoiceBtn" style="background: #dc2626; color: white; padding: 15px 24px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;" >إلغاء الفاتورة</button>
           <button type="button" id="orderEditCancel" style="flex: 1; background: #6b7280; color: white; padding: 15px; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;" data-i18n="cancel"></button>
         </div>
       </form>
@@ -670,7 +670,8 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="translation.js"></script>
-  <script src="accounting.js?v=20260925-online-catalog-filter"></script>
+  <script src="invoice-cancellation.js?v=20261005-cancel-v1"></script>
+  <script src="accounting.js?v=20261005-invoice-cancel-v1"></script>
   <script src="label-print-bridge.js"></script>
 </body>
 </html>

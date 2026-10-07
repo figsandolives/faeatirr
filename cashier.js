@@ -4042,7 +4042,7 @@ function refreshUI() {
 	    function getCashierProductsForCategory(categoryId) {
 	      const category = getCashierCategoryRows().find(c => c.id === categoryId);
 	      const categoryProductIds = new Set((category?.productIds || []).map(id => String(id)));
-	      return allProducts.filter(product => (
+	      return allProducts.filter(product => product.id !== TROLLEY_DEPOSIT_ID && (
 	        String(product.categoryId || '') === String(categoryId)
 	        || categoryProductIds.has(String(product.id))
 	        || (Array.isArray(product.categoryIds) && product.categoryIds.map(String).includes(String(categoryId)))
@@ -4107,9 +4107,9 @@ function refreshUI() {
         return;
       }
       
-      const filteredProducts = allProducts.filter(p => 
+      const filteredProducts = allProducts.filter(p => p.id !== TROLLEY_DEPOSIT_ID && (
         (p.nameAr || '').toLowerCase().includes(searchTerm) || 
-        (p.nameEn || '').toLowerCase().includes(searchTerm)
+        (p.nameEn || '').toLowerCase().includes(searchTerm))
       );
       
       document.getElementById('categoriesAndProductsContainer').innerHTML = `
@@ -4283,7 +4283,37 @@ function refreshUI() {
       }
     }
     
+    const BREAKFAST_TROLLEY_IDS = new Set(['breakfast-trolley-10', 'breakfast-trolley-5']);
+    const TROLLEY_DEPOSIT_ID = 'breakfast-trolley-deposit';
+    const TROLLEY_DEPOSIT_NAME = 'تأمين - يسترد بعد استلام العربانة والمرفقات بحالة سليمة';
+
+    function isTrolleyDeposit(item) {
+      return item?.productId === TROLLEY_DEPOSIT_ID || !!item?.depositForLineId;
+    }
+
+    // Persist the link with the invoice, including when two trolley sizes coexist.
+    function syncTrolleyDeposits(order) {
+      if (!order?.items) return;
+      const deposits = order.items.filter(isTrolleyDeposit);
+      const items = [];
+      order.items.filter(item => !isTrolleyDeposit(item)).forEach(item => {
+        items.push(item);
+        if (!BREAKFAST_TROLLEY_IDS.has(item.productId || item.productCode)) return;
+        if (!item.trolleyLineId) item.trolleyLineId = generateId();
+        const quantity = Number(item.quantity) || 0;
+        const deposit = deposits.find(row => row.depositForLineId === item.trolleyLineId) || {};
+        items.push({ ...deposit, productId: TROLLEY_DEPOSIT_ID,
+          productName: TROLLEY_DEPOSIT_NAME,
+          productNameEn: 'Deposit - refundable after return of trolley and accessories in good condition',
+          depositForLineId: item.trolleyLineId, price: 20, quantity,
+          unit: 'حبة', total: quantity * 20, grossTotal: quantity * 20,
+          notes: deposit.notes || '' });
+      });
+      order.items = items;
+    }
+
     function addProductToInvoice(productId) {
+      if (productId === TROLLEY_DEPOSIT_ID) return;
       const product = allProducts.find(p => p.id === productId);
       if (!product) {
         showToast(cashierT('productNotFound'), true);
@@ -4436,6 +4466,7 @@ function refreshUI() {
     }
     
     function updateSelectedItemsDisplay() {
+      syncTrolleyDeposits(currentOrder);
       const container = document.getElementById('selectedItemsContainer');
       const nextButton = document.getElementById('nextButton');
       updateInvoicePricingBox();
@@ -4449,10 +4480,10 @@ function refreshUI() {
           <div class="bg-gray-50 p-3 rounded-lg mb-2">
             <div class="flex justify-between items-start mb-2">
               <div class="font-bold">${escapeHtml(cashierLanguage === 'en' ? (item.productNameEn || item.productName || '-') : (item.productName || item.productNameEn || '-'))}</div>
-              <button onclick="removeItemFromInvoice(${index})" class="text-red-600 hover:text-red-800 font-bold text-lg">✕</button>
+              <button ${isTrolleyDeposit(item) ? 'disabled title="مرتبط بالعربانة"' : ''} onclick="removeItemFromInvoice(${index})" class="text-red-600 hover:text-red-800 font-bold text-lg">✕</button>
             </div>
             <div class="flex items-center gap-2">
-              <input type="text" value="${item.quantity}" readonly onclick="showNumericKeypadForInvoice(${index}, this)" class="quantity-input bg-white cursor-pointer">
+              <input type="text" value="${item.quantity}" readonly onclick="${isTrolleyDeposit(item) ? '' : `showNumericKeypadForInvoice(${index}, this)`}" class="quantity-input bg-white cursor-pointer">
               <span class="text-sm text-gray-600">× ${item.price.toFixed(3)}</span>
               <span class="font-bold text-blue-600 mr-auto">${item.total.toFixed(3)} ${cashierT('kd')}</span>
             </div>
@@ -4466,6 +4497,7 @@ function refreshUI() {
     }
     
     function updateItemQuantity(index, value) {
+      if (isTrolleyDeposit(currentOrder.items[index])) return;
       value = convertToEnglishNumbers(value);
       const quantity = parseFloat(value);
       
@@ -4479,6 +4511,10 @@ function refreshUI() {
     }
     
     function removeItemFromInvoice(index) {
+      if (isTrolleyDeposit(currentOrder.items[index])) {
+        showToast('التأمين مرتبط بالعربانة ولا يمكن حذفه إلا بحذف العربانة', true);
+        return;
+      }
       currentOrder.items.splice(index, 1);
       updateSelectedItemsDisplay();
     }
@@ -5556,11 +5592,13 @@ function showNumericKeypadForInvoice(index, inputField) {
           currentOrder.invoiceSaveAttemptId = currentOrder.invoiceSaveAttemptId || generateId();
           const orderId = currentOrder.invoiceSaveAttemptId;
           const timestamp = Date.now();
+          syncTrolleyDeposits(currentOrder);
           const cleanedItems = currentOrder.items.map(item => ({
             productId: item.productId || '', productName: item.productName || '',
             productNameEn: item.productNameEn || '', price: item.price || 0,
             quantity: item.quantity || 0, total: item.total || 0,
-            unit: item.unit || '', notes: item.notes || ''
+            unit: item.unit || '', notes: item.notes || '',
+            trolleyLineId: item.trolleyLineId || '', depositForLineId: item.depositForLineId || ''
           }));
           const order = {
             timestamp,
@@ -9509,7 +9547,7 @@ function renderAccountingContent(section) {
     function getAdminProductsForSelectedCategory() {
       const selectedCategoryId = getAdminProductSelectedCategoryId();
       if (!selectedCategoryId) return allProducts;
-      return allProducts.filter(product => (product.categoryId || '') === selectedCategoryId);
+      return allProducts.filter(product => product.id !== TROLLEY_DEPOSIT_ID && (product.categoryId || '') === selectedCategoryId);
     }
 
     function doesAdminProductMatchSearch(product) {
@@ -15107,12 +15145,15 @@ function getEditDiscountInfo() {
   const baseTotal = getEditItemsGrossTotal();
   const discountType = document.getElementById('editDiscountType')?.value || 'none';
   const discountValue = parseFloat(convertToEnglishNumbers(document.getElementById('editDiscountValue')?.value || '0')) || 0;
-  const discountAmount = calculateOrderDiscountAmount(baseTotal, discountType, discountValue);
-  return { baseTotal, discountType, discountValue, discountAmount };
+  const discountableTotal = currentEditingOrder.items.filter(item => !isTrolleyDeposit(item))
+    .reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.price || 0), 0);
+  const discountAmount = calculateOrderDiscountAmount(discountableTotal, discountType, discountValue);
+  return { baseTotal, discountableTotal, discountType, discountValue, discountAmount };
 }
 
 function applyEditDiscountToItems() {
-  const { baseTotal, discountType, discountValue, discountAmount } = getEditDiscountInfo();
+  syncTrolleyDeposits(currentEditingOrder);
+  const { baseTotal, discountableTotal, discountType, discountValue, discountAmount } = getEditDiscountInfo();
   currentEditingOrder.discountType = discountType;
   currentEditingOrder.discountValue = discountValue;
   currentEditingOrder.discountAmount = discountAmount;
@@ -15121,13 +15162,13 @@ function applyEditDiscountToItems() {
 
   currentEditingOrder.items = currentEditingOrder.items.map(item => {
     const grossTotal = parseFloat(((parseFloat(item.quantity) || 0) * (parseFloat(item.price) || 0)).toFixed(3));
-    const itemDiscount = baseTotal > 0 && discountAmount > 0
-      ? parseFloat((discountAmount * (grossTotal / baseTotal)).toFixed(3))
+    const itemDiscount = !isTrolleyDeposit(item) && discountableTotal > 0 && discountAmount > 0
+      ? parseFloat((discountAmount * (grossTotal / discountableTotal)).toFixed(3))
       : 0;
     return {
       ...item,
       grossTotal,
-      discountPercent: discountType === 'percent' ? discountValue : 0,
+      discountPercent: !isTrolleyDeposit(item) && discountType === 'percent' ? discountValue : 0,
       discountAmount: itemDiscount,
       total: parseFloat(Math.max(0, grossTotal - itemDiscount).toFixed(3))
     };
@@ -15138,6 +15179,7 @@ function applyEditDiscountToItems() {
 
 // عرض المنتجات للتعديل
 function renderEditProducts() {
+  syncTrolleyDeposits(currentEditingOrder);
   const container = document.getElementById('editProductsList');
   
   let html = `
@@ -15145,15 +15187,15 @@ function renderEditProducts() {
       ${currentEditingOrder.items.map((item, index) => `
         <div class="flex gap-2 items-center bg-gray-50 p-3 rounded-lg">
           <span class="flex-1 font-bold">${item.productName}</span>
-          <input type="number" value="${item.quantity}" onchange="updateEditProduct(${index}, 'quantity', this.value)" class="w-20 p-2 border rounded-lg" step="0.001">
+          <input type="number" value="${item.quantity}" ${isTrolleyDeposit(item) ? 'disabled' : ''} onchange="updateEditProduct(${index}, 'quantity', this.value)" class="w-20 p-2 border rounded-lg" step="0.001">
           <select onchange="updateEditProduct(${index}, 'unit', this.value)" class="p-2 border rounded-lg">
             <option value="حبة" ${item.unit === 'حبة' ? 'selected' : ''}>حبة</option>
             <option value="كرتون" ${item.unit === 'كرتون' ? 'selected' : ''}>كرتون</option>
             <option value="كيلو" ${item.unit === 'كيلو' ? 'selected' : ''}>كيلو</option>
           </select>
-          <input type="number" value="${item.price}" onchange="updateEditProduct(${index}, 'price', this.value)" class="w-24 p-2 border rounded-lg" step="0.001">
+          <input type="number" value="${item.price}" ${isTrolleyDeposit(item) ? 'disabled' : ''} onchange="updateEditProduct(${index}, 'price', this.value)" class="w-24 p-2 border rounded-lg" step="0.001">
           <span class="font-bold text-blue-600 w-24 text-center">${(item.total || 0).toFixed(3)} د.ك</span>
-          <button onclick="removeEditProduct(${index})" class="bg-red-600 text-white px-3 py-2 rounded-lg hover:bg-red-700">حذف</button>
+          <button ${isTrolleyDeposit(item) ? 'disabled' : ''} onclick="removeEditProduct(${index})" class="bg-red-600 text-white px-3 py-2 rounded-lg hover:bg-red-700">حذف</button>
         </div>
       `).join('')}
     </div>
@@ -15227,6 +15269,7 @@ function renderEditProducts() {
 
 // تحديث منتج
 function updateEditProduct(index, field, value) {
+  if (isTrolleyDeposit(currentEditingOrder.items[index])) return;
   if (field === 'quantity' || field === 'price') {
     currentEditingOrder.items[index][field] = parseFloat(value) || 0;
     currentEditingOrder.items[index].grossTotal = currentEditingOrder.items[index].quantity * currentEditingOrder.items[index].price;
@@ -15234,12 +15277,17 @@ function updateEditProduct(index, field, value) {
   } else {
     currentEditingOrder.items[index][field] = value;
   }
+  syncTrolleyDeposits(currentEditingOrder);
   applyEditDiscountToItems();
   renderEditProducts();
 }
 
 // حذف منتج
 function removeEditProduct(index) {
+  if (isTrolleyDeposit(currentEditingOrder.items[index])) {
+    showToast('التأمين مرتبط بالعربانة ولا يمكن حذفه إلا بحذف العربانة', true);
+    return;
+  }
   if (currentEditingOrder.items.length <= 1) {
     showToast('يجب أن يحتوي الطلب على منتج واحد على الأقل');
     return;
@@ -15357,7 +15405,7 @@ function searchProducts() {
   
   // البحث في nameAr و nameEn و id
   const filteredProducts = allProducts.filter(p => {
-    if (!p) return false;
+    if (!p || p.id === TROLLEY_DEPOSIT_ID) return false;
     
     const searchIn = [
       p.nameAr,
@@ -15423,6 +15471,7 @@ function addSelectedProduct() {
   const price = parseFloat(document.getElementById('selectedProductPrice').value) || 0;
   
   const newProduct = {
+    productId: selectedProduct.id,
     productName: selectedProduct.name,
     productCode: selectedProduct.code,
     quantity: qty,

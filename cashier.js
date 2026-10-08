@@ -237,6 +237,7 @@
     let salesReportCurrentDetailProduct = null;
     let allInventoryCategories = [];
     let allInventoryUnits = [];
+    let allAccountingUnits = [];
     let allIssueCashiers = [];
     let allInventoryIssues = [];
     let allInventoryTransfers = [];
@@ -800,6 +801,7 @@
         allCategories,
         allInventoryCategories,
         allInventoryUnits,
+        allAccountingUnits,
         allIssueCashiers,
         allInventoryIssues,
         allInventoryTransfers,
@@ -829,6 +831,7 @@
       allCategories = Array.isArray(cache.allCategories) ? cache.allCategories : [];
       allInventoryCategories = Array.isArray(cache.allInventoryCategories) ? cache.allInventoryCategories : [];
       allInventoryUnits = Array.isArray(cache.allInventoryUnits) ? cache.allInventoryUnits : [];
+      allAccountingUnits = Array.isArray(cache.allAccountingUnits) ? cache.allAccountingUnits : [];
       allIssueCashiers = Array.isArray(cache.allIssueCashiers) ? cache.allIssueCashiers : [];
       allInventoryIssues = Array.isArray(cache.allInventoryIssues) ? cache.allInventoryIssues : [];
       allInventoryTransfers = Array.isArray(cache.allInventoryTransfers) ? cache.allInventoryTransfers : [];
@@ -948,7 +951,8 @@
         ['inventorySuppliers', 'الموردين'],
         ['inventoryPurchases', 'سندات الشراء'],
         ['stockMaterials', 'مواد المخزون'],
-        ['transferRequests', 'طلبات النواقص']
+        ['transferRequests', 'طلبات النواقص'],
+        ['units', 'وحدات المحاسبة']
       ];
 
       try {
@@ -994,7 +998,8 @@
           inventorySuppliersSnapshot,
           inventoryPurchasesSnapshot,
           stockMaterialsSnapshot,
-          transferRequestsSnapshot
+          transferRequestsSnapshot,
+          accountingUnitsSnapshot
         ] = await Promise.all(dataRefs.map(loadSnapshot));
 
         setLoadedOrders(
@@ -1028,6 +1033,7 @@
             : (category.productIds ? Object.values(category.productIds) : [])
         }));
         allInventoryUnits = toArray(inventoryUnitsSnapshot);
+        allAccountingUnits = toArray(accountingUnitsSnapshot);
         allIssueCashiers = toArray(issueCashiersSnapshot);
         allInventoryIssues = toArray(inventoryIssuesSnapshot).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
         allInventoryTransfers = toArray(inventoryTransfersSnapshot).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -1789,6 +1795,11 @@ function setupRealtimeListeners() {
   });
 
   // 7. مراقبة وحدات المخزون
+  db.ref('units').on('value', (snapshot) => {
+    allAccountingUnits = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
+    refreshUI();
+  });
+
   db.ref('inventoryUnits').on('value', (snapshot) => {
     allInventoryUnits = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
     refreshUI();
@@ -3614,8 +3625,10 @@ function refreshUI() {
 
     function getShortageMaterialUnit(item) {
       const source = getShortageItemSource('material', item.itemId || item.id);
-      const unit = allInventoryUnits.find(unit => unit.id === (item.unitId || source?.unitId));
-      return (unit ? cashierDisplayName(unit) : (source?.unit || '')) || cashierT('unit');
+      const unitId = source?.unitId || item.unitId;
+      const unit = allAccountingUnits.find(unit => String(unit.id) === String(unitId))
+        || allInventoryUnits.find(unit => String(unit.id) === String(unitId));
+      return (unit ? cashierDisplayName(unit) : (source?.unitName || source?.unitLabel || source?.unit || '')) || cashierT('unit');
     }
 
     function openShortageMaterialQuantity(itemId, editIndex = null) {
@@ -3631,7 +3644,7 @@ function refreshUI() {
       modal.setAttribute('aria-modal', 'true');
       modal.setAttribute('aria-labelledby', 'shortageMaterialQuantityTitle');
       modal.innerHTML = `
-        <form class="modal-content p-6 w-full max-w-md">
+        <form class="modal-content p-6" style="width:420px;max-width:calc(100vw - 32px)">
           <h2 id="shortageMaterialQuantityTitle" class="text-xl font-bold text-purple-900 mb-6">${escapeHtml(cashierDisplayName(source))}</h2>
           <label for="shortageMaterialQuantityInput" class="block font-bold mb-2">${cashierT('qty')}</label>
           <div class="flex items-center gap-3 mb-6">

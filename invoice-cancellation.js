@@ -13,6 +13,31 @@ window.InvoiceCancellation = (() => {
   async function cancel(db, id, actor) {
     const name = actor?.name || actor?.fullName || actor?.username;
     if (!name) throw new Error('يجب تسجيل الدخول بحساب شخصي لإلغاء الفاتورة');
+    const original = (await db.ref(`orders/${id}`).once('value')).val();
+    if (original?.stockDeducted && original.stockMovements) {
+      if (isCancelled(original)) throw new Error('الفاتورة ملغية بالفعل');
+      for (let attempt = 0; attempt < 16; attempt++) {
+        const currentOrder = (await db.ref(`orders/${id}`).once('value')).val();
+        if (!currentOrder || isCancelled(currentOrder)) throw new Error('الفاتورة ملغية بالفعل أو غير موجودة');
+        const at = Date.now();
+        const cancelledOrder = { ...currentOrder, status: 'cancelled', isCancelled: true, cancelledAt: at,
+          cancelledByName: name, cancelledById: actor.id || actor.code || '', cancelledByCode: actor.code || '', updatedAt: at, stockRestored: true };
+        const updates = { [`orders/${id}`]: cancelledOrder };
+        for (const [productId, move] of Object.entries(currentOrder.stockMovements)) {
+          const path = `products/${productId}/stockByBranch/${move.branchId}`;
+          const before = Number((await db.ref(path).once('value')).val() || 0);
+          const after = Number((before + move.quantity).toFixed(6));
+          updates[path] = after;
+          updates[`invoiceStockCancellations/${id}/${productId}`] = { branchId: move.branchId, before, after, quantity: move.quantity };
+        }
+        try { await db.ref().update(updates); return cancelledOrder; }
+        catch (error) {
+          const winner = (await db.ref(`orders/${id}`).once('value')).val();
+          if (isCancelled(winner)) return winner;
+          if (attempt === 15) throw error;
+        }
+      }
+    }
     const at = Date.now();
     const result = await db.ref(`orders/${id}`).transaction(order => {
       if (!order || isCancelled(order)) return;

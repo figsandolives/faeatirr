@@ -63,6 +63,36 @@ window.InvoiceSave = (() => {
     return {key, counter: number(values[0]), sequence: number(values[1]), rawSequence: number(values[2]), assignment: number(values[3]) || number(values[4])};
   }
 
+  async function stockPlan(db, order) {
+    const quantities = new Map();
+    for (const item of order.items || []) {
+      if (!item.productId || item.productId === 'breakfast-trolley-deposit' || item.depositForLineId) continue;
+      const qty = Number(item.quantity ?? item.qty);
+      if (!Number.isFinite(qty) || qty <= 0) throw new Error('كمية المنتج غير صالحة');
+      quantities.set(item.productId, (quantities.get(item.productId) || 0) + qty);
+    }
+    if (!quantities.size) return { branchId: null, moves: {} };
+    let branchId = order.stockBranchId;
+    if (!branchId) {
+      const branches = await get(db, 'branches');
+      branchId = Object.entries(branches || {}).find(([id, branch]) =>
+        id === order.branch || [branch.nameAr, branch.name, branch.nameEn].includes(order.branch))?.[0];
+    }
+    if (!branchId || /[.#$\[\]/]/.test(branchId)) throw new Error('تعذر تحديد مخزون الفرع، حدّث الصفحة وتحقق من ربط الجهاز بالفرع');
+    const moves = {};
+    for (const [productId, requested] of quantities) {
+      const qty = Number(requested.toFixed(6));
+      const product = await get(db, `products/${productId}`);
+      if (!product) throw new Error('المنتج غير موجود في المخزون');
+      const before = Number(product.stockByBranch?.[branchId] || 0);
+      if (!Number.isFinite(before) || qty > before + 0.0000001) {
+        throw new Error(`الكمية غير متاحة في مخزون الفرع: ${product.nameAr || product.name || productId} (متبقي: ${Number.isFinite(before) ? before : 0})`);
+      }
+      moves[productId] = { branchId, before, quantity: qty, after: Math.max(0, Number((before - qty).toFixed(6))) };
+    }
+    return { branchId, moves };
+  }
+
   async function commit(db, pending, {normalize = false, maxRetries = 32} = {}) {
     const id = pending.id;
     const payload = clone(pending.order);
@@ -77,7 +107,7 @@ window.InvoiceSave = (() => {
       if (normalize && (!existing || cancelled(existing))) throw new Error('لا يمكن ترقيم فاتورة ملغية أو غير موجودة');
       const before = await state(db, payload.branch, id);
       if (normalize && before.assignment && Number(existing.invoiceNumber) === before.assignment) return existing;
-      if (before.assignment) {
+      if (before.assignment && (normalize || !payload.items.some(item => item.productId))) {
         // A legacy reservation already exists. Reuse it without moving the counter.
         const saved = {...(existing || payload), id, invoiceNumber: String(before.assignment).padStart(padding(payload.branch), '0'), invoiceSequenceVersion: 'v2'};
         const result = await db.ref(`orders/${id}`).transaction(current => {
@@ -90,6 +120,7 @@ window.InvoiceSave = (() => {
         if (winner && !normalize) return winner;
         throw new Error('تعذر استكمال الرقم المحجوز');
       }
+      const stock = normalize ? { branchId: null, moves: {} } : await stockPlan(db, payload);
       const allocated = Math.max(before.counter, before.sequence, before.rawSequence) + 1;
       const saved = {...(normalize ? existing : payload), id,
         invoiceNumber: String(allocated).padStart(padding(payload.branch), '0'),
@@ -98,6 +129,13 @@ window.InvoiceSave = (() => {
       if (normalize) {
         saved.invoiceNumberBeforeNormalization = String(existing.invoiceNumber || '');
         saved.invoiceNumberNormalizedAt = Date.now();
+      }
+      if (!normalize && Object.keys(stock.moves).length) {
+        saved.stockBranchId = stock.branchId;
+        saved.branchId = stock.branchId;
+        saved.createdAt = payload.createdAt || payload.timestamp || Date.now();
+        saved.stockDeducted = true;
+        saved.stockMovements = stock.moves;
       }
       const updates = {
         [`orders/${id}`]: saved,
@@ -110,6 +148,12 @@ window.InvoiceSave = (() => {
           baseRawSequence: before.rawSequence, branch: payload.branch,
           mode: normalize ? 'normalize' : 'create', timestamp: Date.now()}
       };
+      if (!normalize && Object.keys(stock.moves).length) {
+        updates[`invoiceCommits/${before.key}`].stockMoves = stock.moves;
+        for (const [productId, move] of Object.entries(stock.moves)) {
+          updates[`products/${productId}/stockByBranch/${move.branchId}`] = move.after;
+        }
+      }
       // Carry the durable local history into the successful atomic write too,
       // including failures recorded before an offline browser was restarted.
       const audit = (event, timestamp, error = '') => ({event, timestamp,

@@ -1863,6 +1863,10 @@ function setupRealtimeListeners() {
 
 // 2. دالة تحديث واجهة المستخدم بدون ريفريش
 function refreshUI() {
+  document.querySelectorAll('[data-stock-product]').forEach(label => {
+    const product = allProducts.find(product => product.id === label.dataset.stockProduct);
+    if (product) label.outerHTML = renderInvoiceProductStock(product);
+  });
   scheduleDataCacheSave();
   if (isLoadingFreshData) return;
 
@@ -4214,6 +4218,7 @@ function refreshUI() {
           <div class="text-4xl mb-2">📦</div>
           <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(prod))}</div>
           <div class="text-blue-600 font-bold text-lg">${prod.price.toFixed(3)} ${cashierT('kd')}</div>
+          ${renderInvoiceProductStock(prod)}
         </div>
       `).join('')}
     </div>
@@ -4241,6 +4246,7 @@ function refreshUI() {
               <div class="text-4xl mb-2">📦</div>
               <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(prod))}</div>
               <div class="text-blue-600 font-bold text-lg">${prod.price.toFixed(3)} ${cashierT('kd')}</div>
+          ${renderInvoiceProductStock(prod)}
               <div class="text-sm text-gray-600">${prod.unit}</div>
             </div>
           `).join('')}
@@ -4433,6 +4439,50 @@ function refreshUI() {
       order.items = items;
     }
 
+    function getInvoiceStockBranchId() {
+      const name = String(currentBranch || '').trim();
+      const branch = allBranches.find(branch => [branch.nameAr, branch.name, branch.nameEn, branch.id].includes(name));
+      if (branch) return branch.id;
+      const deviceId = localStorage.getItem('deviceBranchId');
+      return allBranches.some(branch => branch.id === deviceId) ? deviceId : null;
+    }
+
+    function getInvoiceProductStock(product) {
+      const branchId = getInvoiceStockBranchId();
+      return branchId ? Math.max(0, Number(product?.stockByBranch?.[branchId] || 0)) : 0;
+    }
+
+    function getInvoiceProductUnit(product) {
+      const unit = allAccountingUnits.find(unit => unit.id === product?.unitId)
+        || allInventoryUnits.find(unit => unit.id === product?.unitId);
+      return unit ? cashierDisplayName(unit) : (product?.unit || '');
+    }
+
+    function renderInvoiceProductStock(product) {
+      const qty = getInvoiceProductStock(product);
+      const unit = getInvoiceProductUnit(product);
+      const text = qty <= 0
+        ? (cashierLanguage === 'en' ? 'Out of stock' : 'نفذت الكمية من المخزون')
+        : (cashierLanguage === 'en' ? `Remaining: ${formatInventoryDecimal(qty)}${unit ? ' ' + unit : ''} in stock` : `متبقي: ${formatInventoryDecimal(qty)}${unit ? ' ' + unit : ''} في المخزون`);
+      return `<div data-stock-product="${escapeHtml(product.id)}" style="color:#dc2626;font-weight:700;font-size:13px;margin-top:6px">${escapeHtml(text)}</div>`;
+    }
+
+    function canSetInvoiceProductQuantity(productId, quantity, editIndex = -1) {
+      const product = allProducts.find(product => product.id === productId);
+      const others = currentOrder.items.reduce((total, item, index) => total +
+        (index !== editIndex && item.productId === productId ? Number(item.quantity || 0) : 0), 0);
+      const stock = getInvoiceProductStock(product);
+      if (!getInvoiceStockBranchId()) {
+        showToast(cashierLanguage === 'en' ? 'Branch stock could not be identified' : 'تعذر تحديد مخزون الفرع، حدّث الصفحة وتحقق من ربط الجهاز بالفرع', true);
+        return false;
+      }
+      if (!product || stock <= 0 || others + quantity > stock + 0.0000001) {
+        showToast(stock <= 0 ? (cashierLanguage === 'en' ? 'Out of stock' : 'نفذت الكمية من المخزون') : (cashierLanguage === 'en' ? `Available stock: ${stock}` : `الكمية تتجاوز المتاح في مخزون الفرع، المتبقي: ${stock}`), true);
+        return false;
+      }
+      return true;
+    }
+
     function addProductToInvoice(productId) {
       if (productId === TROLLEY_DEPOSIT_ID) return;
       const product = allProducts.find(p => p.id === productId);
@@ -4440,6 +4490,7 @@ function refreshUI() {
         showToast(cashierT('productNotFound'), true);
         return;
       }
+      if (!canSetInvoiceProductQuantity(productId, 1)) return;
       const existingItem = currentOrder.items.find(item => item.productId === productId);
       
       if (existingItem) {
@@ -4626,6 +4677,10 @@ function refreshUI() {
         return;
       }
       
+      if (!canSetInvoiceProductQuantity(currentOrder.items[index].productId, quantity, index)) {
+        updateSelectedItemsDisplay();
+        return;
+      }
       currentOrder.items[index].quantity = quantity;
       currentOrder.items[index].total = quantity * currentOrder.items[index].price;
       updateSelectedItemsDisplay();
@@ -5758,6 +5813,7 @@ function showNumericKeypadForInvoice(index, inputField) {
             total: currentOrder.items.reduce((sum, item) => sum + item.total, 0) + (currentOrder.deliveryPrice || 0)
           };
       
+          order.stockBranchId = getInvoiceStockBranchId();
           pending = InvoiceSave.prepare(order, orderId, currentOrder);
           InvoiceSave.remember(localStorage, key, pending);
         }

@@ -6166,6 +6166,7 @@ function renderOrderSalesReportView(section) {
 }
 
 function printA4Report(title, metadataRows, headers, rows, summaryRows = []) {
+  const logoUrl = new URL('logo.png', window.location.href).href;
   const lang = window.i18n.getLanguage();
   const dir = lang === 'ar' ? 'rtl' : 'ltr';
   const headerCells = (headers || []).map((item) => `<th>${item}</th>`).join('');
@@ -6204,7 +6205,7 @@ function printA4Report(title, metadataRows, headers, rows, summaryRows = []) {
             <h2>${title}</h2>
             <p>${window.i18n.t('date_time')}: ${formatDate(Date.now())}</p>
           </div>
-          <img class="logo" src="logo.png" alt="logo" />
+          <img class="logo" src="${logoUrl}" alt="logo" />
         </div>
         ${metaHtml ? `<div class="meta">${metaHtml}</div>` : ''}
         ${summaryHtml ? `<div class="summary">${summaryHtml}</div>` : ''}
@@ -6230,9 +6231,21 @@ function printA4Report(title, metadataRows, headers, rows, summaryRows = []) {
   if (!printWindow) return;
   printWindow.document.write(html);
   printWindow.document.close();
-  printWindow.focus();
-  printWindow.print();
-  printWindow.close();
+  const printWhenReady = async () => {
+    await Promise.all(Array.from(printWindow.document.images).map(image => {
+      if (image.complete) return Promise.resolve();
+      return new Promise(resolve => {
+        image.addEventListener('load', resolve, { once: true });
+        image.addEventListener('error', resolve, { once: true });
+      });
+    }));
+    await printWindow.document.fonts?.ready;
+    if (printWindow.closed) return;
+    printWindow.addEventListener('afterprint', () => printWindow.close(), { once: true });
+    printWindow.focus();
+    printWindow.print();
+  };
+  printWhenReady();
 }
 
 function printReportTable(title, metadataRows, headers, rows, totalLabel, totalValue) {
@@ -19079,7 +19092,7 @@ function printCashierTransferRequestReport(record) {
     rows,
     record.status === 'received'
       ? [
-          { label: 'إقرار الاستلام', value: `أقر الكاشير ${record.receivedByCashier || record.cashierName || '-'} بأنه استلم الأصناف الموضحة في هذا التقرير.` },
+          { label: 'إقرار الاستلام', value: `أقر الموظف ${record.receivedByCashier || record.cashierName || '-'} بأنه استلم الأصناف الموضحة في هذا التقرير.` },
           { label: 'وقت الاستلام', value: formatDate(record.receivedAt) }
         ]
       : []

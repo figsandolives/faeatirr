@@ -3625,10 +3625,34 @@ function refreshUI() {
 
     function getShortageMaterialUnit(item) {
       const source = getShortageItemSource('material', item.itemId || item.id);
-      const unitId = source?.unitId || item.unitId;
+      const unitId = item.unitId || source?.unitId;
       const unit = allAccountingUnits.find(unit => String(unit.id) === String(unitId))
         || allInventoryUnits.find(unit => String(unit.id) === String(unitId));
       return (unit ? cashierDisplayName(unit) : (source?.unitName || source?.unitLabel || source?.unit || '')) || cashierT('unit');
+    }
+
+    function getShortageUnitOptions() {
+      const units = new Map();
+      [...allAccountingUnits, ...allInventoryUnits].forEach(unit => {
+        if (unit.id && !units.has(String(unit.id))) units.set(String(unit.id), unit);
+      });
+      return Array.from(units.values());
+    }
+
+    async function saveMissingShortageMaterialUnit(source, unitId) {
+      if (source.unitId || source.unitName || source.unitLabel || source.unit) return;
+      if (typeof cashierSessionToken !== 'undefined' && cashierSessionToken) {
+        await updateCashierRecord(`stockMaterials/${source.id}`, { unitId });
+        source.unitId = unitId;
+      } else {
+        const result = await db.ref(`stockMaterials/${source.id}`).transaction(current => {
+          if (!current || current.unitId || current.unitName || current.unitLabel || current.unit) return;
+          return { ...current, unitId };
+        });
+        const saved = result.snapshot.val();
+        if (!saved) throw new Error('Material no longer exists');
+        source.unitId = saved.unitId || null;
+      }
     }
 
     function openShortageMaterialQuantity(itemId, editIndex = null) {
@@ -3636,6 +3660,8 @@ function refreshUI() {
       if (!source) { showToast(cashierT('itemNotFound'), true); return; }
       document.getElementById('shortageMaterialQuantityModal')?.remove();
       const item = editIndex === null ? null : currentShortageDraft.items[editIndex];
+      const unitOptions = getShortageUnitOptions();
+      const selectedUnitId = item?.unitId || source.unitId || '';
       const modal = document.createElement('div');
       modal.id = 'shortageMaterialQuantityModal';
       modal.className = 'modal-overlay';
@@ -3649,7 +3675,10 @@ function refreshUI() {
           <label for="shortageMaterialQuantityInput" class="block font-bold mb-2">${cashierT('qty')}</label>
           <div class="flex items-center gap-3 mb-6">
             <input id="shortageMaterialQuantityInput" type="text" inputmode="decimal" dir="ltr" autocomplete="off" required value="${item ? item.qty : ''}" oninput="this.value = normalizeDecimalInput(this.value); this.setCustomValidity('')" class="w-full p-3 border-2 border-purple-300 rounded-lg text-xl">
-            <span class="font-bold whitespace-nowrap">${escapeHtml(getShortageMaterialUnit(source))}</span>
+            <select id="shortageMaterialUnitSelect" required aria-label="${cashierT('unit')}" class="p-3 border-2 border-purple-300 rounded-lg font-bold" style="max-width:145px">
+              <option value="">${cashierLanguage === 'en' ? 'Select unit' : 'اختر الوحدة'}</option>
+              ${unitOptions.map(unit => `<option value="${escapeHtml(String(unit.id))}" ${String(unit.id) === String(selectedUnitId) ? 'selected' : ''}>${escapeHtml(cashierDisplayName(unit))}</option>`).join('')}
+            </select>
           </div>
           <div class="flex gap-3">
             <button type="submit" class="flex-1 bg-purple-800 text-white p-3 rounded-lg font-bold">${cashierT('confirm')}</button>
@@ -3662,7 +3691,7 @@ function refreshUI() {
       modal.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
       });
-      modal.querySelector('form').onsubmit = event => {
+      modal.querySelector('form').onsubmit = async event => {
         event.preventDefault();
         const qty = Number(normalizeDecimalInput(input.value));
         if (!Number.isFinite(qty) || qty <= 0) {
@@ -3670,19 +3699,33 @@ function refreshUI() {
           input.reportValidity();
           return;
         }
-        if (editIndex === null) addItemToShortage('material', itemId, qty);
-        else if (currentShortageDraft.items[editIndex] === item) {
-          item.qty = qty;
-          renderShortageItems();
+        const unitId = modal.querySelector('select').value;
+        if (!unitOptions.some(unit => String(unit.id) === unitId)) return;
+        const confirmButton = modal.querySelector('[type="submit"]');
+        if (confirmButton.disabled) return;
+        confirmButton.disabled = true;
+        try {
+          await saveMissingShortageMaterialUnit(source, unitId);
+          if (editIndex === null) addItemToShortage('material', itemId, qty, unitId);
+          else if (currentShortageDraft.items[editIndex] === item) {
+            item.qty = qty;
+            item.unitId = unitId;
+            renderShortageItems();
+          }
+          close();
+        } catch (error) {
+          console.error('Error saving material unit:', error);
+          showToast(cashierLanguage === 'en' ? 'Could not save the unit. Please try again.' : 'تعذر حفظ الوحدة، حاول مرة أخرى', true);
+        } finally {
+          confirmButton.disabled = false;
         }
-        close();
       };
       document.body.appendChild(modal);
       input.focus();
       input.select();
     }
 
-	    function addItemToShortage(itemType, itemId, qty = 1) {
+	    function addItemToShortage(itemType, itemId, qty = 1, requestedUnitId = null) {
           if (itemType === 'material' && arguments.length < 3) {
             openShortageMaterialQuantity(itemId);
             return;
@@ -3692,7 +3735,8 @@ function refreshUI() {
 	        showToast(cashierT('itemNotFound'), true);
 	        return;
 	      }
-	      const existing = currentShortageDraft.items.find(item => item.itemType === itemType && item.itemId === itemId);
+	      const unitId = requestedUnitId || source.unitId || null;
+          const existing = currentShortageDraft.items.find(item => item.itemType === itemType && item.itemId === itemId && (item.unitId || null) === unitId);
 	      if (existing) {
 	        existing.qty += qty;
 	      } else {
@@ -3702,7 +3746,7 @@ function refreshUI() {
 	          name: source.nameAr || source.name || source.nameEn || '',
 	          nameAr: source.nameAr || source.name || '',
 	          nameEn: source.nameEn || '',
-	          unitId: source.unitId || null,
+	          unitId,
 	          barcode: source.barcode || '',
 	          qty
 	        });

@@ -4449,7 +4449,7 @@ function refreshUI() {
 
     function getInvoiceProductStock(product) {
       const branchId = getInvoiceStockBranchId();
-      return branchId ? Math.max(0, Number(product?.stockByBranch?.[branchId] || 0)) : 0;
+      return branchId ? Number(product?.stockByBranch?.[branchId] || 0) : 0;
     }
 
     function getInvoiceProductUnit(product) {
@@ -4469,17 +4469,11 @@ function refreshUI() {
 
     function canSetInvoiceProductQuantity(productId, quantity, editIndex = -1) {
       const product = allProducts.find(product => product.id === productId);
-      const others = currentOrder.items.reduce((total, item, index) => total +
-        (index !== editIndex && item.productId === productId ? Number(item.quantity || 0) : 0), 0);
-      const stock = getInvoiceProductStock(product);
       if (!getInvoiceStockBranchId()) {
         showToast(cashierLanguage === 'en' ? 'Branch stock could not be identified' : 'تعذر تحديد مخزون الفرع، حدّث الصفحة وتحقق من ربط الجهاز بالفرع', true);
         return false;
       }
-      if (!product || stock <= 0 || others + quantity > stock + 0.0000001) {
-        showToast(stock <= 0 ? (cashierLanguage === 'en' ? 'Out of stock' : 'نفذت الكمية من المخزون') : (cashierLanguage === 'en' ? `Available stock: ${stock}` : `الكمية تتجاوز المتاح في مخزون الفرع، المتبقي: ${stock}`), true);
-        return false;
-      }
+      if (!product || !Number.isFinite(quantity) || quantity <= 0) return false;
       return true;
     }
 

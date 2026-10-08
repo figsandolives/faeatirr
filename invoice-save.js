@@ -85,10 +85,10 @@ window.InvoiceSave = (() => {
       const product = await get(db, `products/${productId}`);
       if (!product) throw new Error('المنتج غير موجود في المخزون');
       const before = Number(product.stockByBranch?.[branchId] || 0);
-      if (!Number.isFinite(before) || qty > before + 0.0000001) {
+      if (!Number.isFinite(before)) {
         throw new Error(`الكمية غير متاحة في مخزون الفرع: ${product.nameAr || product.name || productId} (متبقي: ${Number.isFinite(before) ? before : 0})`);
       }
-      moves[productId] = { branchId, before, quantity: qty, after: Math.max(0, Number((before - qty).toFixed(6))) };
+      moves[productId] = { branchId, before, quantity: qty, after: Number((before - qty).toFixed(6)) };
     }
     return { branchId, moves };
   }

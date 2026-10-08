@@ -3612,7 +3612,68 @@ function refreshUI() {
 	        : allProducts.find(item => item.id === itemId);
 	    }
 
+    function getShortageMaterialUnit(item) {
+      const source = getShortageItemSource('material', item.itemId || item.id);
+      const unit = allInventoryUnits.find(unit => unit.id === (item.unitId || source?.unitId));
+      return (unit ? cashierDisplayName(unit) : (source?.unit || '')) || cashierT('unit');
+    }
+
+    function openShortageMaterialQuantity(itemId, editIndex = null) {
+      const source = getShortageItemSource('material', itemId);
+      if (!source) { showToast(cashierT('itemNotFound'), true); return; }
+      document.getElementById('shortageMaterialQuantityModal')?.remove();
+      const item = editIndex === null ? null : currentShortageDraft.items[editIndex];
+      const modal = document.createElement('div');
+      modal.id = 'shortageMaterialQuantityModal';
+      modal.className = 'modal-overlay';
+      modal.dir = cashierLanguage === 'en' ? 'ltr' : 'rtl';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('aria-labelledby', 'shortageMaterialQuantityTitle');
+      modal.innerHTML = `
+        <form class="modal-content p-6 w-full max-w-md">
+          <h2 id="shortageMaterialQuantityTitle" class="text-xl font-bold text-purple-900 mb-6">${escapeHtml(cashierDisplayName(source))}</h2>
+          <label for="shortageMaterialQuantityInput" class="block font-bold mb-2">${cashierT('qty')}</label>
+          <div class="flex items-center gap-3 mb-6">
+            <input id="shortageMaterialQuantityInput" type="text" inputmode="decimal" dir="ltr" autocomplete="off" required value="${item ? item.qty : ''}" oninput="this.value = normalizeDecimalInput(this.value); this.setCustomValidity('')" class="w-full p-3 border-2 border-purple-300 rounded-lg text-xl">
+            <span class="font-bold whitespace-nowrap">${escapeHtml(getShortageMaterialUnit(source))}</span>
+          </div>
+          <div class="flex gap-3">
+            <button type="submit" class="flex-1 bg-purple-800 text-white p-3 rounded-lg font-bold">${cashierT('confirm')}</button>
+            <button type="button" class="flex-1 bg-gray-200 p-3 rounded-lg font-bold">${cashierT('cancel')}</button>
+          </div>
+        </form>`;
+      const input = modal.querySelector('input');
+      const close = () => { modal.remove(); document.getElementById('shortageSearchBox')?.focus(); };
+      modal.querySelector('[type="button"]').onclick = close;
+      modal.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
+      });
+      modal.querySelector('form').onsubmit = event => {
+        event.preventDefault();
+        const qty = Number(normalizeDecimalInput(input.value));
+        if (!Number.isFinite(qty) || qty <= 0) {
+          input.setCustomValidity(cashierLanguage === 'en' ? 'Enter a quantity greater than zero' : 'أدخل كمية أكبر من صفر');
+          input.reportValidity();
+          return;
+        }
+        if (editIndex === null) addItemToShortage('material', itemId, qty);
+        else if (currentShortageDraft.items[editIndex] === item) {
+          item.qty = qty;
+          renderShortageItems();
+        }
+        close();
+      };
+      document.body.appendChild(modal);
+      input.focus();
+      input.select();
+    }
+
 	    function addItemToShortage(itemType, itemId, qty = 1) {
+          if (itemType === 'material' && arguments.length < 3) {
+            openShortageMaterialQuantity(itemId);
+            return;
+          }
 	      const source = getShortageItemSource(itemType, itemId);
 	      if (!source) {
 	        showToast(cashierT('itemNotFound'), true);
@@ -3657,8 +3718,11 @@ function refreshUI() {
 	            <button onclick="removeShortageItem(${index})" class="text-red-600 hover:text-red-800 font-bold text-lg">✕</button>
 	          </div>
 	          <div class="flex items-center gap-2">
-	            <input type="number" min="1" step="1" value="${item.qty}" onchange="updateShortageItemQty(${index}, this.value)" class="quantity-input bg-white">
-	            <span class="text-sm text-gray-600">${cashierT('qty')}</span>
+            ${item.itemType === 'material' ? `
+              <span dir="ltr" class="font-bold">${item.qty}</span>
+              <span class="text-sm text-gray-600">${escapeHtml(getShortageMaterialUnit(item))}</span>
+              <button onclick="openShortageMaterialQuantity(currentShortageDraft.items[${index}].itemId, ${index})" class="bg-purple-800 text-white px-3 py-2 rounded-lg font-bold">${cashierT('edit')}</button>
+            ` : `<input type="number" min="1" step="1" value="${item.qty}" onchange="updateShortageItemQty(${index}, this.value)" class="quantity-input bg-white"><span class="text-sm text-gray-600">${cashierT('qty')}</span>`}
 	          </div>
 	        </div>
 	      `).join('');

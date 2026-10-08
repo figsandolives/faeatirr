@@ -3887,7 +3887,16 @@ function refreshUI() {
 
 	    function openCashierReceiveShortage(requestId) {
 	      const request = allTransferRequests.find(item => item.id === requestId);
-	      if (!request) return;
+      if (!request) return;
+      if (!isShortageRequestBranch() || !getCashierBranchShortageRequests().some(item => item.id === requestId)) {
+        showToast('هذا الطلب يخص فرعًا آخر', true);
+        return;
+      }
+      if (request.status !== 'sent') {
+        showToast(request.status === 'received' ? 'تم استلام هذا الطلب مسبقًا' : 'الطلب غير جاهز للاستلام', true);
+        return;
+      }
+      document.getElementById('cashierReceiveShortageModal')?.remove();
 	      const items = request.items || [];
 	      const modal = document.createElement('div');
 	      modal.className = 'modal-overlay';
@@ -4546,6 +4555,18 @@ function refreshUI() {
     function handleBarcodeScan(value) {
       if (currentScreen !== 'cashier' || !currentCashier) return;
       const barcode = normalizeBarcodeValue(value);
+      if (barcode.startsWith('990') && /^\d{14,}$/.test(barcode)) {
+        const matches = allTransferRequests.filter(item => {
+          const match = /^TR-(\d{8})-(\d+)$/.exec(String(item.requestNumber || ''));
+          return match && `990${match[1]}${match[2]}` === barcode;
+        });
+        if (!matches.length) { showToast('لم يتم العثور على طلب النواقص لهذا الباركود', true); return; }
+        const branchMatches = getCashierBranchShortageRequests().filter(item => matches.some(match => match.id === item.id));
+        if (branchMatches.length !== 1) { showToast(branchMatches.length ? 'يوجد أكثر من طلب بهذا الرقم؛ افتح الطلب من قائمة النواقص' : 'هذا الطلب يخص فرعًا آخر', true); return; }
+        openCashierReceiveShortage(branchMatches[0].id);
+        clearProductSearchBoxAfterScan(barcode);
+        return;
+      }
 	      if (!/^\d{6,}$/.test(barcode)) return;
 	      clearProductSearchBoxAfterScan(barcode);
 

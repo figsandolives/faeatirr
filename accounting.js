@@ -18826,6 +18826,7 @@ function bindCashierTransferRequestsSection() {
       const draft = state.cashierTransferDraft;
       if (!draft?.items?.length) return;
       printCashierTransferRequestReport({
+        ...draft.sourceRecord,
         requestNumber: draft.requestNumber,
         branchId: draft.branchId,
         cashierName: draft.cashierName,
@@ -18843,6 +18844,7 @@ function openCashierTransferModal(request, mode = 'transfer') {
   const mainBranchId = getMainBranchId();
   const isTransferMode = mode === 'transfer';
   state.cashierTransferDraft.mode = isTransferMode ? 'transfer' : 'view';
+  state.cashierTransferDraft.sourceRecord = request;
   state.cashierTransferDraft.requestId = request.id;
   state.cashierTransferDraft.requestNumber = request.requestNumber || '';
   state.cashierTransferDraft.branchId = request.branchId || '';
@@ -18933,13 +18935,16 @@ function renderCashierTransferRequestsTable() {
 	            <button class="btn ghost small" data-action="print">طباعة</button>
 	            <button class="btn primary small" data-action="deliver">تسليم</button>
 	          ` : ''}
-	          ${rec.status === 'sent' || rec.status === 'received' ? `
+	          ${rec.status === 'sent' || rec.status === 'received' || rec.status === 'transferred' || rec.status === 'partial_received' ? `
 	            <button class="btn ghost small" data-action="view">${window.i18n.t('view')}</button>
 	            <button class="btn ghost small" data-action="print">تقرير PDF</button>
+                <button class="btn ghost small" data-action="delivery-sheet">طباعة ورقة التسليم</button>
 	          ` : ''}
 	        </div>
 	      </td>
 	    `;
+    const sheetBtn = row.querySelector('[data-action="delivery-sheet"]');
+    if (sheetBtn) sheetBtn.addEventListener('click', () => printCashierShortageDeliverySheet(rec));
     const viewBtn = row.querySelector('[data-action="view"]');
     if (viewBtn) viewBtn.addEventListener('click', () => openCashierTransferModal(rec, 'view'));
 	    const printBtn = row.querySelector('[data-action="print"]');
@@ -19019,13 +19024,46 @@ function getCashierTransferItemName(item) {
   return names.en && names.en !== '-' ? `${names.ar} / ${names.en}` : names.ar;
 }
 
+function getCashierShortageExecutor(record) {
+  const transfer = state.cache.cashierTransfers?.[record.transferId];
+  return record.sentBy || record.processedBy || transfer?.storekeeperName || '-';
+}
+
+function getCashierShortageReceiptBarcode(record) {
+  const match = /^TR-(\d{8})-(\d+)$/.exec(String(record.requestNumber || ''));
+  return match ? `990${match[1]}${match[2]}` : '';
+}
+
+function printCashierShortageDeliverySheet(record) {
+  const barcode = getCashierShortageReceiptBarcode(record);
+  if (!barcode || typeof JsBarcode === 'undefined') {
+    alert('تعذر إنشاء باركود الاستلام لهذا الطلب.');
+    return;
+  }
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  JsBarcode(svg, barcode, { format: 'CODE128', displayValue: true, height: 140, width: 3, margin: 24, fontSize: 24 });
+  const logo = new URL('logo.png', window.location.href).href;
+  openPrintWindow(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>ورقة تسليم نواقص</title>
+    <style>@page{size:A4 portrait;margin:18mm}body{font-family:Tahoma,Arial,sans-serif;color:#000;margin:0}.head{text-align:center}.logo{width:110px;height:110px;object-fit:contain}h1{font-size:36px;margin:20px 0 40px}.meta{font-size:23px;line-height:2.1}.barcode{text-align:center;margin-top:55px;direction:ltr}.barcode svg{max-width:100%;height:auto}.hint{text-align:center;font-size:18px;margin-top:25px}</style></head><body>
+    <div class="head"><img class="logo" src="${escapeHtml(logo)}"><h1>ورقة تسليم نواقص</h1></div>
+    <div class="meta"><div><strong>مقدم الطلب:</strong> ${escapeHtml(record.cashierName || '-')}</div>
+    <div><strong>منفذ الطلب:</strong> ${escapeHtml(getCashierShortageExecutor(record))}</div>
+    <div><strong>تاريخ الطلب:</strong> ${escapeHtml(formatDate(record.createdAt))}</div>
+    <div><strong>رقم الطلب:</strong> ${escapeHtml(record.requestNumber || '-')}</div>
+    <div><strong>الفرع:</strong> ${escapeHtml(getCashierTransferBranchLabel(record))}</div></div>
+    <div class="barcode">${svg.outerHTML}</div><p class="hint">امسح الباركود في شاشة الكاشير لفتح استلام هذا الطلب</p>
+    <script>window.addEventListener('load',async()=>{await document.fonts?.ready;window.focus();window.print();});</script></body></html>`);
+}
+
 function buildCashierTransferPrintMeta(record) {
   return [
     { label: window.i18n.t('transfer_request_number'), value: record.requestNumber || '-' },
     { label: window.i18n.t('branch'), value: getCashierTransferBranchLabel(record) },
-    { label: window.i18n.t('cashier_name'), value: record.cashierName || '-' },
+    { label: 'مقدم الطلب', value: escapeHtml(record.cashierName || '-') },
+    { label: 'منفذ الطلب', value: escapeHtml(getCashierShortageExecutor(record)) },
     { label: window.i18n.t('date_time'), value: formatDate(record.createdAt) },
-    { label: window.i18n.t('status'), value: getCashierTransferRequestStatusLabel(record) }
+    { label: window.i18n.t('status'), value: getCashierTransferRequestStatusLabel(record) },
+    ...(record.status === 'received' || record.status === 'partial_received' ? [{ label: 'مستلم الطلب', value: escapeHtml(record.receivedByCashier || record.receivedBy || '-') }] : [])
   ];
 }
 
@@ -19159,6 +19197,7 @@ function renderCashierTransferItems() {
       printBtn.addEventListener('click', () => {
         printCashierTransferRequestGroupReport(
           {
+            ...state.cashierTransferDraft.sourceRecord,
             requestNumber: state.cashierTransferDraft.requestNumber,
             branchId: state.cashierTransferDraft.branchId,
             cashierName: state.cashierTransferDraft.cashierName,

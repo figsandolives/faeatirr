@@ -1628,6 +1628,7 @@ function selectSection(sectionId) {
 function initSections() {
   setupReportsSection();
   setupOrdersSection();
+  renderDailySessionsSection();
   setupOnlineOrdersSection();
   setupPendingStockMovesSection();
   setupDevicesCashiersSection();
@@ -1663,6 +1664,7 @@ function initSections() {
 function rebuildSections() {
   setupReportsSection();
   setupOrdersSection();
+  renderDailySessionsSection();
   setupOnlineOrdersSection();
   setupPendingStockMovesSection();
   setupDevicesCashiersSection();
@@ -6327,6 +6329,296 @@ function printSalesProductDetailsReport(product, rows, totalRevenue) {
     window.i18n.t('reports_total_revenue'),
     formatMoney(totalRevenue)
   );
+}
+
+
+function renderDailySessionsSection() {
+  const section = document.getElementById('section-dailySessions');
+  if (!section) return;
+  const english = window.i18n.getLanguage() === 'en';
+  const sessions = Object.entries(state.cache.dailySessions || {})
+    .map(([id, session]) => ({ ...session, id }))
+    .sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0));
+  const money = value => `${(parseFloat(value) || 0).toFixed(3)}${getCurrencySuffix()}`;
+  const headers = english
+    ? ['Employee', 'Branch', 'Opened', 'Closed', 'Opening amount', 'Status', 'Actions']
+    : ['الموظف', 'الفرع', 'فتح اليومية', 'إغلاق اليومية', 'مبلغ البداية', 'الحالة', 'الإجراءات'];
+  section.innerHTML = `<div class="card"><div class="section-head"><h2>${window.i18n.t('daily_sessions')}</h2><span>${english ? 'Sessions' : 'عدد اليوميات'}: ${sessions.length}</span></div>
+    <div class="table-wrap"><table><thead><tr>${headers.map(label => `<th>${label}</th>`).join('')}</tr></thead><tbody>
+    ${sessions.map(session => `<tr><td>${escapeHtml(session.cashierName || '-')}</td><td>${escapeHtml(session.branch || '-')}</td>
+      <td>${escapeHtml(formatDate(session.openedAt))}</td><td>${escapeHtml(formatDate(session.closedAt))}</td><td>${money(session.openingAmount)}</td>
+      <td>${session.status === 'closed' ? (english ? 'Closed' : 'مغلقة') : (english ? 'Open' : 'مفتوحة')}</td>
+      <td><button class="btn small" data-print-daily-session="${escapeHtml(session.id)}">${english ? 'Print' : 'طباعة'}</button></td></tr>`).join('') || `<tr><td colspan="7">${english ? 'No saved sessions' : 'لا توجد يوميات محفوظة'}</td></tr>`}
+    </tbody></table></div></div>`;
+  section.querySelectorAll('[data-print-daily-session]').forEach(button => {
+    button.addEventListener('click', () => printAccountingDailySession(button.dataset.printDailySession));
+  });
+}
+
+function printAccountingDailySession(sessionId) {
+  const savedSession = state.cache.dailySessions?.[sessionId];
+  if (!savedSession) return;
+  const session = { ...savedSession, id: sessionId };
+  const cashierLanguage = window.i18n.getLanguage();
+  const showToast = message => alert(message);
+    function getDailySessionOrders(session) {
+      if (!session) return [];
+      return Object.entries(state.cache.orders || {}).map(([id, order]) => ({ ...order, id }))
+        .filter(order => {
+          const belongsById = order.dailySessionId && order.dailySessionId === session.id;
+          const belongsByTime = !order.dailySessionId &&
+            order.branch === session.branch &&
+            order.cashierCode === session.cashierCode &&
+            (order.timestamp || 0) >= (session.openedAt || 0) &&
+            (!session.closedAt || (order.timestamp || 0) <= session.closedAt);
+          return belongsById || belongsByTime;
+        })
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    }
+
+    function getLocalDateValueFromTimestamp(timestamp) {
+      const date = new Date(timestamp || Date.now());
+      const pad = (value) => String(value).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+
+    function buildDailyBalanceSummary(session, orders, payments) {
+      const cancelledOrders = orders.filter(InvoiceCancellation.isCancelled);
+      const activeOrders = orders.filter(order => !InvoiceCancellation.isCancelled(order));
+      const totals = { cash: 0, online: 0, knet: 0 };
+      activeOrders.forEach(order => {
+        const total = parseFloat(order.total) || 0;
+        if (order.paymentMethod === 'cash') totals.cash += total;
+        if (order.paymentMethod === 'online') totals.online += total;
+        if (order.paymentMethod === 'knet') totals.knet += total;
+      });
+      const deliveryOrders = activeOrders.filter(order => order.orderType === 'delivery');
+      const deliveredDeliveryOrders = deliveryOrders.filter(order => (order.courierName || '').trim());
+      const pendingDeliveryOrders = deliveryOrders.filter(order => !(order.courierName || '').trim());
+      const sessionDate = getLocalDateValueFromTimestamp(session?.openedAt || Date.now());
+      const sameDayPendingDeliveryOrders = pendingDeliveryOrders.filter(order => !order.deliveryDate || order.deliveryDate === sessionDate);
+      const futurePendingDeliveryOrders = pendingDeliveryOrders.filter(order => order.deliveryDate && order.deliveryDate !== sessionDate);
+      return {
+        orders,
+        deliveryOrders,
+        deliveredDeliveryOrders,
+        cancelledOrders,
+        sameDayPendingDeliveryOrders,
+        futurePendingDeliveryOrders,
+        totals,
+        payments,
+        firstInvoice: orders[0]?.invoiceNumber || '-',
+        lastInvoice: orders[orders.length - 1]?.invoiceNumber || '-'
+      };
+    }
+
+    function formatNumberWithThreeDecimals(value) {
+      return (parseFloat(value) || 0).toFixed(3);
+    }
+
+    function getPaymentMethodLabel(method, withIcon = true) {
+      if (method === 'cash') return withIcon ? '💵 كاش' : 'كاش';
+      if (method === 'online') return withIcon ? '💳 أونلاين' : 'أونلاين';
+      if (method === 'knet') return withIcon ? '💳 كي-نت' : 'كي-نت';
+      if (method === 'payment_link' || method === 'subscription') return withIcon ? '🔗 رابط دفع' : 'رابط دفع';
+      return 'N/A';
+    }
+
+    function formatDeliveryDisplayTime(timeValue) {
+      if (!timeValue) return '-';
+      const [hourPart, minutePart = '00'] = timeValue.split(':');
+      const hour = parseInt(hourPart, 10);
+      if (isNaN(hour)) return timeValue;
+      // الساعة 12 هي وقت الظهر، وليست صباحاً أو مساءً.
+      const period = hour === 12 ? 'ظهراً' : (hour > 12 ? 'مساءً' : 'صباحاً');
+      const displayHour = hour % 12 || 12;
+      return `${displayHour}:${minutePart} ${period}`;
+    }
+
+    function formatDeliveryDateWithDay(dateValue) {
+      if (!dateValue) return '';
+      const date = new Date(`${dateValue}T00:00:00`);
+      const days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      return `${days[date.getDay()]} ${date.getDate()} / ${date.getMonth() + 1} / ${date.getFullYear()}م`;
+    }
+
+    function getDeliveryTimeRangeText(order) {
+      const from = formatDeliveryDisplayTime(order.deliveryTimeFrom);
+      const to = formatDeliveryDisplayTime(order.deliveryTimeTo);
+      return `بين الساعة ${from} و ${to}`;
+    }
+
+    function getDeliveryDateAndTimeText(order) {
+      const dateText = order.deliveryDate ? formatDeliveryDateWithDay(order.deliveryDate) : '-';
+      return `${dateText} - ${getDeliveryTimeRangeText(order)}`;
+    }
+
+    function formatDate(timestamp) {
+      if (!timestamp) return '-';
+      const date = new Date(timestamp);
+      return date.toLocaleDateString(cashierLanguage === 'en' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
+        calendar: 'gregory',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+    }
+
+    function formatTime(timestamp) {
+      if (!timestamp) return '-';
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString(cashierLanguage === 'en' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
+        calendar: 'gregory',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    function printDailyBalanceReport(session, summary) {
+      const paymentsTotal = summary.payments.reduce((sum, payment) => sum + (parseFloat(payment.amount) || 0), 0);
+      const deliveryRows = summary.deliveredDeliveryOrders.map(order => `
+        <tr>
+          <td>${order.invoiceNumber || '-'}${InvoiceCancellation.badge(order)}</td>
+          <td>${getPaymentMethodLabel(order.paymentMethod, false)}</td>
+          <td>${formatNumberWithThreeDecimals(order.total)}</td>
+          <td>${formatNumberWithThreeDecimals(order.deliveryPrice || order.deliveryFee || 0)}</td>
+          <td>${escapeHtml(order.courierName || '-')}</td>
+        </tr>
+      `).join('');
+      const sameDayPendingRows = summary.sameDayPendingDeliveryOrders.map(order => `
+        <tr>
+          <td>${order.invoiceNumber || '-'}${InvoiceCancellation.badge(order)}</td>
+          <td>${getPaymentMethodLabel(order.paymentMethod, false)}</td>
+          <td>${formatNumberWithThreeDecimals(order.total)}</td>
+          <td>${formatNumberWithThreeDecimals(order.deliveryPrice || order.deliveryFee || 0)}</td>
+          <td>${getDeliveryTimeRangeText(order)}</td>
+        </tr>
+      `).join('');
+      const futurePendingRows = summary.futurePendingDeliveryOrders.map(order => `
+        <tr>
+          <td>${order.invoiceNumber || '-'}${InvoiceCancellation.badge(order)}</td>
+          <td>${getPaymentMethodLabel(order.paymentMethod, false)}</td>
+          <td>${formatNumberWithThreeDecimals(order.total)}</td>
+          <td>${getDeliveryDateAndTimeText(order)}</td>
+        </tr>
+      `).join('');
+
+      const printWindow = window.open('', '_blank', 'width=800,height=600');
+      if (!printWindow) {
+        showToast('تعذر فتح نافذة الطباعة. يرجى السماح بالنوافذ المنبثقة.', true);
+        return;
+      }
+
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+        <head>
+          <meta charset="UTF-8">
+          <title>يومية الموظف</title>
+          <style>
+            @page { size: 80mm auto; margin: 0; }
+            * { box-sizing: border-box; }
+            body { width: 80mm; margin: 0; padding: 4mm 7mm; font-family: Arial, sans-serif; color: #111; }
+            .receipt { width: 64mm; margin: 0 auto; }
+            .center { text-align: center; }
+            .logo { width: 26mm; height: 26mm; object-fit: contain; margin: 0 auto 2mm; display: block; }
+            h1 { font-size: 18px; margin: 2mm 0; }
+            h2 { font-size: 14px; margin: 4mm 0 2mm; border-top: 1px dashed #000; padding-top: 2mm; }
+            .row { display: flex; justify-content: space-between; gap: 3mm; font-size: 12px; margin: 1.5mm 0; }
+            .bold { font-weight: 700; }
+            table { width: 100%; border-collapse: collapse; font-size: 8px; margin-top: 2mm; table-layout: fixed; }
+            th { background: #e5e7eb; border-bottom: 1px solid #000; padding: 1mm 0.5mm; }
+            td { border-bottom: 1px dotted #bbb; padding: 1mm 0.5mm; text-align: center; overflow-wrap: anywhere; }
+            .thanks { text-align: center; font-weight: 900; font-size: 15px; margin-top: 5mm; border-top: 1px dashed #000; padding-top: 3mm; }
+          </style>
+        </head>
+        <body>
+        <div class="receipt">
+          <img src="logo.png" class="logo" onerror="this.style.display='none'">
+          <h1 class="center">يومية الموظف ${escapeHtml(session.cashierName || '')}</h1>
+          <div class="row"><span>فتح اليومية:</span><span class="bold">${formatDate(session.openedAt)} ${formatTime(session.openedAt)}</span></div>
+          <div class="row"><span>مبلغ البداية:</span><span class="bold">${formatNumberWithThreeDecimals(session.openingAmount)} د.ك</span></div>
+          <div class="row"><span>إغلاق اليومية:</span><span class="bold">${formatDate(session.closedAt)} ${formatTime(session.closedAt)}</span></div>
+
+          <h2>الإيرادات</h2>
+          <div class="row"><span>كاش</span><span class="bold">${formatNumberWithThreeDecimals(summary.totals.cash)} د.ك</span></div>
+          <div class="row"><span>أونلاين</span><span class="bold">${formatNumberWithThreeDecimals(summary.totals.online)} د.ك</span></div>
+          <div class="row"><span>كي نت</span><span class="bold">${formatNumberWithThreeDecimals(summary.totals.knet)} د.ك</span></div>
+
+          <h2>مدفوعات</h2>
+          ${summary.payments.length > 0 ? summary.payments.map(payment => `
+            <div class="row"><span>${escapeHtml(payment.name)}</span><span class="bold">${formatNumberWithThreeDecimals(payment.amount)} د.ك</span></div>
+          `).join('') : '<div class="row"><span>لا توجد مدفوعات</span><span class="bold">0.000 د.ك</span></div>'}
+          <div class="row"><span>إجمالي المدفوعات</span><span class="bold">${formatNumberWithThreeDecimals(paymentsTotal)} د.ك</span></div>
+
+          <h2>الفواتير</h2>
+          <div class="row"><span>رقم أول فاتورة:</span><span class="bold">${summary.firstInvoice}</span></div>
+          <div class="row"><span>رقم آخر فاتورة:</span><span class="bold">${summary.lastInvoice}</span></div>
+
+          ${(summary.cancelledOrders || []).length ? `<h2>الفواتير الملغية</h2>${summary.cancelledOrders.map(order => `<div>#${escapeHtml(order.invoiceNumber)}${InvoiceCancellation.badge(order)}</div>`).join('')}` : ''}
+          <h2>فواتير التوصيل المسلمة للمندوب</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>الفاتورة</th>
+                <th>الدفع</th>
+                <th>القيمة</th>
+                <th>التوصيل</th>
+                <th>المندوب</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${deliveryRows || '<tr><td colspan="5">لا توجد فواتير توصيل مسلمة</td></tr>'}
+            </tbody>
+          </table>
+
+          ${sameDayPendingRows ? `
+            <h2>فواتير توصيل سيتابعها الكاشير التالي</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>الفاتورة</th>
+                  <th>الدفع</th>
+                  <th>القيمة</th>
+                  <th>التوصيل</th>
+                  <th>موعد التوصيل</th>
+                </tr>
+              </thead>
+              <tbody>${sameDayPendingRows}</tbody>
+            </table>
+          ` : ''}
+
+          ${futurePendingRows ? `
+            <h2>فواتير توصيل مؤجلة ليوم آخر</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>الفاتورة</th>
+                  <th>الدفع</th>
+                  <th>القيمة</th>
+                  <th>موعد توصيلها</th>
+                </tr>
+              </thead>
+              <tbody>${futurePendingRows}</tbody>
+            </table>
+          ` : ''}
+
+          <div class="thanks">***شكراً***</div>
+        </div>
+          <script>
+            window.print();
+            window.onafterprint = function() { window.close(); };
+          <\/script>
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+    }
+
+    
+    let currentPreparationReport = null;
+  const summary = buildDailyBalanceSummary(session, getDailySessionOrders(session), Array.isArray(session.payments) ? session.payments : []);
+  printDailyBalanceReport(session, summary);
 }
 
 function setupOrdersSection() {
@@ -25282,6 +25574,7 @@ function scheduleDataRefresh() {
 function watchData() {
   const paths = [
     'orders',
+    'dailySessions',
     'customers',
     'products',
     'productInfos',
@@ -25372,6 +25665,7 @@ function refreshAllDataViews() {
   renderListSections();
   renderReportsSection();
   renderOrders();
+  renderDailySessionsSection();
   renderOnlineOrders();
   renderDevicesCashiers();
   renderUsers();

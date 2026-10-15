@@ -28,7 +28,14 @@ const orderingApp = firebase.apps.find((candidate) => candidate.name === orderin
   || firebase.initializeApp(orderingFirebaseConfig, orderingAppName);
 const orderingAuth = firebase.auth(orderingApp);
 const orderingDb = firebase.database(orderingApp);
-let onlineOrdersListenerAttached = false;
+// Online orders live on the platform server (all of them, including those from
+// before the move) and are read with the signed-in user's own code, which has
+// read-only access to orders there.
+const PLATFORM_API_BASE = 'https://162-35-27-249.sslip.io/platform-api';
+const PLATFORM_ORDERS_REFRESH_MS = 60000;
+let platformOnlineOrders = {};
+let platformOrdersToken = '';
+let platformOrdersTimer = null;
 
 const state = {
   deviceId: null,
@@ -1339,6 +1346,7 @@ function handleLogin() {
       els.loginOverlay.classList.add('hidden');
       els.loginError.textContent = '';
       selectSection(state.currentSection);
+      startPlatformOnlineOrders(code);
     })
     .catch(() => {
       els.loginError.textContent = window.i18n.t('error');
@@ -1349,6 +1357,7 @@ function handleLogout() {
   if (!confirm(window.i18n.t('confirm_logout'))) return;
   state.user = null;
   state.role = null;
+  stopPlatformOnlineOrders();
   updateUserBadge();
   applyRoleAccess();
   if (els.loginCode) els.loginCode.value = '';
@@ -25626,30 +25635,68 @@ function watchData() {
     });
   });
 
-  orderingAuth.onAuthStateChanged((user) => {
-    if (!user) {
-      orderingAuth.signInAnonymously().catch((error) => {
-        console.error('Could not sign in to the ordering platform', error);
-        state.cache.onlineOrders = {};
-        renderOnlineOrders();
-      });
-      return;
-    }
-    if (onlineOrdersListenerAttached) return;
-    onlineOrdersListenerAttached = true;
-    orderingDb.ref('orderingPlatform/onlineOrders').on('value', (snap) => {
-      state.cache.onlineOrders = snap.val() || {};
-      if (state.importInProgress || isEditingDataInput()) {
-        state.pendingDataRefresh = true;
-        return;
-      }
-      renderOnlineOrders();
-    }, (error) => {
-      console.error('Could not load online orders', error);
-      state.cache.onlineOrders = {};
-      renderOnlineOrders();
-    });
+  // Online orders are read from the platform server (see startPlatformOnlineOrders).
+}
+
+function mergeOnlineOrders() {
+  state.cache.onlineOrders = platformOnlineOrders;
+  if (state.importInProgress || isEditingDataInput()) {
+    state.pendingDataRefresh = true;
+    return;
+  }
+  renderOnlineOrders();
+}
+
+async function platformOrdersRequest(path, options = {}) {
+  const response = await fetch(`${PLATFORM_API_BASE}${path}`, {
+    ...options,
+    headers: { Accept: 'application/json', ...(options.headers || {}), ...(platformOrdersToken ? { Authorization: `Bearer ${platformOrdersToken}` } : {}) },
+    cache: 'no-store'
   });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw Object.assign(new Error(data.error || 'platform request failed'), { status: response.status });
+  return data;
+}
+
+async function refreshPlatformOnlineOrders() {
+  if (!platformOrdersToken) return;
+  try {
+    const rows = await platformOrdersRequest('/accounting/online-orders');
+    platformOnlineOrders = Object.fromEntries((Array.isArray(rows) ? rows : [])
+      .map((row) => row?.rawOrder)
+      .filter((order) => order?.orderId)
+      .map((order) => [String(order.orderId), order]));
+    mergeOnlineOrders();
+  } catch (error) {
+    console.error('Could not load platform online orders', error);
+    if (error.status === 401 || error.status === 403) stopPlatformOnlineOrders();
+  }
+}
+
+// Signs in to the platform with the code the user just used on this page.
+async function startPlatformOnlineOrders(code) {
+  stopPlatformOnlineOrders();
+  try {
+    const session = await platformOrdersRequest('/auth/employee', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code })
+    });
+    if (!session?.sessionToken) return;
+    platformOrdersToken = session.sessionToken;
+    await refreshPlatformOnlineOrders();
+    platformOrdersTimer = setInterval(refreshPlatformOnlineOrders, PLATFORM_ORDERS_REFRESH_MS);
+  } catch (error) {
+    console.warn('Platform online orders are not available for this user', error);
+  }
+}
+
+function stopPlatformOnlineOrders() {
+  clearInterval(platformOrdersTimer);
+  platformOrdersTimer = null;
+  platformOrdersToken = '';
+  if (Object.keys(platformOnlineOrders).length) {
+    platformOnlineOrders = {};
+    mergeOnlineOrders();
+  }
 }
 
 function isEditingDataInput() {

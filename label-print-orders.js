@@ -12,7 +12,8 @@
   };
 
   const app = firebase.apps.length ? firebase.app() : firebase.initializeApp(firebaseConfig);
-  const db = firebase.database(app);
+  // Label requests/config live on our server; products stay on Firebase.
+  const db = FigsRTDB.wrap(firebase.database(app));
   const root = document.getElementById('printOrdersApp');
   const state = {
     requests: {},

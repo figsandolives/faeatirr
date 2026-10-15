@@ -314,7 +314,8 @@
       const zpl = await buildProductionLabelBitmapZpl(labelItem);
       await window.figsDesktop.printZpl({ zpl });
     }
-    await firebase.database().ref(`${REQUEST_PATH}/${requestId}`).update({
+    // Requests live on our server now (figs-rtdb.js); product reads above stay on Firebase.
+    await FigsRTDB.database().ref(`${REQUEST_PATH}/${requestId}`).update({
       status: 'completed',
       printedAt: firebase.database.ServerValue.TIMESTAMP,
       printedByDeviceId: localStorage.getItem('deviceId') || ''

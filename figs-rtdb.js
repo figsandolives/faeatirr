@@ -192,7 +192,10 @@
           });
         } catch (_) { response = null; }
         if (response && response.status === 401) {
-          if (token) { this.refused.add(token); if (this.storage.getItem(TOKEN_KEY) === token) this.setToken(''); } else await this.login();
+          if (token) { this.refused.add(token); if (this.storage.getItem(TOKEN_KEY) === token) this.setToken(''); continue; }
+          // No extra login box: the pages keep their own login screens, as before.
+          if (!this.loginPrompt) throw Object.assign(new Error('غير مصرح'), { status: 401 });
+          await this.login();
           continue;
         }
         if (response && response.status < 500) {

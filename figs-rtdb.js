@@ -8,8 +8,8 @@
 (function (global) {
   'use strict';
 
-  // ← المجموعات التي انتقلت إلى السيرفر. تُعدَّل فقط ليلة النقل وبعد الاستيراد.
-  const SERVER_COLLECTIONS = ['labelPrintRequests', 'labelPrinterConfig'];
+  // ← المجموعات التي انتقلت إلى السيرفر. '*' = كل بيانات fawatir (منذ 16 أكتوبر 2026).
+  const SERVER_COLLECTIONS = ['*'];
   const API_BASE = 'https://162-35-27-249.sslip.io/platform-api';
   const TOKEN_KEY = 'figsRtdbSession';
 
@@ -196,6 +196,7 @@
           continue;
         }
         if (response && response.status < 500) {
+          this.setConnected(true);
           const payload = await response.json().catch(() => ({}));
           if (response.ok || response.status === 409 && payload.committed === false) return payload;
           throw Object.assign(new Error(payload.error || `HTTP ${response.status}`), { status: response.status, code: payload.code });
@@ -595,7 +596,7 @@
 
   class Router {
     constructor(firebaseDb, client, serverCollections) { this.firebase = firebaseDb; this.client = client; this.collections = new Set(serverCollections); }
-    onServer(top) { return !this.firebase || this.collections.has(top); }
+    onServer(top) { return !this.firebase || this.collections.has('*') || this.collections.has(top); }
     ref(path) {
       const parts = splitPath(path);
       if (!parts.length) return new RootRef(this);
@@ -637,7 +638,7 @@
     if (!global.document) return;
     router.client.request('GET', '/rtdb/config').then(config => {
       const server = new Set(config.serverCollections || []);
-      const missing = [...router.collections].filter(name => !server.has(name));
+      const missing = server.has('*') ? [] : [...router.collections].filter(name => !server.has(name));
       if (missing.length) showBanner(`تنبيه: هذه الصفحة قديمة أو السيرفر لم يجهز (${missing.join(', ')}). حدّث الصفحة وأبلغ المدير.`);
     }, () => {});
   }

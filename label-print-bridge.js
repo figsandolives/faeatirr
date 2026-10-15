@@ -274,15 +274,16 @@
   }
 
   async function loadAuthoritativeLabelItem(item) {
-    if (!item?.productId || !window.firebase?.database) return item;
+    if (!item?.productId || !window.FigsRTDB) return item;
     try {
-      const productSnap = await firebase.database().ref(`products/${item.productId}`).once('value');
-      const infoSnap = await firebase.database().ref(`productInfos/${item.productId}`).once('value');
+      const db = FigsRTDB.database();
+      const productSnap = await db.ref(`products/${item.productId}`).once('value');
+      const infoSnap = await db.ref(`productInfos/${item.productId}`).once('value');
       const product = productSnap.val() || {};
       const info = infoSnap.val() || {};
       let origin = info.origin || item.origin || '';
       if (!origin && product.countryOriginId) {
-        const originSnap = await firebase.database().ref(`countryOrigins/${product.countryOriginId}`).once('value');
+        const originSnap = await db.ref(`countryOrigins/${product.countryOriginId}`).once('value');
         const originRow = originSnap.val() || {};
         origin = originRow.nameAr || originRow.nameEn || originRow.name || '';
       }
@@ -314,7 +315,7 @@
       const zpl = await buildProductionLabelBitmapZpl(labelItem);
       await window.figsDesktop.printZpl({ zpl });
     }
-    // Requests live on our server now (figs-rtdb.js); product reads above stay on Firebase.
+    // All fawatir data lives on our server now (figs-rtdb.js).
     await FigsRTDB.database().ref(`${REQUEST_PATH}/${requestId}`).update({
       status: 'completed',
       printedAt: firebase.database.ServerValue.TIMESTAMP,

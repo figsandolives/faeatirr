@@ -10,7 +10,8 @@ const firebaseConfig = {
 };
 
 const app = firebase.apps.length ? firebase.app() : firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+// Data lives on our server since 2026-10-16 (figs-rtdb.js); Firebase is fallback only.
+const db = FigsRTDB.wrap(firebase.database());
 const serverTime = firebase.database.ServerValue.TIMESTAMP;
 
 // منصة البيع تعمل على مشروع Firebase منفصل عن نظام الكاشير.

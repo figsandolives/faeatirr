@@ -12,7 +12,8 @@
 
     // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
+    // البيانات على سيرفرنا منذ 16 أكتوبر 2026 (figs-rtdb.js)؛ Firebase احتياط فقط.
+    const db = FigsRTDB.wrap(firebase.database());
     // طلبات الموقع موجودة في مشروع Firebase مستقل عن الكاشير. كان البحث
     // سابقاً يتم في قاعدة الكاشير، لذلك كانت نافذة طلبات الأونلاين فارغة.
     const orderingPlatformFirebaseConfig = {
@@ -2689,12 +2690,6 @@ function refreshUI() {
       try {
         await window.figsDesktop.printHtml({ html: job.html, type: 'a4', silent: true });
         await jobRef.update({ status: 'printed', printedAt: Date.now(), printedBy: getDeviceId() });
-        if (job.purpose === 'baking-schedule' && job.notify?.phone && job.notify?.text) {
-          fetch('http://127.0.0.1:5678/webhook/baking-schedule-printed', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone: job.notify.phone, text: job.notify.text, jobId: jobRef.key, printedAt: Date.now() })
-          }).catch(error => console.warn('Baking schedule WhatsApp workflow was unavailable:', error));
-        }
         await markHawalliA4PrintStationSuccessful();
       } catch (error) {
         await jobRef.update({ status: 'failed', failedAt: Date.now(), error: String(error?.message || error).slice(0, 180) });
@@ -5850,7 +5845,6 @@ function showNumericKeypadForInvoice(index, inputField) {
           return;
         }
         showThermalInvoice(savedOrder);
-        void sendCashierInvoiceToWhatsApp(savedOrder).catch(error => console.error('Saved invoice; WhatsApp failed:', error));
         showToast(`تم تأكيد حفظ الفاتورة #${savedOrder.invoiceNumber}`);
       } catch (error) {
         console.error('Invoice save attempt:', error);

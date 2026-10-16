@@ -87,7 +87,6 @@
     let allProductCategories = [];
     let allCustomers = [];
     let allOnlineOrders = [];
-    let customerDuplicateCleanupStarted = false;
     let allOrders = [];
     let allCashiers = [];
     let allProductPriceChanges = [];
@@ -1763,7 +1762,6 @@ function setupRealtimeListeners() {
   // 4. مراقبة العملاء
   db.ref('customers').on('value', (snapshot) => {
     allCustomers = sortCustomersNewestFirst(snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : []);
-    mergeExistingDuplicateCustomers();
     refreshUI();
   });
 
@@ -2095,64 +2093,6 @@ function refreshUI() {
         seen.add(normalized);
         return true;
       }).map(address => ({ area: address.area || '', details: address.details || '' }));
-    }
-
-    async function mergeExistingDuplicateCustomers() {
-      if (customerDuplicateCleanupStarted || !allCustomers.length) return;
-      customerDuplicateCleanupStarted = true;
-      const groups = new Map();
-      allCustomers.forEach(customer => {
-        const phone = normalizeCustomerPhone(customer.phone);
-        if (!phone) return;
-        const list = groups.get(phone) || [];
-        list.push(customer);
-        groups.set(phone, list);
-      });
-      const updates = {};
-      const duplicateGroups = [];
-      let merged = 0;
-      // Only what really changes is saved: this runs every time the cashier
-      // opens, and re-saving all ~4,000 customers each time slowed every device.
-      const phoneIndex = (await db.ref('customerPhoneIndex').once('value')).val() || {};
-      const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
-        : value && typeof value === 'object' ? `{${Object.keys(value).sort().filter(key => value[key] !== undefined && value[key] !== null).map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`
-        : JSON.stringify(value ?? null);
-      const sameData = (a, b) => canonical(a) === canonical(b);
-      groups.forEach((customers, phone) => {
-        const ordered = [...customers].sort((a, b) => getCustomerCreatedValue(a) - getCustomerCreatedValue(b));
-        const primary = ordered[0];
-        const mergedRecord = {
-          ...primary,
-          id: primary.id,
-          phone,
-          addresses: mergeCustomerAddresses(...ordered.map(item => item.addresses))
-        };
-        if (ordered.length > 1 || !sameData(primary, mergedRecord)) updates[`customers/${primary.id}`] = mergedRecord;
-        if (phoneIndex[phone] !== primary.id) updates[`customerPhoneIndex/${phone}`] = primary.id;
-        ordered.slice(1).forEach(duplicate => { updates[`customers/${duplicate.id}`] = null; merged++; });
-        if (ordered.length > 1) duplicateGroups.push({ phone, name: primary.name || '', phones: ordered.map(item => normalizeCustomerPhone(item.phone)) });
-      });
-      try {
-        if (Object.keys(updates).length) await db.ref().update(updates);
-        // الفواتير لا تحمل معرف العميل، بل رقم الهاتف فقط. لذلك نطبع الرقم
-        // الموحد على الفواتير القديمة ذات السجل المكرر أيضاً.
-        if (duplicateGroups.length) {
-          const ordersSnapshot = await db.ref('orders').once('value');
-          const orderUpdates = {};
-          Object.entries(ordersSnapshot.val() || {}).forEach(([orderId, order]) => {
-            const group = duplicateGroups.find(item => item.phones.includes(normalizeCustomerPhone(order?.phoneNumber)));
-            if (group) {
-              orderUpdates[`orders/${orderId}/phoneNumber`] = group.phone;
-              orderUpdates[`orders/${orderId}/customerName`] = group.name || order.customerName || '';
-            }
-          });
-          if (Object.keys(orderUpdates).length) await db.ref().update(orderUpdates);
-        }
-        if (merged) showToast(`تم دمج ${merged} سجل عميل مكرر حسب رقم الهاتف`);
-      } catch (error) {
-        console.error('Unable to merge duplicate customers:', error);
-        customerDuplicateCleanupStarted = false;
-      }
     }
 
     async function deleteCustomer(id) {

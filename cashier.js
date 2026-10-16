@@ -3933,22 +3933,47 @@ function refreshUI() {
 	      });
 	    }
 
+	    // A second tap while the first receipt is saving must not add the stock twice.
+	    const shortageReceiveInFlight = new Set();
 	    async function submitCashierShortageReceive(requestId) {
+	      if (shortageReceiveInFlight.has(requestId)) return;
 	      const request = allTransferRequests.find(item => item.id === requestId);
 	      if (!request) return;
+	      shortageReceiveInFlight.add(requestId);
+	      try { await saveCashierShortageReceive(request, requestId); } finally { shortageReceiveInFlight.delete(requestId); }
+	    }
+	    async function saveCashierShortageReceive(request, requestId) {
 	      const rows = Array.from(document.querySelectorAll('#cashierReceiveShortageRows .received-shortage-qty'));
 	      const receivedItems = (request.items || []).map((item, index) => ({
 	        ...item,
 	        receivedQty: Number(convertToEnglishNumbers(rows[index]?.value || '0')) || 0
 	      }));
-	      try {
-	        await db.ref(`transferRequests/${requestId}`).update({
-	          status: 'received',
-	          receivedAt: firebase.database.ServerValue.TIMESTAMP,
-	          receivedByCashier: currentCashier?.name || '',
-	          receivedItems,
-	          items: receivedItems
+	      // Receiving adds what the branch actually got to the branch's stock, in
+	      // the same save as the request (all or nothing). Sending already took
+	      // the sent quantities out of the main warehouse (accounting).
+	      const base = `transferRequests/${requestId}`;
+	      const updates = {
+	        [`${base}/status`]: 'received',
+	        [`${base}/receivedAt`]: firebase.database.ServerValue.TIMESTAMP,
+	        [`${base}/receivedByCashier`]: currentCashier?.name || '',
+	        [`${base}/receivedItems`]: receivedItems,
+	        [`${base}/items`]: receivedItems
+	      };
+	      const branchId = request.branchId || getCurrentBranchIdForTransferRequest();
+	      if (request.stockSentAt && !request.stockReceivedAt && request.status === 'sent' && branchId) {
+	        updates[`${base}/stockReceivedAt`] = firebase.database.ServerValue.TIMESTAMP;
+	        updates[`${base}/stockReceivedBranchId`] = branchId;
+	        const totals = new Map();
+	        receivedItems.forEach(item => {
+	          const qty = Number(item.receivedQty || 0);
+	          if (!qty || !item.itemId) return;
+	          const path = `${(item.itemType || 'product') === 'product' ? 'products' : 'stockMaterials'}/${item.itemId}/stockByBranch/${branchId}`;
+	          totals.set(path, (totals.get(path) || 0) + qty);
 	        });
+	        totals.forEach((qty, path) => { updates[path] = firebase.database.ServerValue.increment(qty); });
+	      }
+	      try {
+	        await db.ref().update(updates);
 	        document.getElementById('cashierReceiveShortageModal')?.remove();
 	        showToast('تم استلام طلب النواقص');
 	        showShortageRequestsPage();

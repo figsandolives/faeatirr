@@ -19710,15 +19710,41 @@ function submitCashierTransferDelivery(record, overlay) {
     if (errorEl) errorEl.textContent = window.i18n.t('error');
     return;
   }
-  db.ref(`transferRequests/${record.id}`).update({
-    status: 'sent',
-    sentAt: serverTime,
-    sentBy: state.user?.name || null,
-    items,
-    sentItems: items
-  }).then(() => {
+  // Sending takes the sent quantities out of the main warehouse, in the same
+  // save as the request itself (all or nothing). The branch adds what it
+  // actually receives when it confirms receipt in the cashier.
+  const fromBranchId = getMainBranchId();
+  if (!fromBranchId) {
+    if (errorEl) errorEl.textContent = window.i18n.t('select_branch_prompt');
+    return;
+  }
+  const alreadyMoved = Boolean(record.stockSentAt) || record.status !== 'accepted';
+  const base = `transferRequests/${record.id}`;
+  const updates = {
+    [`${base}/status`]: 'sent',
+    [`${base}/sentAt`]: serverTime,
+    [`${base}/sentBy`]: state.user?.name || null,
+    [`${base}/items`]: items,
+    [`${base}/sentItems`]: items
+  };
+  if (!alreadyMoved) {
+    updates[`${base}/stockSentAt`] = serverTime;
+    updates[`${base}/stockSentFromBranchId`] = fromBranchId;
+    const totals = new Map();
+    items.forEach((item) => {
+      const qty = Number(item.sentQty || 0);
+      if (!qty || !item.itemId) return;
+      const path = `${normalizeItemType(item) === 'product' ? 'products' : 'stockMaterials'}/${item.itemId}/stockByBranch/${fromBranchId}`;
+      totals.set(path, (totals.get(path) || 0) + qty);
+    });
+    totals.forEach((qty, path) => { updates[path] = firebase.database.ServerValue.increment(-qty); });
+  }
+  return db.ref().update(updates).then(() => {
     overlay.remove();
     renderCashierTransferRequestsSection();
+  }).catch((error) => {
+    console.error('Shortage delivery failed:', error);
+    if (errorEl) errorEl.textContent = window.i18n.t('error');
   });
 }
 

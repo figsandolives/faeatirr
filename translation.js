@@ -1190,59 +1190,82 @@ function t(key) {
   return langPack[key] || translations.en[key] || key;
 }
 
-function applyTranslations(root = document) {
-  root.querySelectorAll('[data-i18n]').forEach((el) => {
-    const key = el.getAttribute('data-i18n');
-    if (key) {
-      el.textContent = t(key);
-    }
-  });
+// Writes only when the text really differs: rewriting identical text still
+// counts as a page change and used to restart the translation observer
+// below in an endless loop (a ~0.13 s freeze every second).
+function setTextIfChanged(el, value) {
+  if (el.textContent !== value) el.textContent = value;
+}
+function setAttributeIfChanged(el, attr, value) {
+  if (el.getAttribute(attr) !== value) el.setAttribute(attr, value);
+}
 
-  root.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
-    const key = el.getAttribute('data-i18n-placeholder');
-    if (key) {
-      el.setAttribute('placeholder', t(key));
-    }
-  });
-
-  root.querySelectorAll('[data-i18n-title]').forEach((el) => {
-    const key = el.getAttribute('data-i18n-title');
-    if (key) {
-      el.setAttribute('title', t(key));
-    }
-  });
-
-  // Some legacy screens are rendered dynamically and still contain plain UI
-  // labels. Translate only exact strings that exist in the Arabic dictionary,
-  // so customer and product data are never altered.
-  const exactUiTranslations = new Map();
+// Some legacy screens are rendered dynamically and still contain plain UI
+// labels. Translate only exact strings that exist in the Arabic dictionary,
+// so customer and product data are never altered. Built once.
+let exactUiTranslationsCache = null;
+function exactUiTranslations() {
+  if (exactUiTranslationsCache) return exactUiTranslationsCache;
+  exactUiTranslationsCache = new Map();
   Object.keys(translations.ar).forEach((key) => {
     const ar = String(translations.ar[key] || '').trim();
     const en = translations.en[key];
-    if (ar && en && !exactUiTranslations.has(ar)) exactUiTranslations.set(ar, en);
+    if (ar && en && !exactUiTranslationsCache.has(ar)) exactUiTranslationsCache.set(ar, en);
   });
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  return exactUiTranslationsCache;
+}
+
+function applyTranslations(root = document) {
+  const scope = root.querySelectorAll ? root : document;
+  const withSelf = (selector) => {
+    const found = [...scope.querySelectorAll(selector)];
+    if (scope.matches?.(selector)) found.unshift(scope);
+    return found;
+  };
+  withSelf('[data-i18n]').forEach((el) => {
+    const key = el.getAttribute('data-i18n');
+    if (key) setTextIfChanged(el, t(key));
+  });
+
+  withSelf('[data-i18n-placeholder]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    if (key) setAttributeIfChanged(el, 'placeholder', t(key));
+  });
+
+  withSelf('[data-i18n-title]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-title');
+    if (key) setAttributeIfChanged(el, 'title', t(key));
+  });
+
+  // Arabic is the language the screens are written in: plain labels need no work.
+  if (currentLang !== 'en' && !legacyTranslated) return;
+  const dictionary = exactUiTranslations();
+  const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   let node;
   while ((node = walker.nextNode())) {
     if (node.parentElement?.closest('script, style, [data-i18n]')) continue;
     if (!legacyOriginalText.has(node)) legacyOriginalText.set(node, node.nodeValue || '');
     const original = legacyOriginalText.get(node);
     const trimmed = original.trim();
-    const translated = exactUiTranslations.get(trimmed);
-    node.nodeValue = currentLang === 'en' && translated ? original.replace(trimmed, translated) : original;
+    const translated = dictionary.get(trimmed);
+    const value = currentLang === 'en' && translated ? original.replace(trimmed, translated) : original;
+    if (node.nodeValue !== value) node.nodeValue = value;
   }
-  root.querySelectorAll('[placeholder], [title]').forEach((el) => {
+  withSelf('[placeholder], [title]').forEach((el) => {
     if (!legacyOriginalAttributes.has(el)) legacyOriginalAttributes.set(el, {});
     const originals = legacyOriginalAttributes.get(el);
     ['placeholder', 'title'].forEach((attr) => {
       if (!(attr in originals)) originals[attr] = el.getAttribute(attr);
       const original = originals[attr];
       if (original === null) return;
-      const translated = exactUiTranslations.get(original.trim());
-      el.setAttribute(attr, currentLang === 'en' && translated ? translated : original);
+      const translated = dictionary.get(original.trim());
+      setAttributeIfChanged(el, attr, currentLang === 'en' && translated ? translated : original);
     });
   });
+  if (currentLang === 'en') legacyTranslated = true;
 }
+// True once English labels were written, so switching back to Arabic restores them.
+let legacyTranslated = false;
 
 function updateLangButtons() {
   document.querySelectorAll('[data-lang]').forEach((btn) => {
@@ -1269,13 +1292,21 @@ window.i18n = { t, setLanguage, getLanguage, applyTranslations };
 
 document.addEventListener('DOMContentLoaded', () => {
   setLanguage(currentLang);
-  let pendingTranslation = false;
-  new MutationObserver(() => {
-    if (pendingTranslation) return;
-    pendingTranslation = true;
+  // Translate only what was added, not the whole page on every change.
+  let pendingRoots = new Set();
+  new MutationObserver((records) => {
+    const first = pendingRoots.size === 0;
+    records.forEach((record) => record.addedNodes.forEach((node) => {
+      const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+      if (element && element.isConnected) pendingRoots.add(element);
+    }));
+    if (!first || !pendingRoots.size) return;
     requestAnimationFrame(() => {
-      pendingTranslation = false;
-      applyTranslations();
+      const added = pendingRoots;
+      pendingRoots = new Set();
+      // Skip nodes inside another added node (a redrawn table adds many rows).
+      const outermost = (el) => { for (let parent = el.parentElement; parent; parent = parent.parentElement) if (added.has(parent)) return false; return true; };
+      added.forEach((el) => { if (el.isConnected && outermost(el)) applyTranslations(el); });
     });
   }).observe(document.body, { childList: true, subtree: true });
 });

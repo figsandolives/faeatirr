@@ -80,9 +80,11 @@ window.InvoiceSave = (() => {
     }
     if (!branchId || /[.#$\[\]/]/.test(branchId)) throw new Error('تعذر تحديد مخزون الفرع، حدّث الصفحة وتحقق من ربط الجهاز بالفرع');
     const moves = {};
+    // All products are read at once (one round trip instead of one per item).
+    const products = new Map(await Promise.all([...quantities.keys()].map(async productId => [productId, await get(db, `products/${productId}`)])));
     for (const [productId, requested] of quantities) {
       const qty = Number(requested.toFixed(6));
-      const product = await get(db, `products/${productId}`);
+      const product = products.get(productId);
       if (!product) throw new Error('المنتج غير موجود في المخزون');
       const before = Number(product.stockByBranch?.[branchId] || 0);
       if (!Number.isFinite(before)) {

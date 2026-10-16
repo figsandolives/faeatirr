@@ -1631,6 +1631,8 @@ function selectSection(sectionId) {
   if (target) {
     target.classList.add('active');
     state.currentSection = sectionId;
+    // Data changed while this section was hidden: bring every view up to date.
+    if (otherViewsStale && !state.importInProgress && !isEditingDataInput()) refreshAllDataViews();
     applyAutomaticSectionTablePagination(sectionId);
   }
 }
@@ -13393,7 +13395,9 @@ function updateItemStock(itemType, itemId, branchId, delta, mode = 'delta') {
   if (mode === 'set') {
     return stockRef.set(delta);
   }
-  return stockRef.transaction((current) => (Number(current || 0) + Number(delta || 0)));
+  // One atomic server-side add instead of read-then-write: same result, one
+  // round trip, and all items of a voucher go to the server together.
+  return stockRef.set(firebase.database.ServerValue.increment(Number(delta || 0)));
 }
 
 function setupIssueSection() {
@@ -16348,26 +16352,37 @@ function submitInventoryCount() {
   if (state.inventoryDraft.editingId) {
     const editingId = state.inventoryDraft.editingId;
     const existing = state.cache.inventoryCount?.[editingId];
+    // An edit corrects what was counted back then, so stock moves by the
+    // difference only; sales and transfers made since the count are kept.
+    // Lines already in the count keep their original "before" quantity.
+    const oldItems = normalizeItems(existing?.items || []);
+    const oldByKey = new Map(oldItems.map((item) => [getItemKey(item), item]));
+    const sameBranch = !existing?.branchId || existing.branchId === branchId;
+    const editedItems = itemsWithPrevious.map((item) => {
+      const old = sameBranch ? oldByKey.get(getItemKey(item)) : null;
+      return old && old.previousQty !== undefined && old.previousQty !== null ? { ...item, previousQty: old.previousQty } : item;
+    });
     const payload = {
       branchId,
       storageLocationId,
-      items: itemsWithPrevious
+      items: editedItems
     };
     db.ref(`inventoryCount/${editingId}`).update(payload).then(() => {
       const updates = [];
-      itemsWithPrevious.forEach((item) => {
-        updates.push(updateItemStock(item.itemType, item.itemId, branchId, Number(item.qty || 0), 'set'));
-      });
-      const oldMap = buildItemMap(existing?.items || []);
-      const newMap = buildItemMap(state.inventoryDraft.items);
-      Object.keys(oldMap).forEach((key) => {
-        if (!newMap[key]) {
-          const oldItem = oldMap[key];
-          const previousQty = normalizeItems(existing?.items || []).find((it) => getItemKey(it) === key)?.previousQty;
-          if (previousQty !== undefined && previousQty !== null) {
-            updates.push(updateItemStock(oldItem.itemType, oldItem.itemId, branchId, Number(previousQty || 0), 'set'));
-          }
+      const newKeys = new Set(editedItems.map((item) => getItemKey(item)));
+      editedItems.forEach((item) => {
+        const old = sameBranch ? oldByKey.get(getItemKey(item)) : null;
+        if (old) {
+          const diff = Number(item.qty || 0) - Number(old.qty || 0);
+          if (diff) updates.push(updateItemStock(item.itemType, item.itemId, branchId, diff));
+        } else {
+          updates.push(updateItemStock(item.itemType, item.itemId, branchId, Number(item.qty || 0), 'set'));
         }
+      });
+      oldItems.forEach((oldItem) => {
+        if (sameBranch && newKeys.has(getItemKey(oldItem))) return;
+        const undo = inventoryCountUndoDelta(oldItem);
+        if (undo !== null && undo !== 0) updates.push(updateItemStock(normalizeItemType(oldItem), oldItem.itemId || oldItem.id, existing?.branchId || branchId, undo));
       });
       Promise.all(updates).then(() => {
         resetInventoryDraft();
@@ -16453,10 +16468,22 @@ function deleteInventoryCount(record) {
     alert(window.i18n.t('cannot_revert_inventory'));
     return;
   }
-  const updates = items.map((item) => updateItemStock(item.itemType, item.itemId, branchId, Number(item.previousQty || 0), 'set'));
+  // Undo only what the count changed (counted − before); putting the old
+  // figure back would also erase every sale and transfer made since.
+  const updates = items
+    .map((item) => [item, inventoryCountUndoDelta(item)])
+    .filter(([, delta]) => delta)
+    .map(([item, delta]) => updateItemStock(item.itemType, item.itemId, branchId, delta));
   Promise.all(updates).then(() => {
     db.ref(`inventoryCount/${record.id}`).remove();
   });
+}
+
+// Stock change that undoes one counted line: before − counted (null if the
+// line has no recorded "before" quantity).
+function inventoryCountUndoDelta(item) {
+  if (item?.previousQty === undefined || item?.previousQty === null) return null;
+  return Number(item.previousQty || 0) - Number(item.qty || 0);
 }
 
 function setupReceivingSection() {
@@ -25577,8 +25604,92 @@ function scheduleDataRefresh() {
   clearTimeout(dataRefreshTimer);
   dataRefreshTimer = setTimeout(() => {
     dataRefreshTimer = null;
-    refreshAllDataViews();
+    refreshVisibleDataViews();
   }, 120);
+}
+
+// A second click on a save button while the first save was still going
+// saved the voucher twice and moved the stock twice (found in the data).
+// Each save now ignores further clicks until everything that click sent to
+// the server is done.
+function guardSave(save) {
+  let busy = false;
+  return function guardedSave(...args) {
+    if (busy) return undefined;
+    busy = true;
+    let result;
+    const release = () => { busy = false; };
+    try {
+      result = save.apply(this, args);
+    } finally {
+      const client = window.FigsRTDB?.client?.();
+      Promise.resolve(result).catch(() => {})
+        .then(() => (client ? client.whenIdle(400) : null))
+        .then(release, release);
+    }
+    return result;
+  };
+}
+[
+  'submitIssueVoucher', 'submitProductionVoucher', 'submitInventoryCount', 'submitReceivingVoucher',
+  'submitPurchaseOrder', 'submitPurchaseReceive', 'submitSupplierReturn', 'submitTransferVoucher',
+  'submitCashierTransfer', 'submitCashierTransferDelivery', 'submitStockReturnVoucher', 'submitScrapReturnVoucher'
+].forEach((name) => {
+  if (typeof window[name] === 'function') window[name] = guardSave(window[name]);
+});
+
+// Redrawing all 33 sections took ~0.5 s and ran after every sale or edit,
+// freezing the page. Data changes now redraw only the open section; the
+// others are redrawn together when the user opens another section.
+var otherViewsStale = false; // var: selectSection may run before this line during start-up
+function sectionRenderers(sectionId) {
+  const listConfig = listConfigs.find((config) => config.sectionId === sectionId);
+  if (listConfig) return [() => renderListSection(listConfig)];
+  return ({
+    reports: [renderReportsSection],
+    orders: [renderOrders],
+    dailySessions: [renderDailySessionsSection],
+    onlineOrders: [renderOnlineOrders],
+    devicesCashiers: [renderDevicesCashiers],
+    users: [renderUsers],
+    tables: [renderTablesSection],
+    pendingStockMoves: [renderPendingStockMoves],
+    discounts: [renderDiscounts],
+    products: [renderProductsSection],
+    productInfo: [renderProductInfoSection],
+    productCategories: [renderProductCategoriesSection],
+    itemCards: [renderItemCardSection],
+    stickerMaker: [renderStickerMakerSection],
+    stockMaterials: [renderStockMaterialsSection],
+    materialCategories: [renderMaterialCategoriesSection],
+    storageLocations: [renderStorageLocationsSection],
+    issue: [renderIssueSection],
+    production: [renderProductionSection],
+    productionFollowUp: [renderProductionFollowUpSection],
+    inventoryCount: [renderInventorySection],
+    receiving: [renderReceivingSection],
+    transfers: [renderTransfersSection],
+    cashierTransferRequests: [renderCashierTransferRequestsSection],
+    stockReturn: [renderStockReturnSection],
+    scrapReturn: [renderScrapReturnSection],
+    suppliers: [renderSuppliersSection],
+    purchase: [renderPurchasesSection],
+    supplierReturn: [renderSupplierReturnSection],
+    customers: [renderCustomersSection],
+    units: [renderUnitsSection]
+  })[sectionId] || null;
+}
+
+function refreshVisibleDataViews() {
+  const renderers = sectionRenderers(state.currentSection);
+  if (!renderers) {
+    refreshAllDataViews();
+    return;
+  }
+  renderers.forEach((render) => render());
+  updateReorderNotice();
+  applyAutomaticSectionTablePagination(state.currentSection);
+  otherViewsStale = true;
 }
 
 function watchData() {
@@ -25710,6 +25821,7 @@ function isEditingDataInput() {
 }
 
 function refreshAllDataViews() {
+  otherViewsStale = false;
   renderListSections();
   renderReportsSection();
   renderOrders();
@@ -25750,7 +25862,7 @@ function flushPendingDataRefresh() {
   if (!state.pendingDataRefresh) return;
   if (isEditingDataInput()) return;
   state.pendingDataRefresh = false;
-  refreshAllDataViews();
+  refreshVisibleDataViews();
 }
 
 function renderListSections() {

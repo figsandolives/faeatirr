@@ -2111,16 +2111,24 @@ function refreshUI() {
       const updates = {};
       const duplicateGroups = [];
       let merged = 0;
+      // Only what really changes is saved: this runs every time the cashier
+      // opens, and re-saving all ~4,000 customers each time slowed every device.
+      const phoneIndex = (await db.ref('customerPhoneIndex').once('value')).val() || {};
+      const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
+        : value && typeof value === 'object' ? `{${Object.keys(value).sort().filter(key => value[key] !== undefined && value[key] !== null).map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`
+        : JSON.stringify(value ?? null);
+      const sameData = (a, b) => canonical(a) === canonical(b);
       groups.forEach((customers, phone) => {
         const ordered = [...customers].sort((a, b) => getCustomerCreatedValue(a) - getCustomerCreatedValue(b));
         const primary = ordered[0];
-        updates[`customers/${primary.id}`] = {
+        const mergedRecord = {
           ...primary,
           id: primary.id,
           phone,
           addresses: mergeCustomerAddresses(...ordered.map(item => item.addresses))
         };
-        updates[`customerPhoneIndex/${phone}`] = primary.id;
+        if (ordered.length > 1 || !sameData(primary, mergedRecord)) updates[`customers/${primary.id}`] = mergedRecord;
+        if (phoneIndex[phone] !== primary.id) updates[`customerPhoneIndex/${phone}`] = primary.id;
         ordered.slice(1).forEach(duplicate => { updates[`customers/${duplicate.id}`] = null; merged++; });
         if (ordered.length > 1) duplicateGroups.push({ phone, name: primary.name || '', phones: ordered.map(item => normalizeCustomerPhone(item.phone)) });
       });
@@ -2562,10 +2570,21 @@ function refreshUI() {
       }, error => console.error('Unable to listen for remote receipt jobs', error));
     }
 
+    // A printed receipt's HTML is not needed again. Kept, it grew the job list
+    // to 4 MB, and every new print rewrote all of it (slow printing).
+    let remoteReceiptHistoryTrimmed = false;
     async function processQueuedRemoteReceiptJobs() {
       if (remoteReceiptQueueBusy) return;
       const snapshot = await hawalliPrintJobsRef().once('value');
       const jobs = snapshot.val() || {};
+      if (!remoteReceiptHistoryTrimmed) {
+        remoteReceiptHistoryTrimmed = true;
+        const trims = {};
+        Object.entries(jobs).forEach(([jobId, job]) => {
+          if (job?.html && job.status !== 'queued' && job.status !== 'printing') trims[`${jobId}/html`] = null;
+        });
+        if (Object.keys(trims).length) hawalliPrintJobsRef().update(trims).catch(error => console.warn('Unable to trim printed receipts', error));
+      }
       for (const [jobId, job] of Object.entries(jobs)) {
         if (job?.status !== 'queued') continue;
         await processRemoteReceiptJob(hawalliPrintJobsRef().child(jobId));
@@ -2592,7 +2611,7 @@ function refreshUI() {
       }
       try {
         await window.figsDesktop.printHtml({ html: job.html, type: 'receipt', silent: true });
-        await jobRef.update({ status: 'printed', printedAt: Date.now(), printedBy: getDeviceId() });
+        await jobRef.update({ status: 'printed', printedAt: Date.now(), printedBy: getDeviceId(), html: null });
         await markHawalliPrintStationSuccessful();
       } catch (error) {
         await jobRef.update({ status: 'failed', failedAt: Date.now(), error: String(error?.message || error).slice(0, 180) });

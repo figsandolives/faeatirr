@@ -31,17 +31,23 @@
     const orderingPlatformAuth = firebase.auth(orderingPlatformApp);
     let orderingPlatformReady = null;
 
+    // Online store orders live on the platform server since early October;
+    // the old Firebase copy (menassafigs) stopped at W00729 on 8 Oct 2026.
+    const ONLINE_ORDERS_URL = 'https://162-35-27-249.sslip.io/platform-api/tracker/orders';
+    async function loadOnlineOrdersFromServer() {
+      const response = await fetch(ONLINE_ORDERS_URL, { cache: 'no-store', headers: { Accept: 'application/json' } });
+      const list = await response.json().catch(() => null);
+      if (!response.ok || !Array.isArray(list)) throw new Error('تعذر تحميل طلبات الأونلاين');
+      allOnlineOrders = list
+        .map(order => ({ id: order.orderId, ...order }))
+        .sort((a, b) => (b.createdAtMs || b.createdAt || b.timestamp || 0) - (a.createdAtMs || a.createdAt || a.timestamp || 0));
+      refreshUI();
+    }
     async function ensureOrderingPlatformReady() {
       if (!orderingPlatformReady) {
-        orderingPlatformReady = (async () => {
-          if (!orderingPlatformAuth.currentUser) await orderingPlatformAuth.signInAnonymously();
-          orderingPlatformDb.ref('orderingPlatform/onlineOrders').on('value', snapshot => {
-            allOnlineOrders = snapshot.val()
-              ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })).sort((a, b) => (b.createdAtMs || b.timestamp || 0) - (a.createdAtMs || a.timestamp || 0))
-              : [];
-            refreshUI();
-          }, error => console.error('Unable to read online orders:', error));
-        })();
+        orderingPlatformReady = loadOnlineOrdersFromServer().then(() => {
+          setInterval(() => loadOnlineOrdersFromServer().catch(error => console.error('Unable to read online orders:', error)), 20000);
+        }, error => { orderingPlatformReady = null; throw error; });
       }
       return orderingPlatformReady;
     }
@@ -6824,10 +6830,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     async function openOnlineOrderPreparationPicker() {
       try {
         await ensureOrderingPlatformReady();
-        if (!allOnlineOrders.length) {
-          const snapshot = await orderingPlatformDb.ref('orderingPlatform/onlineOrders').once('value');
-          allOnlineOrders = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
-        }
+        if (!allOnlineOrders.length) await loadOnlineOrdersFromServer();
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         modal.innerHTML = `

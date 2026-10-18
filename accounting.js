@@ -326,6 +326,17 @@ function formatNumberWithThreeDecimals(value) {
   return Number.isFinite(number) ? number.toFixed(3) : '0.000';
 }
 
+function getIssueTypeLabel(issueType) {
+  if (issueType === 'production') return window.i18n.t('issue_production');
+  if (issueType === 'use') return window.i18n.t('issue_use');
+  return window.i18n.t('issue_order');
+}
+
+// Take out vouchers deduct stock now for production and for-use; order vouchers are deducted by the invoice.
+function issueDeductsStock(issueType) {
+  return issueType === 'production' || issueType === 'use';
+}
+
 function getStaffLabel(staff, fallbackId = '-') {
   if (!staff) return fallbackId;
   const localized = getLocalizedName(staff);
@@ -7941,9 +7952,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
     normalizeItems(issue.items).forEach((item) => {
       if (!isSameItem(item)) return;
       const record = { id, ...issue };
-      const typeLabel = issue.issueType === 'production'
-        ? window.i18n.t('issue_production')
-        : window.i18n.t('issue_order');
+      const typeLabel = getIssueTypeLabel(issue.issueType);
       const invoiceNumber = issue.issueType === 'order' ? issue.invoiceNumber || issue.issueNumber : issue.issueNumber;
       const orderKey = issue.issueType === 'order' ? normalizeDigits(String(issue.invoiceNumber || '')).trim() : '';
       const order = orderKey ? ordersByNumber[orderKey] : null;
@@ -7963,7 +7972,7 @@ function buildItemCardMovements(entry, branchId, fromDate, toDate) {
         typeLabel,
         issue.createdAt,
         price,
-        issue.issueType === 'production'
+        issueDeductsStock(issue.issueType)
       );
     });
   });
@@ -13413,6 +13422,7 @@ function setupIssueSection() {
             <option value="all">${window.i18n.t('all_types')}</option>
             <option value="order">${window.i18n.t('issue_order')}</option>
             <option value="production">${window.i18n.t('issue_production')}</option>
+            <option value="use">${window.i18n.t('issue_use')}</option>
           </select>
         </div>
       </div>
@@ -13423,7 +13433,7 @@ function setupIssueSection() {
             <th>${window.i18n.t('issue_type')}</th>
             <th>${window.i18n.t('date_time')}</th>
             <th>${window.i18n.t('storekeeper_name')}</th>
-            <th>${window.i18n.t('cashiers')}</th>
+            <th>${window.i18n.t('issue_employee')}</th>
             <th>${window.i18n.t('production_staff')}</th>
             <th>${window.i18n.t('invoice_number')}</th>
             <th>${window.i18n.t('items')}</th>
@@ -13449,15 +13459,17 @@ function setupIssueSection() {
             <select id="issueType" class="input">
               <option value="order">${window.i18n.t('issue_order')}</option>
               <option value="production">${window.i18n.t('issue_production')}</option>
+              <option value="use">${window.i18n.t('issue_use')}</option>
             </select>
           </div>
         </div>
         <div id="issueOrderFields" class="grid two" style="margin-top: 12px;">
           <div>
-            <label class="tag">${window.i18n.t('cashiers')}</label>
+            <label class="tag">${window.i18n.t('issue_employee')}</label>
             <select id="issueCashier" class="input"></select>
+            <button id="issueAddEmployeeBtn" type="button" class="btn ghost small" style="margin-top: 6px;" title="${window.i18n.t('add_issue_employee')}">+ ${window.i18n.t('add_issue_employee')}</button>
           </div>
-          <div>
+          <div id="issueInvoiceField">
             <label class="tag">${window.i18n.t('invoice_number')}</label>
             <input id="issueInvoice" class="input" />
           </div>
@@ -13483,6 +13495,29 @@ function setupIssueSection() {
           <button id="issueSubmitBtn" class="btn primary">${window.i18n.t('issue')}</button>
         </div>
         <p id="issueError" class="helper form-error" style="margin-top: 8px;"></p>
+      </div>
+    </div>
+    <div id="issueEmployeeModal" class="overlay hidden">
+      <div class="modal" style="text-align: start; max-width: 420px; width: 100%;">
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <h3>${window.i18n.t('add_issue_employee')}</h3>
+          <button id="issueEmployeeCloseBtn" type="button" class="btn ghost small">×</button>
+        </div>
+        <div class="stack" style="margin-top: 12px; gap: 10px;">
+          <div>
+            <label class="tag">${window.i18n.t('name_ar')}</label>
+            <input id="issueEmployeeNameAr" class="input" />
+          </div>
+          <div>
+            <label class="tag">${window.i18n.t('name_en')}</label>
+            <input id="issueEmployeeNameEn" class="input" />
+          </div>
+        </div>
+        <div class="row" style="justify-content: flex-end; margin-top: 16px;">
+          <button id="issueEmployeeCancelBtn" type="button" class="btn ghost">${window.i18n.t('cancel')}</button>
+          <button id="issueEmployeeSaveBtn" type="button" class="btn primary">${window.i18n.t('save')}</button>
+        </div>
+        <p id="issueEmployeeError" class="helper form-error" style="margin-top: 8px;"></p>
       </div>
     </div>
   `;
@@ -13535,8 +13570,7 @@ function bindIssueSection() {
   if (typeSelect) {
     typeSelect.addEventListener('change', () => {
       state.issueDraft.type = typeSelect.value;
-      orderFields.classList.toggle('hidden', state.issueDraft.type !== 'order');
-      productionFields.classList.toggle('hidden', state.issueDraft.type !== 'production');
+      applyIssueTypeFields();
     });
   }
 
@@ -13545,6 +13579,8 @@ function bindIssueSection() {
       state.issueDraft.cashierId = cashierSelect.value;
     });
   }
+
+  bindIssueEmployeeModal();
 
   if (invoiceInput) {
     invoiceInput.addEventListener('input', () => {
@@ -13587,6 +13623,75 @@ function bindIssueSection() {
       renderIssueTable();
     });
   }
+}
+
+// Order vouchers need the employee and invoice; for-use vouchers need the employee only.
+function applyIssueTypeFields() {
+  const type = state.issueDraft.type;
+  document.getElementById('issueOrderFields')?.classList.toggle('hidden', type !== 'order' && type !== 'use');
+  document.getElementById('issueInvoiceField')?.classList.toggle('hidden', type !== 'order');
+  document.getElementById('issueProductionFields')?.classList.toggle('hidden', type !== 'production');
+}
+
+// Employees added from the take out voucher live in issueEmployees, next to the cashiers in the list.
+function getIssueEmployeeOptions() {
+  const options = Object.entries(state.cache.cashiers || {}).map(([id, cashier]) => ({
+    id,
+    label: cashier.name || cashier.code || id
+  }));
+  Object.entries(state.cache.issueEmployees || {}).forEach(([id, employee]) => {
+    options.push({ id: `emp:${id}`, label: getLocalizedName(employee) });
+  });
+  return options;
+}
+
+function getIssueEmployeeName(employeeId) {
+  if (!employeeId) return null;
+  if (String(employeeId).startsWith('emp:')) {
+    const employee = state.cache.issueEmployees?.[String(employeeId).slice(4)];
+    return employee ? (employee.nameAr || employee.nameEn || null) : null;
+  }
+  const cashier = state.cache.cashiers?.[employeeId];
+  return cashier ? (cashier.name || cashier.code || null) : null;
+}
+
+function bindIssueEmployeeModal() {
+  const overlay = document.getElementById('issueEmployeeModal');
+  const nameArInput = document.getElementById('issueEmployeeNameAr');
+  const nameEnInput = document.getElementById('issueEmployeeNameEn');
+  const errorEl = document.getElementById('issueEmployeeError');
+  const saveBtn = document.getElementById('issueEmployeeSaveBtn');
+  if (!overlay) return;
+  const close = () => overlay.classList.add('hidden');
+  document.getElementById('issueAddEmployeeBtn')?.addEventListener('click', () => {
+    nameArInput.value = '';
+    nameEnInput.value = '';
+    errorEl.textContent = '';
+    overlay.classList.remove('hidden');
+    nameArInput.focus();
+  });
+  document.getElementById('issueEmployeeCloseBtn')?.addEventListener('click', close);
+  document.getElementById('issueEmployeeCancelBtn')?.addEventListener('click', close);
+  saveBtn?.addEventListener('click', () => {
+    const nameAr = nameArInput.value.trim();
+    const nameEn = nameEnInput.value.trim();
+    if (!nameAr || !nameEn) {
+      errorEl.textContent = window.i18n.t('error');
+      return;
+    }
+    saveBtn.disabled = true;
+    const ref = db.ref('issueEmployees').push();
+    ref.set({ nameAr, nameEn, createdAt: serverTime }).then(() => {
+      state.cache.issueEmployees = { ...(state.cache.issueEmployees || {}), [ref.key]: { nameAr, nameEn } };
+      state.issueDraft.cashierId = `emp:${ref.key}`;
+      renderIssueSelects();
+      close();
+    }).catch(() => {
+      errorEl.textContent = window.i18n.t('error');
+    }).finally(() => {
+      saveBtn.disabled = false;
+    });
+  });
 }
 
 function openIssueModal() {
@@ -13643,8 +13748,7 @@ function renderIssueSection() {
     typeSelect.value = state.issueDraft.type || 'order';
   }
   if (orderFields && productionFields) {
-    orderFields.classList.toggle('hidden', state.issueDraft.type !== 'order');
-    productionFields.classList.toggle('hidden', state.issueDraft.type !== 'production');
+    applyIssueTypeFields();
   }
   renderEntrySearchTypeFilter('issue', state.issueDraft.searchTypes);
   renderIssueSelects();
@@ -13660,7 +13764,6 @@ function renderIssueSection() {
 function renderIssueSelects() {
   const cashierSelect = document.getElementById('issueCashier');
   const productionStaffSelect = document.getElementById('issueProductionStaff');
-  const cashiers = state.cache.cashiers || {};
   const productionStaff = state.cache.productionStaff || {};
 
   if (cashierSelect) {
@@ -13669,10 +13772,10 @@ function renderIssueSelects() {
     placeholder.value = '';
     placeholder.textContent = window.i18n.t('select');
     cashierSelect.appendChild(placeholder);
-    Object.entries(cashiers).forEach(([id, cashier]) => {
+    getIssueEmployeeOptions().forEach(({ id, label }) => {
       const option = document.createElement('option');
       option.value = id;
-      option.textContent = cashier.name || cashier.code || id;
+      option.textContent = label;
       cashierSelect.appendChild(option);
     });
     cashierSelect.value = state.issueDraft.cashierId || '';
@@ -13841,6 +13944,10 @@ function submitIssueVoucher() {
       return;
     }
   }
+  if (state.issueDraft.type === 'use' && !state.issueDraft.cashierId) {
+    if (errorEl) errorEl.textContent = window.i18n.t('error');
+    return;
+  }
   if (state.issueDraft.type === 'production') {
     if (!state.issueDraft.productionStaffId) {
       if (errorEl) errorEl.textContent = window.i18n.t('error');
@@ -13848,9 +13955,8 @@ function submitIssueVoucher() {
     }
   }
 
-  const cashiers = state.cache.cashiers || {};
   const productionStaff = state.cache.productionStaff || {};
-  const cashier = cashiers[state.issueDraft.cashierId] || null;
+  const employeeName = getIssueEmployeeName(state.issueDraft.cashierId);
   const staff = productionStaff[state.issueDraft.productionStaffId] || null;
   const productionStaffName = getStaffLabel(staff, null);
   const mainBranchId = getMainBranchId();
@@ -13866,8 +13972,8 @@ function submitIssueVoucher() {
     const branchId = existing?.branchId || mainBranchId;
     const payload = {
       issueType,
-      cashierId: issueType === 'order' ? state.issueDraft.cashierId : null,
-      cashierName: issueType === 'order' ? (cashier?.name || cashier?.code || null) : null,
+      cashierId: issueType === 'order' || issueType === 'use' ? state.issueDraft.cashierId : null,
+      cashierName: issueType === 'order' || issueType === 'use' ? employeeName : null,
       invoiceNumber: issueType === 'order' ? state.issueDraft.invoiceNumber : null,
       productionStaffId: issueType === 'production' ? state.issueDraft.productionStaffId : null,
       productionStaffName: issueType === 'production' ? productionStaffName : null,
@@ -13875,12 +13981,12 @@ function submitIssueVoucher() {
     };
     db.ref(`stockIssue/${editingId}`).update(payload).then(() => {
       const updates = [];
-      if (existing?.issueType === 'production') {
+      if (issueDeductsStock(existing?.issueType)) {
         normalizeItems(state.issueDraft.originalItems).forEach((item) => {
           updates.push(updateItemStock(item.itemType, item.itemId, branchId, Number(item.qty || 0)));
         });
       }
-      if (issueType === 'production') {
+      if (issueDeductsStock(issueType)) {
         normalizeItems(state.issueDraft.items).forEach((item) => {
           updates.push(updateItemStock(item.itemType, item.itemId, branchId, -Number(item.qty || 0)));
         });
@@ -13901,8 +14007,8 @@ function submitIssueVoucher() {
       storekeeperId: state.user?.id || null,
       storekeeperName: state.user?.name || null,
       issueType,
-      cashierId: issueType === 'order' ? state.issueDraft.cashierId : null,
-      cashierName: issueType === 'order' ? (cashier?.name || cashier?.code || null) : null,
+      cashierId: issueType === 'order' || issueType === 'use' ? state.issueDraft.cashierId : null,
+      cashierName: issueType === 'order' || issueType === 'use' ? employeeName : null,
       invoiceNumber: issueType === 'order' ? state.issueDraft.invoiceNumber : null,
       productionStaffId: issueType === 'production' ? state.issueDraft.productionStaffId : null,
       productionStaffName: issueType === 'production' ? productionStaffName : null,
@@ -13911,7 +14017,7 @@ function submitIssueVoucher() {
     };
     const issueRef = db.ref('stockIssue').push();
     issueRef.set(payload).then(() => {
-      const updates = issueType === 'production'
+      const updates = issueDeductsStock(issueType)
         ? state.issueDraft.items.map((item) => updateItemStock(item.itemType, item.itemId, mainBranchId, -Number(item.qty || 0)))
         : [];
       Promise.all(updates).then(() => {
@@ -13945,7 +14051,7 @@ function renderIssueTable() {
     const staffLabel = issue.productionStaffName || getStaffLabel(state.cache.productionStaff?.[issue.productionStaffId], '-') || '-';
     row.innerHTML = `
       <td>${issue.issueNumber || '-'}</td>
-      <td>${issue.issueType === 'production' ? window.i18n.t('issue_production') : window.i18n.t('issue_order')}</td>
+      <td>${getIssueTypeLabel(issue.issueType)}</td>
       <td>${formatDate(issue.createdAt)}</td>
       <td>${issue.storekeeperName || '-'}</td>
       <td>${issue.cashierName || '-'}</td>
@@ -13984,7 +14090,7 @@ function deleteIssue(issue) {
   if (!confirm(window.i18n.t('confirm_delete'))) return;
   const branchId = issue.branchId || getMainBranchId();
   const items = normalizeItems(issue.items);
-  const updates = issue.issueType === 'production'
+  const updates = issueDeductsStock(issue.issueType)
     ? items.map((item) => updateItemStock(item.itemType, item.itemId, branchId, Number(item.qty || 0)))
     : [];
   Promise.all(updates).then(() => {
@@ -14005,7 +14111,7 @@ function openIssueDetails(issue) {
   els.issueDetailBody.innerHTML = `
     <div class="notice" style="margin-bottom: 12px;">
       <div>${window.i18n.t('issue_number')}: ${issue.issueNumber || '-'}</div>
-      <div>${window.i18n.t('issue_type')}: ${issue.issueType === 'production' ? window.i18n.t('issue_production') : window.i18n.t('issue_order')}</div>
+      <div>${window.i18n.t('issue_type')}: ${getIssueTypeLabel(issue.issueType)}</div>
       <div>${window.i18n.t('date_time')}: ${formatDate(issue.createdAt)}</div>
       <div>${window.i18n.t('storekeeper_name')}: ${issue.storekeeperName || '-'}</div>
       <div>${window.i18n.t('invoice_number')}: ${issue.invoiceNumber || '-'}</div>
@@ -21002,14 +21108,14 @@ function printIssueReport(issue) {
   if (!issue) return;
   const branches = state.cache.branches || {};
   const items = normalizeItems(issue.items);
-  const issueTypeLabel = issue.issueType === 'production' ? window.i18n.t('issue_production') : window.i18n.t('issue_order');
+  const issueTypeLabel = getIssueTypeLabel(issue.issueType);
   const staffLabel = issue.productionStaffName || getStaffLabel(state.cache.productionStaff?.[issue.productionStaffId], '-') || '-';
   const meta = [
     { label: window.i18n.t('issue_type'), value: issueTypeLabel },
     { label: window.i18n.t('date_time'), value: formatDate(issue.createdAt) },
     { label: window.i18n.t('branch'), value: getLocalizedName(branches[issue.branchId]) || '-' },
     { label: window.i18n.t('storekeeper_name'), value: issue.storekeeperName || '-' },
-    { label: window.i18n.t('cashiers'), value: issue.cashierName || '-' },
+    { label: window.i18n.t('issue_employee'), value: issue.cashierName || '-' },
     { label: window.i18n.t('production_staff_single'), value: staffLabel },
     { label: window.i18n.t('invoice_number'), value: issue.invoiceNumber || '-' },
     { label: window.i18n.t('items'), value: items.length }
@@ -25754,6 +25860,7 @@ function watchData() {
     'orderTypes',
     'paymentMethods',
     'cashiers',
+    'issueEmployees',
     'users',
     'tables',
     'devices',

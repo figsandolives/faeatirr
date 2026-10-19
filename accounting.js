@@ -9438,7 +9438,7 @@ function saveMaterial() {
   const unitDefinitionUnitIdFinal = unitDefinitionQtyRaw && unitDefinitionUnitId ? unitDefinitionUnitId : null;
 
   const payload = {
-    code: editId ? rawCode : normalizeCode(rawCode, 'SK'),
+    code: editId ? keepOrReplaceCode(rawCode, 'SK', editId) : normalizeCode(rawCode, 'SK'),
     barcode,
     nameAr,
     nameEn,
@@ -9775,9 +9775,9 @@ function updateImportProgressOverlay({ visible = true, title = '', subtitle = ''
   }
 }
 
-function buildImportedProductPayload(row, mainBranchId) {
+function buildImportedProductPayload(row, mainBranchId, usedCodes) {
   return {
-    code: normalizeCode(row.code, 'FG'),
+    code: normalizeCode(row.code, 'FG', usedCodes),
     barcode: row.barcode || generateBarcodeValue(),
     nameAr: row.nameAr || '',
     nameEn: row.nameEn || '',
@@ -9794,9 +9794,9 @@ function buildImportedProductPayload(row, mainBranchId) {
   };
 }
 
-function buildImportedStockMaterialPayload(row, mainBranchId) {
+function buildImportedStockMaterialPayload(row, mainBranchId, usedCodes) {
   return {
-    code: normalizeCode(row.code, 'SK'),
+    code: normalizeCode(row.code, 'SK', usedCodes),
     barcode: row.barcode || generateBarcodeValue(),
     nameAr: row.nameAr || '',
     nameEn: row.nameEn || '',
@@ -10312,11 +10312,13 @@ function importBulkStockMaterials() {
   const rows = state.importedStockMaterials;
   if (!rows || rows.length === 0) return;
   const mainBranchId = getMainBranchId();
+  // One set for the whole import, so rows in the same file don't get the same code.
+  const usedCodes = collectUsedItemCodes();
   importRowsWithProgress({
     type: 'stockMaterials',
     path: 'stockMaterials',
     rows,
-    buildPayload: (row) => buildImportedStockMaterialPayload(row, mainBranchId),
+    buildPayload: (row) => buildImportedStockMaterialPayload(row, mainBranchId, usedCodes),
     title: `${window.i18n.t('importing')} ${window.i18n.t('stock_materials')}`
   });
 }
@@ -10526,7 +10528,7 @@ function saveProduct() {
   const unitDefinitionUnitIdFinal = unitDefinitionQtyRaw && unitDefinitionUnitId ? unitDefinitionUnitId : null;
 
   const payload = {
-    code: editId ? rawCode : normalizeCode(rawCode, 'FG'),
+    code: editId ? keepOrReplaceCode(rawCode, 'FG', editId) : normalizeCode(rawCode, 'FG'),
     barcode,
     nameAr,
     nameEn,
@@ -10559,23 +10561,52 @@ function saveProduct() {
   }
 }
 
-function generateFixedCode(prefix) {
-  const digits = Math.floor(1000 + Math.random() * 9000);
-  return `${prefix}-${digits}`;
+// Codes of every product and stock material, so a new code is never one
+// that another item already has. `excludeId` leaves out the item being edited.
+function collectUsedItemCodes(excludeId = null) {
+  const used = new Set();
+  [state.cache.products, state.cache.stockMaterials].forEach((items) => {
+    Object.entries(items || {}).forEach(([id, item]) => {
+      if (excludeId && String(id) === String(excludeId)) return;
+      const code = String(item?.code || '').trim().toUpperCase();
+      if (code) used.add(code);
+    });
+  });
+  return used;
 }
 
-function normalizeCode(value, prefix) {
+function generateFixedCode(prefix, used = collectUsedItemCodes()) {
+  let code = '';
+  for (let attempt = 0; attempt < 500 && (!code || used.has(code)); attempt += 1) {
+    code = `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+  }
+  for (let digits = 1000; used.has(code); digits += 1) {
+    code = `${prefix}-${digits}`;
+  }
+  used.add(code);
+  return code;
+}
+
+function normalizeCode(value, prefix, used = collectUsedItemCodes()) {
   const text = String(value || '').trim().toUpperCase();
+  let code = '';
   if (text && text.startsWith(`${prefix}-`) && /\d{4}$/.test(text)) {
-    return text;
-  }
-  if (text && text.startsWith(prefix)) {
+    code = text;
+  } else if (text && text.startsWith(prefix)) {
     const digits = text.replace(/\D/g, '').slice(-4);
-    if (digits) {
-      return `${prefix}-${digits.padStart(4, '0')}`;
-    }
+    if (digits) code = `${prefix}-${digits.padStart(4, '0')}`;
   }
-  return generateFixedCode(prefix);
+  if (!code || used.has(code)) return generateFixedCode(prefix, used);
+  used.add(code);
+  return code;
+}
+
+// On edit the code is kept, unless another item already has it.
+function keepOrReplaceCode(rawCode, prefix, editId) {
+  const code = String(rawCode || '').trim();
+  if (!code) return code;
+  const used = collectUsedItemCodes(editId);
+  return used.has(code.toUpperCase()) ? generateFixedCode(prefix, used) : code;
 }
 
 function generateProductCode() {
@@ -10727,11 +10758,13 @@ function importBulkProducts() {
   const rows = state.importedProducts;
   if (!rows || rows.length === 0) return;
   const mainBranchId = getMainBranchId();
+  // One set for the whole import, so rows in the same file don't get the same code.
+  const usedCodes = collectUsedItemCodes();
   importRowsWithProgress({
     type: 'products',
     path: 'products',
     rows,
-    buildPayload: (row) => buildImportedProductPayload(row, mainBranchId),
+    buildPayload: (row) => buildImportedProductPayload(row, mainBranchId, usedCodes),
     title: `${window.i18n.t('importing')} ${window.i18n.t('products')}`
   });
 }

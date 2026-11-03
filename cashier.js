@@ -357,6 +357,7 @@
         materialsSearchMode: 'بحث مواد مخزون',
         product: 'منتج',
         material: 'مواد مخزون',
+        uncategorized: 'بدون تصنيف',
         noMaterialCategories: 'لا توجد أقسام مواد مخزون',
         noProductCategories: 'لا توجد أقسام منتجات',
         shortageItems: 'العناصر المطلوبة',
@@ -469,6 +470,7 @@
         materialsSearchMode: 'Search Stock Materials',
         product: 'Product',
         material: 'Stock Material',
+        uncategorized: 'Uncategorized',
         noMaterialCategories: 'No stock material categories',
         noProductCategories: 'No product categories',
         shortageItems: 'Requested Items',
@@ -3462,15 +3464,70 @@ function refreshUI() {
 	      if (results) results.innerHTML = renderShortageSearchResultsHtml();
 	    }
 
+	    function normalizeShortageSearchText(value) {
+	      return normalizeText(value)
+	        .replace(/[\u064B-\u0652\u0640]/g, '')
+	        .replace(/[أإآٱ]/g, 'ا')
+	        .replace(/ة/g, 'ه')
+	        .replace(/ى/g, 'ي')
+	        .replace(/ؤ/g, 'و')
+	        .replace(/ئ/g, 'ي')
+	        .replace(/\s+/g, ' ');
+	    }
+
+	    // يبحث في المنتجات والمواد معاً (القسم المختار أولاً) ويتجاهل فروق الهمزة والتاء المربوطة والياء وترتيب الكلمات
 	    function getShortageSearchRows() {
-	      const query = normalizeText(shortageSearchTerm);
-	      const rows = shortageSearchMode === 'materials'
-	        ? allStockMaterials.map(item => ({ ...item, itemType: 'material' }))
-	        : allProducts.map(item => ({ ...item, itemType: 'product' }));
-	      if (!query) return [];
+	      const query = normalizeShortageSearchText(shortageSearchTerm);
+	      const words = query.split(' ').filter(Boolean);
+	      if (!words.length) return [];
+	      const materials = allStockMaterials.map(item => ({ ...item, itemType: 'material' }));
+	      const products = allProducts.map(item => ({ ...item, itemType: 'product' }));
+	      const rows = shortageSearchMode === 'materials' ? [...materials, ...products] : [...products, ...materials];
+	      const rank = item => {
+	        const names = [item.nameAr, item.nameEn, item.name, item.code, item.barcode].map(normalizeShortageSearchText);
+	        if (names.includes(query)) return 0;
+	        return names.some(name => name.startsWith(query)) ? 1 : 2;
+	      };
 	      return rows
-	        .filter(item => normalizeText(`${item.nameAr || ''} ${item.nameEn || ''} ${item.name || ''} ${item.code || ''} ${item.barcode || ''}`).includes(query))
-	        .slice(0, 80);
+	        .filter(item => {
+	          const text = normalizeShortageSearchText(`${item.nameAr || ''} ${item.nameEn || ''} ${item.name || ''} ${item.code || ''} ${item.barcode || ''}`);
+	          return words.every(word => text.includes(word));
+	        })
+	        .map((item, index) => ({ item, index, rank: rank(item) }))
+	        .sort((a, b) => a.rank - b.rank || a.index - b.index)
+	        .map(entry => entry.item)
+	        .slice(0, 120);
+	    }
+
+	    // تصنيفات المواد في المحاسبة محفوظة كاسم داخل المادة نفسها، فنبني المجلدات منها عند غياب جدول التصنيفات
+	    function getShortageMaterialGroups() {
+	      const groups = new Map();
+	      allStockMaterials.forEach(item => {
+	        const name = String(item.categoryId || '').trim() || cashierT('uncategorized');
+	        if (!groups.has(name)) groups.set(name, []);
+	        groups.get(name).push(item);
+	      });
+	      return [...groups.entries()].map(([name, items]) => ({ name, items }));
+	    }
+
+	    function showShortageMaterialGroup(encodedName) {
+	      const name = decodeURIComponent(encodedName);
+	      const group = getShortageMaterialGroups().find(entry => entry.name === name);
+	      const results = document.getElementById('shortageSearchResults');
+	      if (!results || !group) return;
+	      results.innerHTML = `
+	        <button onclick="setShortageSearchTerm('')" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">${cashierT('back')}</button>
+	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(name)}</h3>
+	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+	          ${group.items.map(item => `
+	            <div class="product-card" onclick="addItemToShortage('material', '${item.id}')">
+	              <div class="text-4xl mb-2">🧱</div>
+	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(item))}</div>
+	              <div class="text-purple-700 font-bold text-sm">${cashierT('material')}</div>
+	            </div>
+	          `).join('')}
+	        </div>
+	      `;
 	    }
 
 	    function renderShortageSearchResultsHtml() {
@@ -3498,6 +3555,19 @@ function refreshUI() {
 	    function renderShortageCategoryGridHtml() {
 	      if (shortageSearchMode === 'materials') {
 	        const rootCategories = allInventoryCategories.filter(c => !c.parentId);
+	        if (!rootCategories.length && allStockMaterials.length) {
+	          return `
+	            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+	              ${getShortageMaterialGroups().map(group => `
+	                <div class="category-card" onclick="showShortageMaterialGroup('${encodeURIComponent(group.name)}')">
+	                  <div class="text-4xl mb-2">📁</div>
+	                  <div class="font-bold text-lg">${escapeHtml(group.name)}</div>
+	                  <div class="text-gray-500 text-sm">${group.items.length}</div>
+	                </div>
+	              `).join('')}
+	            </div>
+	          `;
+	        }
 	        return `
 	          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 	            ${rootCategories.length ? rootCategories.map(category => `

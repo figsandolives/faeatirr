@@ -357,7 +357,6 @@
         materialsSearchMode: 'بحث مواد مخزون',
         product: 'منتج',
         material: 'مواد مخزون',
-        uncategorized: 'بدون تصنيف',
         noMaterialCategories: 'لا توجد أقسام مواد مخزون',
         noProductCategories: 'لا توجد أقسام منتجات',
         shortageItems: 'العناصر المطلوبة',
@@ -470,7 +469,6 @@
         materialsSearchMode: 'Search Stock Materials',
         product: 'Product',
         material: 'Stock Material',
-        uncategorized: 'Uncategorized',
         noMaterialCategories: 'No stock material categories',
         noProductCategories: 'No product categories',
         shortageItems: 'Requested Items',
@@ -1858,6 +1856,21 @@ function setupRealtimeListeners() {
 	    refreshUI();
 	  });
 
+	  // Sales come off stock in the warehouse system (the cashier only saves the invoice), so the stock
+	  // shown here is the product's stock minus this branch's marked sales since that started.
+	  db.ref('meta/salesStockFrom').on('value', (snapshot) => {
+	    const from = Number(snapshot.val()) || 0;
+	    if (from === salesStockFrom) return;
+	    salesStockFrom = from;
+	    if (salesStockQuery) salesStockQuery.off('value');
+	    salesStockQuery = null; salesStockSold = {};
+	    if (from) {
+	      salesStockQuery = db.ref('orders').orderByChild('timestamp').startAt(from);
+	      salesStockQuery.on('value', (sales) => { salesStockSold = soldByBranch(sales.val()); refreshUI(); });
+	    }
+	    refreshUI();
+	  });
+
 	  db.ref('transferRequests').on('value', (snapshot) => {
 	    allTransferRequests = snapshot.val()
 	      ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
@@ -1867,6 +1880,21 @@ function setupRealtimeListeners() {
 
       setupBakingScheduleListener();
 	}
+
+// كميات المبيعات التي يخصمها نظام المخازن: { فرع: { منتج: كمية } } من الفواتير المعلّمة salesStock
+var salesStockFrom = 0, salesStockQuery = null, salesStockSold = {};
+function soldByBranch(orders) {
+  const sold = {};
+  Object.values(orders || {}).forEach(order => {
+    if (!order || order.salesStock !== true || order.stockDeducted || order.status === 'cancelled' || order.isCancelled === true || !order.stockBranchId) return;
+    const by = sold[order.stockBranchId] || (sold[order.stockBranchId] = {});
+    (Array.isArray(order.items) ? order.items : Object.values(order.items || {})).forEach(item => {
+      if (!item?.productId || item.productId === 'breakfast-trolley-deposit' || item.depositForLineId) return;
+      by[item.productId] = (by[item.productId] || 0) + (Number(item.quantity ?? item.qty) || 0);
+    });
+  });
+  return sold;
+}
 
 // 2. دالة تحديث واجهة المستخدم بدون ريفريش
 function refreshUI() {
@@ -3464,70 +3492,15 @@ function refreshUI() {
 	      if (results) results.innerHTML = renderShortageSearchResultsHtml();
 	    }
 
-	    function normalizeShortageSearchText(value) {
-	      return normalizeText(value)
-	        .replace(/[\u064B-\u0652\u0640]/g, '')
-	        .replace(/[أإآٱ]/g, 'ا')
-	        .replace(/ة/g, 'ه')
-	        .replace(/ى/g, 'ي')
-	        .replace(/ؤ/g, 'و')
-	        .replace(/ئ/g, 'ي')
-	        .replace(/\s+/g, ' ');
-	    }
-
-	    // يبحث في المنتجات والمواد معاً (القسم المختار أولاً) ويتجاهل فروق الهمزة والتاء المربوطة والياء وترتيب الكلمات
 	    function getShortageSearchRows() {
-	      const query = normalizeShortageSearchText(shortageSearchTerm);
-	      const words = query.split(' ').filter(Boolean);
-	      if (!words.length) return [];
-	      const materials = allStockMaterials.map(item => ({ ...item, itemType: 'material' }));
-	      const products = allProducts.map(item => ({ ...item, itemType: 'product' }));
-	      const rows = shortageSearchMode === 'materials' ? [...materials, ...products] : [...products, ...materials];
-	      const rank = item => {
-	        const names = [item.nameAr, item.nameEn, item.name, item.code, item.barcode].map(normalizeShortageSearchText);
-	        if (names.includes(query)) return 0;
-	        return names.some(name => name.startsWith(query)) ? 1 : 2;
-	      };
+	      const query = normalizeText(shortageSearchTerm);
+	      const rows = shortageSearchMode === 'materials'
+	        ? allStockMaterials.map(item => ({ ...item, itemType: 'material' }))
+	        : allProducts.map(item => ({ ...item, itemType: 'product' }));
+	      if (!query) return [];
 	      return rows
-	        .filter(item => {
-	          const text = normalizeShortageSearchText(`${item.nameAr || ''} ${item.nameEn || ''} ${item.name || ''} ${item.code || ''} ${item.barcode || ''}`);
-	          return words.every(word => text.includes(word));
-	        })
-	        .map((item, index) => ({ item, index, rank: rank(item) }))
-	        .sort((a, b) => a.rank - b.rank || a.index - b.index)
-	        .map(entry => entry.item)
-	        .slice(0, 120);
-	    }
-
-	    // تصنيفات المواد في المحاسبة محفوظة كاسم داخل المادة نفسها، فنبني المجلدات منها عند غياب جدول التصنيفات
-	    function getShortageMaterialGroups() {
-	      const groups = new Map();
-	      allStockMaterials.forEach(item => {
-	        const name = String(item.categoryId || '').trim() || cashierT('uncategorized');
-	        if (!groups.has(name)) groups.set(name, []);
-	        groups.get(name).push(item);
-	      });
-	      return [...groups.entries()].map(([name, items]) => ({ name, items }));
-	    }
-
-	    function showShortageMaterialGroup(encodedName) {
-	      const name = decodeURIComponent(encodedName);
-	      const group = getShortageMaterialGroups().find(entry => entry.name === name);
-	      const results = document.getElementById('shortageSearchResults');
-	      if (!results || !group) return;
-	      results.innerHTML = `
-	        <button onclick="setShortageSearchTerm('')" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">${cashierT('back')}</button>
-	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(name)}</h3>
-	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-	          ${group.items.map(item => `
-	            <div class="product-card" onclick="addItemToShortage('material', '${item.id}')">
-	              <div class="text-4xl mb-2">🧱</div>
-	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(item))}</div>
-	              <div class="text-purple-700 font-bold text-sm">${cashierT('material')}</div>
-	            </div>
-	          `).join('')}
-	        </div>
-	      `;
+	        .filter(item => normalizeText(`${item.nameAr || ''} ${item.nameEn || ''} ${item.name || ''} ${item.code || ''} ${item.barcode || ''}`).includes(query))
+	        .slice(0, 80);
 	    }
 
 	    function renderShortageSearchResultsHtml() {
@@ -3555,19 +3528,6 @@ function refreshUI() {
 	    function renderShortageCategoryGridHtml() {
 	      if (shortageSearchMode === 'materials') {
 	        const rootCategories = allInventoryCategories.filter(c => !c.parentId);
-	        if (!rootCategories.length && allStockMaterials.length) {
-	          return `
-	            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-	              ${getShortageMaterialGroups().map(group => `
-	                <div class="category-card" onclick="showShortageMaterialGroup('${encodeURIComponent(group.name)}')">
-	                  <div class="text-4xl mb-2">📁</div>
-	                  <div class="font-bold text-lg">${escapeHtml(group.name)}</div>
-	                  <div class="text-gray-500 text-sm">${group.items.length}</div>
-	                </div>
-	              `).join('')}
-	            </div>
-	          `;
-	        }
 	        return `
 	          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 	            ${rootCategories.length ? rootCategories.map(category => `
@@ -4004,6 +3964,15 @@ function refreshUI() {
 	          if (!qty || !item.itemId) return;
 	          const path = `${(item.itemType || 'product') === 'product' ? 'products' : 'stockMaterials'}/${item.itemId}/stockByBranch/${branchId}`;
 	          totals.set(path, (totals.get(path) || 0) + qty);
+	          // The batches the warehouse sent (first to expire first) arrive at the branch
+	          let left = qty;
+	          Object.entries(item.alloc || {}).forEach(([key, sentQty]) => {
+	            const q = Math.min(left, Number(sentQty) || 0);
+	            if (!/^\d{12}$/.test(key) || q <= 0) return;
+	            const batchPath = `products/${item.itemId}/batchStock/${key}/${branchId}`;
+	            totals.set(batchPath, (totals.get(batchPath) || 0) + q);
+	            left -= q;
+	          });
 	        });
 	        totals.forEach((qty, path) => { updates[path] = firebase.database.ServerValue.increment(qty); });
 	      }
@@ -4513,7 +4482,8 @@ function refreshUI() {
 
     function getInvoiceProductStock(product) {
       const branchId = getInvoiceStockBranchId();
-      return branchId ? Number(product?.stockByBranch?.[branchId] || 0) : 0;
+      if (!branchId) return 0;
+      return Number(product?.stockByBranch?.[branchId] || 0) - Number(salesStockSold[branchId]?.[product?.id] || 0);
     }
 
     function getInvoiceProductUnit(product) {
@@ -4577,7 +4547,15 @@ function refreshUI() {
     function findProductByBarcode(barcode) {
       const value = normalizeBarcodeValue(barcode);
       if (!value) return null;
-      return allProducts.find(product => normalizeBarcodeValue(product.barcode) === value) || null;
+      return allProducts.find(product => normalizeBarcodeValue(product.barcode) === value) || findBatchBarcode(value)?.product || null;
+    }
+
+    // Batch label = product barcode + production date (YYMMDD) + expiry date (YYMMDD)
+    function findBatchBarcode(value) {
+      if (!/^\d{17,}$/.test(value)) return null;
+      const base = value.slice(0, -12);
+      const hits = allProducts.filter(product => normalizeBarcodeValue(product.barcode) === base);
+      return hits.length === 1 ? { product: hits[0], batchKey: value.slice(-12) } : null;
     }
 
 	    function clearProductSearchBoxAfterScan(value) {
@@ -4653,7 +4631,15 @@ function refreshUI() {
         showInvoiceProductsPage();
       }
 
+      const countBefore = currentOrder.items.find(item => item.productId === product.id)?.quantity || 0;
       addProductToInvoice(product.id);
+      // A scanned batch label: the sale is taken from that batch
+      const batch = normalizeBarcodeValue(product.barcode) === normalizeBarcodeValue(barcode) ? null : findBatchBarcode(normalizeBarcodeValue(barcode));
+      const line = currentOrder.items.find(item => item.productId === product.id);
+      if (batch && line && line.quantity > countBefore) {
+        line.batches = line.batches || {};
+        line.batches[batch.batchKey] = (line.batches[batch.batchKey] || 0) + 1;
+      }
       clearProductSearchBoxAfterScan(barcode);
       const productsContainer = document.getElementById('categoriesAndProductsContainer');
       if (productsContainer) productsContainer.innerHTML = renderCategoriesForInvoice();
@@ -5844,7 +5830,8 @@ function showNumericKeypadForInvoice(index, inputField) {
             productNameEn: item.productNameEn || '', price: item.price || 0,
             quantity: item.quantity || 0, total: item.total || 0,
             unit: item.unit || '', notes: item.notes || '',
-            trolleyLineId: item.trolleyLineId || '', depositForLineId: item.depositForLineId || ''
+            trolleyLineId: item.trolleyLineId || '', depositForLineId: item.depositForLineId || '',
+            ...(item.batches ? { batches: item.batches } : {})
           }));
           const order = {
             timestamp,

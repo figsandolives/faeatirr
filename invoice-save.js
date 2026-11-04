@@ -63,15 +63,9 @@ window.InvoiceSave = (() => {
     return {key, counter: number(values[0]), sequence: number(values[1]), rawSequence: number(values[2]), assignment: number(values[3]) || number(values[4])};
   }
 
-  async function stockPlan(db, order) {
-    const quantities = new Map();
-    for (const item of order.items || []) {
-      if (!item.productId || item.productId === 'breakfast-trolley-deposit' || item.depositForLineId) continue;
-      const qty = Number(item.quantity ?? item.qty);
-      if (!Number.isFinite(qty) || qty <= 0) throw new Error('كمية المنتج غير صالحة');
-      quantities.set(item.productId, (quantities.get(item.productId) || 0) + qty);
-    }
-    if (!quantities.size) return { branchId: null, moves: {} };
+  /* The branch whose stock a sale comes from (the device's branch), or null for a sale without products */
+  async function saleBranch(db, order) {
+    if (!(order.items || []).some(item => item.productId && item.productId !== 'breakfast-trolley-deposit' && !item.depositForLineId)) return null;
     let branchId = order.stockBranchId;
     if (!branchId) {
       const branches = await get(db, 'branches');
@@ -79,20 +73,16 @@ window.InvoiceSave = (() => {
         id === order.branch || [branch.nameAr, branch.name, branch.nameEn].includes(order.branch))?.[0];
     }
     if (!branchId || /[.#$\[\]/]/.test(branchId)) throw new Error('تعذر تحديد مخزون الفرع، حدّث الصفحة وتحقق من ربط الجهاز بالفرع');
-    const moves = {};
-    // All products are read at once (one round trip instead of one per item).
-    const products = new Map(await Promise.all([...quantities.keys()].map(async productId => [productId, await get(db, `products/${productId}`)])));
-    for (const [productId, requested] of quantities) {
-      const qty = Number(requested.toFixed(6));
-      const product = products.get(productId);
-      if (!product) throw new Error('المنتج غير موجود في المخزون');
-      const before = Number(product.stockByBranch?.[branchId] || 0);
-      if (!Number.isFinite(before)) {
-        throw new Error(`الكمية غير متاحة في مخزون الفرع: ${product.nameAr || product.name || productId} (متبقي: ${Number.isFinite(before) ? before : 0})`);
-      }
-      moves[productId] = { branchId, before, quantity: qty, after: Number((before - qty).toFixed(6)) };
-    }
-    return { branchId, moves };
+    return branchId;
+  }
+
+  /* meta/salesStockFrom = the time of the earliest sale the accounting site takes from stock, so it
+     reads only the invoices from then on */
+  let salesStartKnown = 0;
+  async function markSalesStart(db, timestamp) {
+    if (salesStartKnown && salesStartKnown <= timestamp) return;
+    const result = await db.ref('meta/salesStockFrom').transaction(current => (Number(current) && Number(current) <= timestamp ? undefined : timestamp));
+    salesStartKnown = Number(result?.snapshot?.val?.()) || timestamp;
   }
 
   async function commit(db, pending, {normalize = false, maxRetries = 32} = {}) {
@@ -122,7 +112,9 @@ window.InvoiceSave = (() => {
         if (winner && !normalize) return winner;
         throw new Error('تعذر استكمال الرقم المحجوز');
       }
-      const stock = normalize ? { branchId: null, moves: {} } : await stockPlan(db, payload);
+      // The cashier no longer moves stock: the accounting site takes every sale marked salesStock
+      // from its branch's balance (and follows later edits and cancellations by itself).
+      const stockBranchId = normalize ? null : await saleBranch(db, payload);
       const allocated = Math.max(before.counter, before.sequence, before.rawSequence) + 1;
       const saved = {...(normalize ? existing : payload), id,
         invoiceNumber: String(allocated).padStart(padding(payload.branch), '0'),
@@ -132,12 +124,11 @@ window.InvoiceSave = (() => {
         saved.invoiceNumberBeforeNormalization = String(existing.invoiceNumber || '');
         saved.invoiceNumberNormalizedAt = Date.now();
       }
-      if (!normalize && Object.keys(stock.moves).length) {
-        saved.stockBranchId = stock.branchId;
-        saved.branchId = stock.branchId;
+      if (!normalize && stockBranchId) {
+        saved.stockBranchId = stockBranchId;
+        saved.branchId = stockBranchId;
         saved.createdAt = payload.createdAt || payload.timestamp || Date.now();
-        saved.stockDeducted = true;
-        saved.stockMovements = stock.moves;
+        saved.salesStock = true;
       }
       const updates = {
         [`orders/${id}`]: saved,
@@ -150,12 +141,6 @@ window.InvoiceSave = (() => {
           baseRawSequence: before.rawSequence, branch: payload.branch,
           mode: normalize ? 'normalize' : 'create', timestamp: Date.now()}
       };
-      if (!normalize && Object.keys(stock.moves).length) {
-        updates[`invoiceCommits/${before.key}`].stockMoves = stock.moves;
-        for (const [productId, move] of Object.entries(stock.moves)) {
-          updates[`products/${productId}/stockByBranch/${move.branchId}`] = move.after;
-        }
-      }
       // Carry the durable local history into the successful atomic write too,
       // including failures recorded before an offline browser was restarted.
       const audit = (event, timestamp, error = '') => ({event, timestamp,
@@ -172,6 +157,7 @@ window.InvoiceSave = (() => {
         updates[`tableDrafts/${safe(pending.draft.tableBranchId)}_${safe(pending.draft.tableNumber)}`] = null;
       }
       try {
+        if (saved.salesStock) await markSalesStart(db, Number(saved.timestamp) || Date.now());
         await db.ref().update(updates);
         return saved;
       } catch (error) {

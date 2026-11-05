@@ -29,6 +29,12 @@ window.InvoiceCancellation = (() => {
           const after = Number((before + move.quantity).toFixed(6));
           updates[path] = after;
           updates[`invoiceStockCancellations/${id}/${productId}`] = { branchId: move.branchId, before, after, quantity: move.quantity };
+          // Units sold from a scanned batch go back to that batch
+          for (const [key, b] of Object.entries(move.batches || {})) {
+            const batchPath = `products/${productId}/batchStock/${key}/${move.branchId}`;
+            const had = Number((await db.ref(batchPath).once('value')).val() || 0);
+            updates[batchPath] = Number((had + (b.before - b.after)).toFixed(6));
+          }
         }
         try { await db.ref().update(updates); return cancelledOrder; }
         catch (error) {

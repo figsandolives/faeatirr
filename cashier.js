@@ -2063,7 +2063,7 @@ function refreshUI() {
       try {
         const phone = normalizeCustomerPhone(customer.phone);
         if (!phone) {
-          showToast('رقم الهاتف غير صالح', true);
+          showToast(PHONE_RULE_MESSAGE, true);
           return false;
         }
 
@@ -2111,7 +2111,15 @@ function refreshUI() {
         .replace(/[٠-٩]/g, digit => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(digit)])
         .replace(/\D/g, '');
       const local = digits.replace(/^00965/, '').replace(/^965/, '');
-      return /^\d{8}$/.test(local) ? `965${local}` : '';
+      // 8 digits, and not a filler like 00000000 or 11111111
+      return /^\d{8}$/.test(local) && !/^(\d)\1{7}$/.test(local) ? `965${local}` : '';
+    }
+    const PHONE_RULE_MESSAGE = 'رقم الهاتف لازم يكون 8 أرقام صحيحة (ممنوع رقم ناقص أو أصفار)';
+    // An old customer saved with a short or filler number cannot be used for a sale
+    function customerPhoneUsable(customer) {
+      if (normalizeCustomerPhone(customer && customer.phone)) return true;
+      showToast(`رقم العميل ${(customer && customer.name) || ''} غير صحيح (${(customer && customer.phone) || '-'}). ${PHONE_RULE_MESSAGE} — عدّل رقمه أو أضف العميل برقمه الصحيح`, true);
+      return false;
     }
 
     function mergeCustomerAddresses(...lists) {
@@ -5248,6 +5256,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     
     function selectCustomerForDelivery(customerId) {
       const customer = allCustomers.find(c => c.id === customerId);
+      if (!customerPhoneUsable(customer)) return;
       currentOrder.customer = customer;
       showSelectedCustomerAddressPage();
     }
@@ -5703,6 +5712,7 @@ function showNumericKeypadForInvoice(index, inputField) {
         return;
       }
       const customer = allCustomers.find(c => c.id === customerId);
+      if (!customerPhoneUsable(customer)) return;
       currentOrder.customer = {
         name: customer.name,
         phone: customer.phone
@@ -5739,7 +5749,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     async function resolvePickupCustomer(name, rawPhone) {
       const phone = normalizeCustomerPhone(rawPhone);
       if (!phone) {
-        showToast('رقم الهاتف غير صالح', true);
+        showToast(PHONE_RULE_MESSAGE, true);
         return null;
       }
       const existing = allCustomers.find(item => normalizeCustomerPhone(item.phone) === phone);
@@ -5809,6 +5819,11 @@ function showNumericKeypadForInvoice(index, inputField) {
 
     async function printAndSaveInvoice() {
       if (invoiceSaveInProgress) return;
+      // A new invoice needs a real phone number (a pending one already started saving keeps its own)
+      if (!currentOrder.invoiceSaveAttemptId && !normalizeCustomerPhone(currentOrder.customer && currentOrder.customer.phone)) {
+        showToast(PHONE_RULE_MESSAGE, true);
+        return;
+      }
       invoiceSaveInProgress = true;
       let pending = null;
       let key = '';
@@ -6444,14 +6459,25 @@ function showNumericKeypadForInvoice(index, inputField) {
       }
     }
 
-    function getCurrentDailySessionOrders() {
-      if (!currentDailySession) return [];
-      return getDailySessionOrders(currentDailySession);
+    // The cashier keeps only today's orders loaded, so a session that runs past midnight
+    // fetches its own orders (its whole open time) before closing or reprinting.
+    async function loadDailySessionOrders(session) {
+      if (!session) return [];
+      try {
+        const snapshot = await db.ref('orders').orderByChild('timestamp')
+          .startAt(session.openedAt || 0).endAt(session.closedAt || Date.now()).once('value');
+        const byId = new Map(allOrders.map(order => [order.id, order]));
+        normalizeOrdersSnapshot(snapshot).forEach(order => { if (!byId.has(order.id)) byId.set(order.id, order); });
+        return getDailySessionOrders(session, Array.from(byId.values()));
+      } catch (error) {
+        console.error('Unable to load daily session orders:', error);
+        return getDailySessionOrders(session);
+      }
     }
 
-    function getDailySessionOrders(session) {
+    function getDailySessionOrders(session, orders = allOrders) {
       if (!session) return [];
-      return allOrders
+      return orders
         .filter(order => {
           const belongsById = order.dailySessionId && order.dailySessionId === session.id;
           const belongsByTime = !order.dailySessionId &&
@@ -6556,8 +6582,8 @@ function showNumericKeypadForInvoice(index, inputField) {
       finalizeDailyBalance(payments);
     }
 
-    function getDailyBalanceSummary(payments) {
-      const orders = getCurrentDailySessionOrders();
+    async function getDailyBalanceSummary(payments) {
+      const orders = await loadDailySessionOrders(currentDailySession);
       return buildDailyBalanceSummary(currentDailySession, orders, payments);
     }
 
@@ -6640,13 +6666,13 @@ function showNumericKeypadForInvoice(index, inputField) {
       `;
     }
 
-    function reprintDailySession(sessionId) {
+    async function reprintDailySession(sessionId) {
       const session = allDailySessions.find(item => item.id === sessionId);
       if (!session) {
         showToast('اليومية غير موجودة', true);
         return;
       }
-      const orders = getDailySessionOrders(session);
+      const orders = await loadDailySessionOrders(session);
       const summary = buildDailyBalanceSummary(session, orders, Array.isArray(session.payments) ? session.payments : []);
       printDailyBalanceReport(session, summary);
     }
@@ -6657,7 +6683,7 @@ function showNumericKeypadForInvoice(index, inputField) {
         return;
       }
 
-      const summary = getDailyBalanceSummary(payments);
+      const summary = await getDailyBalanceSummary(payments);
 
       const closedAt = Date.now();
       const balanceData = {
@@ -15581,6 +15607,12 @@ async function saveOrderEdit() {
     showToast('الرجاء إدخال اسم العميل ورقم الهاتف', true);
     return;
   }
+  const editedPhone = normalizeCustomerPhone(currentEditingOrder.phoneNumber);
+  if (!editedPhone) {
+    showToast(PHONE_RULE_MESSAGE, true);
+    return;
+  }
+  currentEditingOrder.phoneNumber = editedPhone;
 
   if (currentEditingOrder.items.length === 0) {
     showToast('يجب أن تحتوي الفاتورة على منتج واحد على الأقل', true);

@@ -2106,15 +2106,112 @@ function refreshUI() {
       }
     }
 
-    function normalizeCustomerPhone(value) {
-      const digits = String(value || '')
+    // Gulf countries the cashier can pick next to the phone box (len = local digits after the code)
+    const GCC_COUNTRIES = [
+      { cc: '965', iso: 'KW', name: 'الكويت', len: 8 },
+      { cc: '966', iso: 'SA', name: 'السعودية', len: 9 },
+      { cc: '971', iso: 'AE', name: 'الإمارات', len: 9 },
+      { cc: '974', iso: 'QA', name: 'قطر', len: 8 },
+      { cc: '973', iso: 'BH', name: 'البحرين', len: 8 },
+      { cc: '968', iso: 'OM', name: 'عُمان', len: 8 }
+    ];
+    function phoneDigits(value) {
+      return String(value || '')
         .replace(/[٠-٩]/g, digit => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(digit)])
-        .replace(/\D/g, '');
-      const local = digits.replace(/^00965/, '').replace(/^965/, '');
-      // 8 digits, and not a filler like 00000000 or 11111111
-      return /^\d{8}$/.test(local) && !/^(\d)\1{7}$/.test(local) ? `965${local}` : '';
+        .replace(/\D/g, '')
+        .replace(/^00/, '');
     }
-    const PHONE_RULE_MESSAGE = 'رقم الهاتف لازم يكون 8 أرقام صحيحة (ممنوع رقم ناقص أو أصفار)';
+    // Saved form: country code + local number (965XXXXXXXX, 971XXXXXXXXX ...). A bare 8-digit number is Kuwaiti.
+    function normalizeCustomerPhone(value) {
+      const digits = phoneDigits(value);
+      const okLocal = (local, c) => local.length === c.len && !new RegExp(`^(\\d)\\1{${c.len - 1}}$`).test(local);
+      for (const c of GCC_COUNTRIES) {
+        if (digits.length === c.cc.length + c.len && digits.startsWith(c.cc)) {
+          return okLocal(digits.slice(c.cc.length), c) ? digits : '';
+        }
+      }
+      // 8 digits, and not a filler like 00000000 or 11111111
+      return okLocal(digits, GCC_COUNTRIES[0]) ? `965${digits}` : '';
+    }
+    // Country picked in the picker + what the cashier typed (a full number with its code wins)
+    function composeCustomerPhone(cc, typed) {
+      const digits = phoneDigits(typed);
+      if (digits.length > 8) {
+        const full = normalizeCustomerPhone(digits);
+        if (full) return full;
+      }
+      const country = GCC_COUNTRIES.find(c => c.cc === String(cc || '').replace(/\D/g, '')) || GCC_COUNTRIES[0];
+      const local = digits.replace(/^0+/, '');
+      return local.length === country.len ? normalizeCustomerPhone(country.cc + local) : '';
+    }
+    function phoneCountryOf(phone) {
+      const full = normalizeCustomerPhone(phone);
+      return full ? GCC_COUNTRIES.find(c => full.startsWith(c.cc)) : null;
+    }
+    function gccFlagSvg(iso) {
+      const teeth = (x, depth, n, fill) => {
+        const pts = ['0,0', `${x},0`];
+        for (let i = 0; i < n; i++) pts.push(`${x + depth},${(i * 2 + 1) * 10 / n}`, `${x},${(i + 1) * 20 / n}`);
+        pts.push('0,20');
+        return `<polygon points="${pts.join(' ')}" fill="${fill}"/>`;
+      };
+      const tri = (a, b, c) => `<rect width="30" height="6.67" fill="${a}"/><rect y="6.67" width="30" height="6.67" fill="${b}"/><rect y="13.33" width="30" height="6.67" fill="${c}"/>`;
+      const body = {
+        KW: `${tri('#007a3d', '#fff', '#ce1126')}<polygon points="0,0 7.5,6.67 7.5,13.33 0,20" fill="#000"/>`,
+        SA: `<rect width="30" height="20" fill="#006c35"/><rect x="8" y="6" width="14" height="3.2" rx="1" fill="#fff"/><rect x="8" y="12.4" width="14" height="1.3" fill="#fff"/>`,
+        AE: `${tri('#00732f', '#fff', '#000')}<rect width="7.5" height="20" fill="#ff0000"/>`,
+        QA: `<rect width="30" height="20" fill="#8a1538"/>${teeth(8, 3, 9, '#fff')}`,
+        BH: `<rect width="30" height="20" fill="#ce1126"/>${teeth(8, 4, 5, '#fff')}`,
+        OM: `${tri('#fff', '#db161b', '#008000')}<rect width="8" height="20" fill="#db161b"/>`
+      }[iso] || '';
+      return `<svg class="cc-flag" viewBox="0 0 30 20" aria-hidden="true">${body}</svg>`;
+    }
+    // Phone shown with its country's flag; a broken old number is shown as typed
+    function phoneWithFlag(phone) {
+      const c = phoneCountryOf(phone);
+      return c ? `<span class="cc-phone">${gccFlagSvg(c.iso)}<span dir="ltr">+${c.cc} ${String(normalizeCustomerPhone(phone)).slice(c.cc.length)}</span></span>` : `<span dir="ltr">${phone || ''}</span>`;
+    }
+    // Country picker: a hidden input (id) holds the code, so .value keeps working like the old prefix box
+    function phoneCountryPicker(id, cc = '965', onchange = '') {
+      const c = GCC_COUNTRIES.find(x => x.cc === cc) || GCC_COUNTRIES[0];
+      return `<div class="cc-pick">
+        <input type="hidden" id="${id}" value="${c.cc}"${onchange ? ` data-onchange="${onchange}"` : ''}>
+        <button type="button" class="cc-btn" onclick="toggleCcMenu(this)" title="${c.name}">${gccFlagSvg(c.iso)}<span dir="ltr">+${c.cc}</span><span class="cc-caret">▾</span></button>
+        <div class="cc-menu hidden">${GCC_COUNTRIES.map(x => `<button type="button" class="cc-opt${x.cc === c.cc ? ' on' : ''}" onclick="pickCc(this, '${x.cc}')">${gccFlagSvg(x.iso)}<span class="cc-name">${x.name}</span><span dir="ltr" class="cc-code">+${x.cc}</span></button>`).join('')}</div>
+      </div>`;
+    }
+    function toggleCcMenu(btn) {
+      const menu = btn.parentElement.querySelector('.cc-menu');
+      const open = menu.classList.contains('hidden');
+      document.querySelectorAll('.cc-menu').forEach(m => m.classList.add('hidden'));
+      if (open) menu.classList.remove('hidden');
+    }
+    function pickCc(opt, cc) {
+      const wrap = opt.closest('.cc-pick');
+      const c = GCC_COUNTRIES.find(x => x.cc === cc) || GCC_COUNTRIES[0];
+      const input = wrap.querySelector('input[type="hidden"]');
+      input.value = c.cc;
+      const btn = wrap.querySelector('.cc-btn');
+      btn.title = c.name;
+      btn.innerHTML = `${gccFlagSvg(c.iso)}<span dir="ltr">+${c.cc}</span><span class="cc-caret">▾</span>`;
+      wrap.querySelectorAll('.cc-opt').forEach(o => o.classList.toggle('on', o === opt));
+      wrap.querySelector('.cc-menu').classList.add('hidden');
+      const fn = input.dataset.onchange && window[input.dataset.onchange];
+      if (typeof fn === 'function') fn();
+      wrap.parentElement.querySelector('input[type="text"]')?.focus();
+    }
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.cc-pick')) document.querySelectorAll('.cc-menu').forEach(m => m.classList.add('hidden'));
+    });
+    // Customer lists: keep only the picked country, and let a search typed with a leading 0 still match
+    function customerMatchesSearch(item, term, cc) {
+      const itemCc = item.getAttribute('data-cc') || '965';
+      if (cc && itemCc !== cc) return false;
+      const data = (item.getAttribute('data-search') || '').toLowerCase();
+      const digits = phoneDigits(term).replace(/^0+/, '');
+      return data.includes(term) || (/^[\d\s+٠-٩]+$/.test(term) && !!digits && data.includes(digits));
+    }
+    const PHONE_RULE_MESSAGE = 'رقم الهاتف غير صحيح: اختر الدولة ثم اكتب الرقم (الكويت وقطر والبحرين وعُمان 8 أرقام، السعودية والإمارات 9 أرقام)';
     // An old customer saved with a short or filler number cannot be used for a sale
     function customerPhoneUsable(customer) {
       if (normalizeCustomerPhone(customer && customer.phone)) return true;
@@ -5223,13 +5320,16 @@ function showNumericKeypadForInvoice(index, inputField) {
             </button>
           ` : ''}
           
-          <input type="text" id="customerSearchDelivery" oninput="filterCustomersDelivery()" placeholder="${cashierT('customerPhoneSearch')}" class="w-full p-3 border-2 border-gray-300 rounded-lg mb-4 focus:border-blue-600 focus:outline-none">
+          <div class="flex gap-2 mb-4">
+            ${phoneCountryPicker('customerSearchDeliveryCc', '965', 'filterCustomersDelivery')}
+            <input type="text" id="customerSearchDelivery" oninput="filterCustomersDelivery()" placeholder="${cashierT('customerPhoneSearch')}" class="flex-1 min-w-0 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
+          </div>
           
           <div class="max-h-96 overflow-y-auto">
             ${sortCustomersNewestFirst(allCustomers).map(customer => `
-              <div class="customer-delivery-item bg-gray-50 p-4 rounded-lg mb-2 cursor-pointer hover:bg-blue-50 transition" data-search="${customer.name} ${customer.phone}" onclick="selectCustomerForDelivery('${customer.id}')">
+              <div class="customer-delivery-item bg-gray-50 p-4 rounded-lg mb-2 cursor-pointer hover:bg-blue-50 transition" data-search="${customer.name} ${customer.phone}" data-cc="${(phoneCountryOf(customer.phone) || GCC_COUNTRIES[0]).cc}" onclick="selectCustomerForDelivery('${customer.id}')">
                 <div class="font-bold text-lg">${customer.name}</div>
-                <div class="text-gray-600">${customer.phone}</div>
+                <div class="text-gray-600">${phoneWithFlag(customer.phone)}</div>
               </div>
             `).join('')}
           </div>
@@ -5238,6 +5338,7 @@ function showNumericKeypadForInvoice(index, inputField) {
         </div>
       `;
       document.body.appendChild(modal);
+      filterCustomersDelivery();
     }
 
     function showCustomerSelectionForDelivery() {
@@ -5245,12 +5346,10 @@ function showNumericKeypadForInvoice(index, inputField) {
     }
     
     function filterCustomersDelivery() {
-      const searchTerm = document.getElementById('customerSearchDelivery').value.toLowerCase();
-      const items = document.querySelectorAll('.customer-delivery-item');
-      
-      items.forEach(item => {
-        const searchData = item.getAttribute('data-search').toLowerCase();
-        item.style.display = searchData.includes(searchTerm) ? '' : 'none';
+      const searchTerm = document.getElementById('customerSearchDelivery').value.trim().toLowerCase();
+      const cc = document.getElementById('customerSearchDeliveryCc')?.value || '';
+      document.querySelectorAll('.customer-delivery-item').forEach(item => {
+        item.style.display = customerMatchesSearch(item, searchTerm, cc) ? '' : 'none';
       });
     }
     
@@ -5357,6 +5456,7 @@ function showNumericKeypadForInvoice(index, inputField) {
     
     function showAddCustomerForDelivery() {
       const searchValue = convertToEnglishNumbers(document.getElementById('customerSearchDelivery')?.value || '').replace(/\D/g, '');
+      const searchCc = document.getElementById('customerSearchDeliveryCc')?.value || '965';
 	      document.querySelector('.modal-overlay')?.remove();
       
       const modal = document.createElement('div');
@@ -5374,8 +5474,8 @@ function showNumericKeypadForInvoice(index, inputField) {
             <div>
               <label class="block mb-2 font-bold text-gray-700">رقم الهاتف</label>
               <div class="flex gap-2">
-                <input type="text" id="newCustomerPrefix" value="965" class="w-24 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
-                <input type="text" id="newCustomerPhoneDelivery" value="${searchValue}" oninput="this.value = convertToEnglishNumbers(this.value)" class="flex-1 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
+                ${phoneCountryPicker('newCustomerPrefix', searchCc)}
+                <input type="text" id="newCustomerPhoneDelivery" value="${searchValue}" dir="ltr" inputmode="tel" oninput="this.value = convertToEnglishNumbers(this.value)" class="flex-1 min-w-0 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
               </div>
             </div>
             
@@ -5429,7 +5529,11 @@ function showNumericKeypadForInvoice(index, inputField) {
         area = document.getElementById('newCustomerAreaManual').value.trim();
       }
       
-      const normalizedPhone = normalizeCustomerPhone(`${prefix}${phone}`);
+      const normalizedPhone = composeCustomerPhone(prefix, phone);
+      if (!normalizedPhone) {
+        showToast(PHONE_RULE_MESSAGE, true);
+        return;
+      }
       const existing = allCustomers.find(item => normalizeCustomerPhone(item.phone) === normalizedPhone);
       if (existing) {
         showToast('هذا الرقم مسجل بالفعل؛ تم اختيار حساب العميل الموجود', true);
@@ -5638,8 +5742,8 @@ function showNumericKeypadForInvoice(index, inputField) {
             <div>
               <label class="block mb-2 font-bold text-gray-700">رقم الهاتف</label>
               <div class="flex gap-2">
-                <input type="text" id="pickupCustomerPrefix" value="965" class="w-24 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
-                <input type="text" id="pickupCustomerPhone" oninput="this.value = convertToEnglishNumbers(this.value)" class="flex-1 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
+                ${phoneCountryPicker('pickupCustomerPrefix')}
+                <input type="text" id="pickupCustomerPhone" dir="ltr" inputmode="tel" oninput="this.value = convertToEnglishNumbers(this.value)" class="flex-1 min-w-0 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
               </div>
             </div>
 
@@ -5678,13 +5782,16 @@ function showNumericKeypadForInvoice(index, inputField) {
             </select>
           </div>
           
-          <input type="text" id="customerSearchPickup" oninput="filterCustomersPickup()" placeholder="🔍 بحث..." class="w-full p-3 border-2 border-gray-300 rounded-lg mb-4 focus:border-blue-600 focus:outline-none">
+          <div class="flex gap-2 mb-4">
+            ${phoneCountryPicker('customerSearchPickupCc', '965', 'filterCustomersPickup')}
+            <input type="text" id="customerSearchPickup" oninput="filterCustomersPickup()" placeholder="🔍 بحث..." class="flex-1 min-w-0 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
+          </div>
           
           <div class="max-h-96 overflow-y-auto">
             ${sortCustomersNewestFirst(allCustomers).map(customer => `
-              <div class="customer-pickup-item bg-gray-50 p-4 rounded-lg mb-2 cursor-pointer hover:bg-blue-50 transition" data-search="${customer.name} ${customer.phone}" onclick="selectCustomerPickup('${customer.id}')">
+              <div class="customer-pickup-item bg-gray-50 p-4 rounded-lg mb-2 cursor-pointer hover:bg-blue-50 transition" data-search="${customer.name} ${customer.phone}" data-cc="${(phoneCountryOf(customer.phone) || GCC_COUNTRIES[0]).cc}" onclick="selectCustomerPickup('${customer.id}')">
                 <div class="font-bold text-lg">${customer.name}</div>
-                <div class="text-gray-600">${customer.phone}</div>
+                <div class="text-gray-600">${phoneWithFlag(customer.phone)}</div>
               </div>
             `).join('')}
           </div>
@@ -5693,15 +5800,14 @@ function showNumericKeypadForInvoice(index, inputField) {
         </div>
       `;
       document.body.appendChild(modal);
+      filterCustomersPickup();
     }
     
     function filterCustomersPickup() {
-      const searchTerm = document.getElementById('customerSearchPickup').value.toLowerCase();
-      const items = document.querySelectorAll('.customer-pickup-item');
-      
-      items.forEach(item => {
-        const searchData = item.getAttribute('data-search').toLowerCase();
-        item.style.display = searchData.includes(searchTerm) ? '' : 'none';
+      const searchTerm = document.getElementById('customerSearchPickup').value.trim().toLowerCase();
+      const cc = document.getElementById('customerSearchPickupCc')?.value || '';
+      document.querySelectorAll('.customer-pickup-item').forEach(item => {
+        item.style.display = customerMatchesSearch(item, searchTerm, cc) ? '' : 'none';
       });
     }
     
@@ -5737,7 +5843,7 @@ function showNumericKeypadForInvoice(index, inputField) {
         return;
       }
       
-      resolvePickupCustomer(name, `${prefix}${phone}`).then(customer => {
+      resolvePickupCustomer(name, composeCustomerPhone(prefix, phone)).then(customer => {
         if (!customer) return;
         currentOrder.customer = customer;
         currentOrder.pickupBranch = pickupBranch;
@@ -6101,8 +6207,7 @@ function showNumericKeypadForInvoice(index, inputField) {
 }
 
     function cashierWhatsappPhone(value) {
-      const digits = String(value || '').replace(/[٠-٩]/g, digit => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(digit)]).replace(/\D/g, '').replace(/^965/, '');
-      return /^\d{8}$/.test(digits) ? digits : '';
+      return normalizeCustomerPhone(value);
     }
 
     // هذه نسخة العميل فقط: نفس الإيصال الحراري، لكن تتضمن التوصيل داخل PDF المرسل.
@@ -6152,7 +6257,7 @@ function showNumericKeypadForInvoice(index, inputField) {
         if (!pdfBase64) throw new Error('ملف PDF فارغ');
         const response = await fetch(CASHIER_INVOICE_WHATSAPP_URL, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: `C${order.invoiceNumber}`, phone: `965${phone}`, pdfBase64 })
+          body: JSON.stringify({ orderId: `C${order.invoiceNumber}`, phone, pdfBase64 })
         });
         if (!response.ok) throw new Error(`WhatsApp status ${response.status}`);
       } catch (error) {
@@ -9549,8 +9654,8 @@ function renderAccountingContent(section) {
             <div>
               <label class="block mb-2 font-bold text-gray-700">رقم الهاتف</label>
               <div class="flex gap-2">
-                <input type="text" id="newCustomerPrefix" value="965" class="w-20 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
-                <input type="text" id="newCustomerPhone" class="flex-1 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
+                ${phoneCountryPicker('newCustomerPrefix')}
+                <input type="text" id="newCustomerPhone" dir="ltr" inputmode="tel" oninput="this.value = convertToEnglishNumbers(this.value)" class="flex-1 min-w-0 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
               </div>
             </div>
           </div>
@@ -9573,7 +9678,11 @@ function renderAccountingContent(section) {
         return;
       }
       
-      const normalizedPhone = normalizeCustomerPhone(`${prefix}${phone}`);
+      const normalizedPhone = composeCustomerPhone(prefix, phone);
+      if (!normalizedPhone) {
+        showToast(PHONE_RULE_MESSAGE, true);
+        return;
+      }
       const existing = allCustomers.find(item => normalizeCustomerPhone(item.phone) === normalizedPhone);
       if (existing) {
         showToast(`الرقم مسجل بالفعل باسم ${existing.name}`, true);
@@ -9673,7 +9782,10 @@ function renderAccountingContent(section) {
             </div>
             <div>
               <label class="block mb-2 font-bold text-gray-700">رقم الهاتف</label>
-              <input type="text" id="editCustomerPhone" value="${customer.phone}" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
+              <div class="flex gap-2">
+                ${phoneCountryPicker('editCustomerPrefix', (phoneCountryOf(customer.phone) || GCC_COUNTRIES[0]).cc)}
+                <input type="text" id="editCustomerPhone" dir="ltr" inputmode="tel" oninput="this.value = convertToEnglishNumbers(this.value)" value="${phoneCountryOf(customer.phone) ? normalizeCustomerPhone(customer.phone).slice(3) : (customer.phone || '')}" class="flex-1 min-w-0 p-3 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none">
+              </div>
             </div>
           </div>
           <div class="flex gap-3 mt-6">
@@ -9687,7 +9799,7 @@ function renderAccountingContent(section) {
 
     async function saveEditedCustomer(customerId) {
       const name = document.getElementById('editCustomerName').value.trim();
-      const phone = normalizeCustomerPhone(document.getElementById('editCustomerPhone').value.trim());
+      const phone = composeCustomerPhone(document.getElementById('editCustomerPrefix')?.value, document.getElementById('editCustomerPhone').value.trim());
       
       if (!name || !phone) {
         showToast('الرجاء إدخال الاسم ورقم الهاتف', true);

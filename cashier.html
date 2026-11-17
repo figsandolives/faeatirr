@@ -339,6 +339,19 @@
     .baking-sent-status{align-self:center;color:#047857;background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:10px 14px;font-weight:800}.baking-status-page{display:grid;place-items:center}.baking-status-card{width:min(460px,100%);padding:42px 28px;background:#fff;text-align:center;border-radius:20px;box-shadow:0 22px 55px rgba(15,23,42,.13)}.baking-status-card h1{font-size:25px;color:#172033;margin:15px 0 8px}.baking-status-card p{color:#64748b;margin:0 0 24px}.baking-status-icon{width:64px;height:64px;margin:auto;border-radius:50%;display:grid;place-items:center;background:#d1fae5;color:#047857;font-size:34px;font-weight:900}.baking-exit-button{background:#1e3a5f;color:#fff;border:0;border-radius:10px;padding:12px 35px;font:800 16px 'Cairo',sans-serif;cursor:pointer}.baking-loader{width:48px;height:48px;margin:auto;border:5px solid #dbeafe;border-top-color:#2563eb;border-radius:50%;animation:baking-spin .8s linear infinite}@keyframes baking-spin{to{transform:rotate(360deg)}}
     @media (max-width: 768px) { .baking-page{padding:16px}.baking-topbar{align-items:flex-start;flex-wrap:wrap}.baking-title{order:3;flex-basis:100%}.baking-topbar h1{font-size:20px}.baking-actions{margin-inline-start:auto}.baking-day-picker{margin:25px auto;padding:20px;grid-template-columns:1fr}.baking-sheet{padding:10px}.baking-sheet-meta{flex-direction:column}.baking-table{min-width:850px} }
 
+    /* Gulf country picker next to phone boxes */
+    .cc-pick { position: relative; flex: none; }
+    .cc-btn { height: 100%; min-height: 48px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 2px solid #d1d5db; border-radius: .5rem; background: #fff; font-weight: 700; white-space: nowrap; cursor: pointer; }
+    .cc-btn:hover, .cc-btn:focus { border-color: #2563eb; outline: none; }
+    .cc-caret { font-size: 11px; color: #6b7280; }
+    .cc-menu { position: absolute; top: calc(100% + 4px); inset-inline-start: 0; z-index: 80; min-width: 210px; padding: 4px; background: #fff; border: 1px solid #e5e7eb; border-radius: .5rem; box-shadow: 0 10px 25px rgba(0,0,0,.15); }
+    .cc-opt { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px; text-align: start; cursor: pointer; background: none; border: 0; }
+    .cc-opt:hover { background: #eff6ff; }
+    .cc-opt.on { background: #dbeafe; font-weight: 700; }
+    .cc-name { flex: 1; }
+    .cc-code { color: #6b7280; }
+    .cc-flag { width: 24px; height: 16px; flex: none; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.18); }
+    .cc-phone { display: inline-flex; align-items: center; gap: 6px; }
   </style>
   <style>@view-transition { navigation: auto; }</style>
  </head>
@@ -347,7 +360,7 @@
   <script src="figs-rtdb.js?v=20261016-audit-v1" defer></script>
   <script src="invoice-cancellation.js?v=20261104-sales-stock-v1" defer></script>
   <script src="invoice-save.js?v=20261104-sales-stock-v1" defer></script>
-  <script src="cashier.js?v=20261105-phone-v1" defer></script>
+  <script src="cashier.js?v=20261117-gcc-phone-v1" defer></script>
   <script src="label-print-bridge.js?v=20261016-rtdb-all-v2" defer></script>
  </body>
 </html>

@@ -4989,7 +4989,7 @@ function showNumericKeypadForInvoice(index, inputField) {
               <div id="deliverySpecificTimeFields" class="hidden grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                   <label class="block mb-1 text-xs font-bold text-gray-600">${cashierT('deliveryDate')}</label>
-                  <input type="date" id="deliveryDateInput" value="${scheduleDate}" class="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-green-600 focus:outline-none">
+                  <input type="date" id="deliveryDateInput" value="${scheduleDate}" min="${cashierTodayYmd()}" class="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-green-600 focus:outline-none">
                 </div>
                 <div>
                   <label class="block mb-1 text-xs font-bold text-gray-600">${cashierT('fromTime')}</label>
@@ -5174,7 +5174,12 @@ function showNumericKeypadForInvoice(index, inputField) {
           console.error('Error saving delivery area price:', error);
           showToast('تعذر حفظ سعر التوصيل للمنطقة، لكن سيتم إكمال الفاتورة', true);
         }
-        currentOrder.deliveryDate = document.getElementById('deliveryDateInput')?.value || '';
+        const pickedDeliveryDate = document.getElementById('deliveryDateInput')?.value || '';
+        if (pickedDeliveryDate && pickedDeliveryDate < cashierTodayYmd()) {
+          showToast('لا يمكن اختيار تاريخ توصيل سابق', true);
+          return;
+        }
+        currentOrder.deliveryDate = pickedDeliveryDate;
         currentOrder.deliveryTimeFrom = document.getElementById('deliveryFromInput')?.value || '';
         currentOrder.deliveryTimeTo = document.getElementById('deliveryToInput')?.value || '';
         currentOrder.pickupBranch = '';
@@ -15982,7 +15987,7 @@ function openCashierQuickEditOrder(orderId) {
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
                 <label class="block mb-1 text-xs font-bold text-gray-600">تاريخ التوصيل</label>
-                <input type="date" id="cashierEditDeliveryDate" value="${deliveryDate}" class="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-green-600 focus:outline-none">
+                <input type="date" id="cashierEditDeliveryDate" value="${deliveryDate}" min="${deliveryDate && deliveryDate < cashierTodayYmd() ? deliveryDate : cashierTodayYmd()}" class="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-green-600 focus:outline-none">
               </div>
               <div>
                 <label class="block mb-1 text-xs font-bold text-gray-600">من</label>
@@ -16041,6 +16046,17 @@ function updateCashierQuickEditDeliveryPreview() {
   preview.innerHTML = date && from && to
     ? `التوصيل ${formatDeliveryDateWithDay(date)}<br>بين الساعة ${formatDeliveryDisplayTime(from)} و ${formatDeliveryDisplayTime(to)}`
     : '';
+}
+
+/* Cashiers can't pick a delivery day that has passed (deferring to a past day is for the
+   treasurer/manager in the accounting site). */
+function cashierTodayYmd() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function cashierYmdOf(ts) {
+  const d = new Date(ts || Date.now());
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 async function saveCashierQuickEditOrder(orderId) {
@@ -16119,6 +16135,17 @@ async function saveCashierQuickEditOrder(orderId) {
       return;
     }
 
+    if (deliveryDate !== (order.deliveryDate || '') && deliveryDate < cashierTodayYmd()) {
+      showToast('لا يمكن اختيار تاريخ توصيل سابق', true);
+      return;
+    }
+    // A new delivery day moves the invoice's deferral with it (same rule as a new invoice:
+    // deferred only when the delivery day isn't the day the invoice was created)
+    if (deliveryDate !== (order.deliveryDate || '')) {
+      const createdDay = cashierYmdOf(order.createdAt || order.timestamp);
+      updates.accountingDate = deliveryDate !== createdDay ? deliveryDate : '';
+      updates.isInvoiceDeferred = deliveryDate !== createdDay;
+    }
     updates.deliveryDate = deliveryDate;
     updates.deliveryTimeFrom = deliveryTimeFrom;
     updates.deliveryTimeTo = deliveryTimeTo;

@@ -242,6 +242,7 @@
     let salesReportBranchRows = [];
     let salesReportCurrentDetailProduct = null;
     let allInventoryCategories = [];
+    let allMaterialCategories = []; // materialCategories: the accounting site's stock-material folders
     let allInventoryUnits = [];
     let allAccountingUnits = [];
     let allIssueCashiers = [];
@@ -806,6 +807,7 @@
         allCustomers,
         allCategories,
         allInventoryCategories,
+        allMaterialCategories,
         allInventoryUnits,
         allAccountingUnits,
         allIssueCashiers,
@@ -836,6 +838,7 @@
       allCustomers = Array.isArray(cache.allCustomers) ? cache.allCustomers : [];
       allCategories = Array.isArray(cache.allCategories) ? cache.allCategories : [];
       allInventoryCategories = Array.isArray(cache.allInventoryCategories) ? cache.allInventoryCategories : [];
+      allMaterialCategories = Array.isArray(cache.allMaterialCategories) ? cache.allMaterialCategories : [];
       allInventoryUnits = Array.isArray(cache.allInventoryUnits) ? cache.allInventoryUnits : [];
       allAccountingUnits = Array.isArray(cache.allAccountingUnits) ? cache.allAccountingUnits : [];
       allIssueCashiers = Array.isArray(cache.allIssueCashiers) ? cache.allIssueCashiers : [];
@@ -1849,6 +1852,14 @@ function setupRealtimeListeners() {
 	    allInventoryPurchases = snapshot.val() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
 	    allInventoryPurchases.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 	    refreshUI();
+	  });
+
+	  // Stock-material folders made on the accounting site; the shortage page shows them
+	  db.ref('materialCategories').on('value', (snapshot) => {
+	    allMaterialCategories = snapshot.val()
+	      ? Object.entries(snapshot.val()).filter(([, data]) => data && typeof data === 'object').map(([id, data]) => ({ id, ...data }))
+	      : [];
+	    refreshShortageMaterialView();
 	  });
 
 	  db.ref('stockMaterials').on('value', (snapshot) => {
@@ -3632,13 +3643,15 @@ function refreshUI() {
 
 	    function renderShortageCategoryGridHtml() {
 	      if (shortageSearchMode === 'materials') {
-	        const rootCategories = allInventoryCategories.filter(c => !c.parentId);
+	        shortageMaterialCategoryId = null;
+	        const rootCategories = sortByCashierName(shortageMaterialCategories().filter(c => !c.parentId));
 	        return `
 	          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 	            ${rootCategories.length ? rootCategories.map(category => `
 	              <div class="category-card" onclick="showShortageMaterialCategory('${category.id}')">
 	                <div class="text-4xl mb-2">📁</div>
 	                <div class="font-bold text-lg">${escapeHtml(cashierDisplayName(category))}</div>
+	                <div class="text-purple-700 text-sm font-bold">${shortageMaterialCountLabel(category.id)}</div>
 	              </div>
 	            `).join('') : `<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">${cashierT('noMaterialCategories')}</div>`}
 	          </div>
@@ -3685,24 +3698,53 @@ function refreshUI() {
 	      `;
 	    }
 
-	    function showShortageMaterialCategory(categoryId) {
-	      const category = allInventoryCategories.find(c => c.id === categoryId);
-	      const subCategories = allInventoryCategories.filter(c => c.parentId === categoryId);
+	    // Material folders: the accounting site's materialCategories; the old inventoryCategories until those exist
+	    let shortageMaterialCategoryId = null;
+	    function shortageMaterialCategories() {
+	      return allMaterialCategories.length ? allMaterialCategories : allInventoryCategories;
+	    }
+	    function sortByCashierName(list) {
+	      return list.slice().sort((a, b) => cashierDisplayName(a).localeCompare(cashierDisplayName(b), cashierLanguage === 'en' ? 'en' : 'ar'));
+	    }
+	    function shortageMaterialsIn(category) {
 	      const categoryItemIds = new Set((Array.isArray(category?.productIds) ? category.productIds : Object.values(category?.productIds || {})).map(String));
-	      const materials = allStockMaterials.filter(item => (
-	        String(item.categoryId || '') === String(categoryId)
-	        || categoryItemIds.has(String(item.id))
-	      ));
+	      return allStockMaterials.filter(item => String(item.categoryId || '') === String(category.id) || categoryItemIds.has(String(item.id)));
+	    }
+	    function shortageMaterialCountLabel(categoryId) {
+	      const cats = shortageMaterialCategories();
+	      const ids = [categoryId];
+	      for (let i = 0; i < ids.length; i++) cats.forEach(c => { if (c.parentId === ids[i] && !ids.includes(c.id)) ids.push(c.id); });
+	      const n = ids.reduce((sum, id) => { const c = cats.find(x => x.id === id); return sum + (c ? shortageMaterialsIn(c).length : 0); }, 0);
+	      return cashierLanguage === 'en' ? `${n} items` : `${n} مادة`;
+	    }
+	    function refreshShortageMaterialView() {
+	      if (shortageSearchMode !== 'materials' || shortageSearchTerm.trim() || !document.getElementById('shortageSearchResults')) return;
+	      if (shortageMaterialCategoryId && shortageMaterialCategories().some(c => c.id === shortageMaterialCategoryId)) showShortageMaterialCategory(shortageMaterialCategoryId);
+	      else setShortageSearchTerm('');
+	    }
+
+	    function showShortageMaterialCategory(categoryId) {
+	      const cats = shortageMaterialCategories();
+	      const category = cats.find(c => c.id === categoryId);
+	      if (!category) { setShortageSearchTerm(''); return; }
+	      shortageMaterialCategoryId = categoryId;
+	      const subCategories = sortByCashierName(cats.filter(c => c.parentId === categoryId));
+	      const materials = sortByCashierName(shortageMaterialsIn(category));
+	      const trail = [];
+	      for (let c = category; c && trail.length < 10; c = cats.find(x => x.id === c.parentId)) trail.unshift(c);
+	      const parent = category.parentId && cats.find(c => c.id === category.parentId);
+	      const back = parent ? `showShortageMaterialCategory('${parent.id}')` : `setShortageSearchTerm('')`;
 	      const results = document.getElementById('shortageSearchResults');
 	      if (!results) return;
 	      results.innerHTML = `
-	        <button onclick="setShortageSearchTerm('')" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">${cashierT('back')}</button>
-	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(cashierDisplayName(category))}</h3>
+	        <button onclick="${back}" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">${cashierT('back')}</button>
+	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${trail.map(c => escapeHtml(cashierDisplayName(c))).join(' <span class="text-purple-400">›</span> ')}</h3>
 	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 	          ${subCategories.map(subCat => `
 	            <div class="category-card" onclick="showShortageMaterialCategory('${subCat.id}')">
 	              <div class="text-3xl mb-2">📁</div>
 	              <div class="font-bold">${escapeHtml(cashierDisplayName(subCat))}</div>
+	              <div class="text-purple-700 text-sm font-bold">${shortageMaterialCountLabel(subCat.id)}</div>
 	            </div>
 	          `).join('')}
 	          ${materials.map(item => `

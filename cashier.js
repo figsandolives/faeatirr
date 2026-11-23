@@ -608,12 +608,29 @@
         });
       });
     }
-    // Telugu product/material/folder names come from cashier-te-names.js
-    // (keyed by the English name); anything new shows its English name.
+    // Telugu names live on the server: each product, material, folder and unit
+    // carries nameTe plus nameTeEn (the English name it was translated from).
+    // A translation counts only while nameTeEn still equals the English name;
+    // anything new or renamed shows its English name until it is translated.
+    let cashierTeNameCache = { sources: [], map: new Map() };
+    function cashierTeServerMap() {
+      const sources = [allProducts, allStockMaterials, allProductCategories, allMaterialCategories, allAccountingUnits];
+      if (sources.every((list, i) => list === cashierTeNameCache.sources[i])) return cashierTeNameCache.map;
+      const map = new Map();
+      sources.forEach(list => (list || []).forEach(rec => {
+        const te = rec && String(rec.nameTe || '').trim();
+        if (!te) return;
+        const en = String(rec.nameEn || rec.name_en || '').trim();
+        const from = String(rec.nameTeEn || '').trim();
+        if (en && from === en && !map.has(en)) map.set(en, te);
+      }));
+      cashierTeNameCache = { sources, map };
+      return map;
+    }
     function cashierTeName(english) {
       const en = String(english || '').trim();
       if (cashierLanguage !== 'te' || !en) return en;
-      return (window.CASHIER_TE_NAMES && window.CASHIER_TE_NAMES[en]) || en;
+      return cashierTeServerMap().get(en) || en;
     }
     function cashierDeviceLanguage() {
       return localStorage.getItem('cashierLanguage') || 'ar';

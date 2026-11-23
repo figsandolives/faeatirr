@@ -3679,9 +3679,10 @@ function refreshUI() {
 	      const products = getCashierProductsForCategory(categoryId);
 	      const results = document.getElementById('shortageSearchResults');
 	      if (!results) return;
+	      const parent = cashierCategoryParent(categories, category);
 	      results.innerHTML = `
-	        <button onclick="setShortageSearchTerm('')" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">${cashierT('back')}</button>
-	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(cashierDisplayName(category))}</h3>
+	        <button onclick="${parent ? `showShortageProductCategory('${parent.id}')` : `setShortageSearchTerm('')`}" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">${cashierT('back')}</button>
+	        <h3 class="text-2xl font-bold text-gray-800 mb-4">${cashierCategoryTrail(categories, category)}</h3>
 	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 	          ${subCategories.map(subCat => `
 	            <div class="category-card" onclick="showShortageProductCategory('${subCat.id}')">
@@ -4324,6 +4325,16 @@ function refreshUI() {
       showOrderTypeSelection();
     }
     
+	    // Product folder path (main › sub › …) and its parent, for titles and the back button
+	    function cashierCategoryTrail(categories, category) {
+	      const trail = [];
+	      for (let c = category; c && trail.length < 10; c = categories.find(x => x.id === c.parentId)) trail.unshift(c);
+	      return trail.map(c => escapeHtml(cashierDisplayName(c))).join(' <span class="text-purple-400">›</span> ');
+	    }
+	    function cashierCategoryParent(categories, category) {
+	      return category && category.parentId ? categories.find(c => c.id === category.parentId) : null;
+	    }
+
 	    function getCashierCategoryRows() {
 	      const rows = allProductCategories.length ? allProductCategories : allCategories;
 	      return rows.map(category => ({
@@ -4369,12 +4380,13 @@ function refreshUI() {
 	  const products = getCashierProductsForCategory(categoryId);
   
   const container = document.getElementById('categoriesAndProductsContainer');
+  const parent = cashierCategoryParent(categories, category);
   container.innerHTML = `
-    <button onclick="renderCategoriesForInvoice(); document.getElementById('categoriesAndProductsContainer').innerHTML = renderCategoriesForInvoice();" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">
+    <button onclick="${parent ? `showCategoryProductsInvoice('${parent.id}')` : `document.getElementById('categoriesAndProductsContainer').innerHTML = renderCategoriesForInvoice();`}" class="mb-4 bg-gray-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-gray-700 transition">
       ${cashierT('back')}
     </button>
     
-    <h3 class="text-2xl font-bold text-gray-800 mb-4">${escapeHtml(cashierDisplayName(category))}</h3>
+    <h3 class="text-2xl font-bold text-gray-800 mb-4">${cashierCategoryTrail(categories, category)}</h3>
     
     <h4 class="text-lg font-bold text-gray-700 mb-3">${cashierT('subCategoriesProducts')}</h4>
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">

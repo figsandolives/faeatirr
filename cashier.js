@@ -608,6 +608,13 @@
         });
       });
     }
+    // Telugu product/material/folder names come from cashier-te-names.js
+    // (keyed by the English name); anything new shows its English name.
+    function cashierTeName(english) {
+      const en = String(english || '').trim();
+      if (cashierLanguage !== 'te' || !en) return en;
+      return (window.CASHIER_TE_NAMES && window.CASHIER_TE_NAMES[en]) || en;
+    }
     function cashierDeviceLanguage() {
       return localStorage.getItem('cashierLanguage') || 'ar';
     }
@@ -632,7 +639,7 @@
     function cashierDisplayName(item) {
       if (!item) return '-';
       if (cashierLanguage !== 'ar') {
-        return item.nameEn || item.name || item.nameAr || '-';
+        return cashierTeName(item.nameEn || item.name_en || '') || item.name || item.nameAr || '-';
       }
       return item.nameAr || item.name || item.nameEn || '-';
     }
@@ -3969,7 +3976,7 @@ function refreshUI() {
 	        <div class="bg-purple-50 border border-purple-100 p-3 rounded-lg mb-2">
 	          <div class="flex justify-between items-start mb-2">
 	            <div>
-	              <div class="font-bold">${escapeHtml(cashierLanguage !== 'ar' ? (item.nameEn || item.name || item.nameAr || '-') : (item.nameAr || item.name || item.nameEn || '-'))}</div>
+	              <div class="font-bold">${escapeHtml(cashierLanguage !== 'ar' ? (cashierTeName(item.nameEn) || item.name || item.nameAr || '-') : (item.nameAr || item.name || item.nameEn || '-'))}</div>
 	              <div class="text-xs text-purple-700 font-bold">${item.itemType === 'material' ? cashierT('material') : cashierT('product')}</div>
 	            </div>
 	            <button onclick="removeShortageItem(${index})" class="text-red-600 hover:text-red-800 font-bold text-lg">✕</button>
@@ -4924,7 +4931,7 @@ function refreshUI() {
         container.innerHTML = currentOrder.items.map((item, index) => `
           <div class="bg-gray-50 p-3 rounded-lg mb-2">
             <div class="flex justify-between items-start mb-2">
-              <div class="font-bold">${escapeHtml(cashierLanguage !== 'ar' ? (item.productNameEn || item.productName || '-') : (item.productName || item.productNameEn || '-'))}</div>
+              <div class="font-bold">${escapeHtml(cashierLanguage !== 'ar' ? (cashierTeName(item.productNameEn) || item.productName || '-') : (item.productName || item.productNameEn || '-'))}</div>
               <button ${isTrolleyDeposit(item) ? 'disabled title="مرتبط بالعربانة"' : ''} onclick="removeItemFromInvoice(${index})" class="text-red-600 hover:text-red-800 font-bold text-lg">✕</button>
             </div>
             <div class="flex items-center gap-2">

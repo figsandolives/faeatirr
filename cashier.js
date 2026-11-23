@@ -551,10 +551,71 @@
         const original = cashierLegacyOriginalText.get(node);
         const trimmed = original.trim();
         const translated = exact.get(trimmed);
-        node.nodeValue = cashierLanguage === 'en' && translated ? original.replace(trimmed, translated) : original;
+        const next = cashierLanguage === 'te'
+          ? cashierTeText(original)
+          : (cashierLanguage === 'en' && translated ? original.replace(trimmed, translated) : original);
+        if (node.nodeValue !== next) node.nodeValue = next;
       }
+      cashierTranslateAttributes(root);
       document.documentElement.lang = cashierLanguage;
-      document.documentElement.dir = cashierLanguage === 'en' ? 'ltr' : 'rtl';
+      document.documentElement.dir = cashierLanguage === 'ar' ? 'rtl' : 'ltr';
+    }
+
+    // Telugu: only for cashiers whose record says language: 'te'.
+    if (window.CASHIER_TE) cashierTranslations.te = window.CASHIER_TE.keys || {};
+    let cashierTeMaps = null;
+    function cashierTeLookup() {
+      if (cashierTeMaps) return cashierTeMaps;
+      const te = window.CASHIER_TE || { keys: {}, phrases: {} };
+      const exact = new Map();
+      Object.keys(cashierTranslations.ar).forEach((key) => {
+        const ar = String(cashierTranslations.ar[key] || '').trim();
+        if (ar && te.keys?.[key] && !exact.has(ar)) exact.set(ar, te.keys[key]);
+      });
+      Object.entries(te.phrases || {}).forEach(([ar, value]) => { if (!exact.has(ar)) exact.set(ar, value); });
+      const letters = '\\u0621-\\u064A\\u066E-\\u06D3';
+      const parts = [...exact.keys()].filter(k => k.length >= 3).sort((a, b) => b.length - a.length)
+        .map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const rx = parts.length ? new RegExp(`(^|[^${letters}])(${parts.join('|')})(?=$|[^${letters}])`, 'g') : null;
+      cashierTeMaps = { exact, rx };
+      return cashierTeMaps;
+    }
+    function cashierTeText(text) {
+      const value = String(text || '');
+      if (!/[\u0600-\u06FF]/.test(value)) return value;
+      const { exact, rx } = cashierTeLookup();
+      const trimmed = value.trim();
+      const colon = trimmed.match(/^(.*?)\s*([:：])$/);
+      const whole = exact.get(trimmed) || (colon && exact.get(colon[1]) ? exact.get(colon[1]) + colon[2] : '');
+      if (whole) return value.replace(trimmed, whole);
+      return rx ? value.replace(rx, (match, before, phrase) => before + (exact.get(phrase) || phrase)) : value;
+    }
+    const cashierOriginalAttrs = new WeakMap();
+    function cashierTranslateAttributes(root = document) {
+      const scope = root.querySelectorAll ? root : document;
+      scope.querySelectorAll('[placeholder], [title]').forEach((el) => {
+        if (el.closest('script, style')) return;
+        let saved = cashierOriginalAttrs.get(el);
+        if (!saved) {
+          if (cashierLanguage === 'ar') return;
+          saved = { placeholder: el.getAttribute('placeholder'), title: el.getAttribute('title') };
+          cashierOriginalAttrs.set(el, saved);
+        }
+        ['placeholder', 'title'].forEach((attr) => {
+          if (saved[attr] == null) return;
+          const next = cashierLanguage === 'te' ? cashierTeText(saved[attr]) : saved[attr];
+          if (el.getAttribute(attr) !== next) el.setAttribute(attr, next);
+        });
+      });
+    }
+    function cashierDeviceLanguage() {
+      return localStorage.getItem('cashierLanguage') || 'ar';
+    }
+    function cashierIsTeluguCashier() {
+      return !!(currentCashier && currentCashier.language === 'te');
+    }
+    function cashierSwitchLanguageLabel() {
+      return cashierLanguage === 'ar' && cashierIsTeluguCashier() ? 'తెలుగు' : cashierT('switchLanguage');
     }
 
     let cashierTranslationFramePending = false;
@@ -570,15 +631,19 @@
 
     function cashierDisplayName(item) {
       if (!item) return '-';
-      if (cashierLanguage === 'en') {
+      if (cashierLanguage !== 'ar') {
         return item.nameEn || item.name || item.nameAr || '-';
       }
       return item.nameAr || item.name || item.nameEn || '-';
     }
 
     function toggleCashierLanguage() {
-      cashierLanguage = cashierLanguage === 'en' ? 'ar' : 'en';
-      localStorage.setItem('cashierLanguage', cashierLanguage);
+      if (cashierIsTeluguCashier()) {
+        cashierLanguage = cashierLanguage === 'ar' ? 'te' : 'ar';
+      } else {
+        cashierLanguage = cashierLanguage === 'en' ? 'ar' : 'en';
+        localStorage.setItem('cashierLanguage', cashierLanguage);
+      }
       if (currentScreen === 'cashier') renderCashier();
       const invoicePage = document.getElementById('invoicePage');
       if (invoicePage) showInvoiceProductsPage();
@@ -1100,7 +1165,7 @@
 
     function formatDate(timestamp) {
       const date = new Date(timestamp);
-      return date.toLocaleDateString(cashierLanguage === 'en' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
+      return date.toLocaleDateString(cashierLanguage !== 'ar' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
         calendar: 'gregory',
         year: 'numeric',
         month: '2-digit',
@@ -1110,7 +1175,7 @@
 
     function formatTime(timestamp) {
       const date = new Date(timestamp);
-      return date.toLocaleTimeString(cashierLanguage === 'en' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
+      return date.toLocaleTimeString(cashierLanguage !== 'ar' ? 'en-GB' : 'ar-KW-u-ca-gregory', {
         calendar: 'gregory',
         hour: '2-digit',
         minute: '2-digit'
@@ -2551,6 +2616,7 @@ function refreshUI() {
       }
       
       currentCashier = cashier;
+      cashierLanguage = cashier.language === 'te' ? 'te' : cashierDeviceLanguage();
       currentBranch = deviceBranch;
       document.querySelector('.modal-overlay').remove();
       currentScreen = 'cashier';
@@ -3302,7 +3368,7 @@ function refreshUI() {
            <div class="text-xl font-bold">${currentCashier.name} (${currentBranch})</div>
             <div class="flex gap-3">
               <button onclick="toggleCashierLanguage()" class="bg-white text-blue-700 px-4 py-2 rounded-lg font-bold hover:bg-blue-50 transition">
-                ${cashierT('switchLanguage')}
+                ${cashierSwitchLanguageLabel()}
               </button>
 	              ${currentBranch === 'اليرموك' && hasOpenDailySession() ? `
 	                <button onclick="showDailyBalanceStart()" class="bg-amber-500 px-4 py-2 rounded-lg font-bold hover:bg-amber-600 transition border-4 border-white shadow-lg ring-2 ring-amber-200">
@@ -3706,7 +3772,7 @@ function refreshUI() {
 	      return allMaterialCategories.length ? allMaterialCategories : allInventoryCategories;
 	    }
 	    function sortByCashierName(list) {
-	      return list.slice().sort((a, b) => cashierDisplayName(a).localeCompare(cashierDisplayName(b), cashierLanguage === 'en' ? 'en' : 'ar'));
+	      return list.slice().sort((a, b) => cashierDisplayName(a).localeCompare(cashierDisplayName(b), cashierLanguage !== 'ar' ? 'en' : 'ar'));
 	    }
 	    function shortageMaterialsIn(category) {
 	      const categoryItemIds = new Set((Array.isArray(category?.productIds) ? category.productIds : Object.values(category?.productIds || {})).map(String));
@@ -3799,7 +3865,7 @@ function refreshUI() {
       const modal = document.createElement('div');
       modal.id = 'shortageMaterialQuantityModal';
       modal.className = 'modal-overlay';
-      modal.dir = cashierLanguage === 'en' ? 'ltr' : 'rtl';
+      modal.dir = cashierLanguage !== 'ar' ? 'ltr' : 'rtl';
       modal.setAttribute('role', 'dialog');
       modal.setAttribute('aria-modal', 'true');
       modal.setAttribute('aria-labelledby', 'shortageMaterialQuantityTitle');
@@ -3903,7 +3969,7 @@ function refreshUI() {
 	        <div class="bg-purple-50 border border-purple-100 p-3 rounded-lg mb-2">
 	          <div class="flex justify-between items-start mb-2">
 	            <div>
-	              <div class="font-bold">${escapeHtml(cashierLanguage === 'en' ? (item.nameEn || item.name || item.nameAr || '-') : (item.nameAr || item.name || item.nameEn || '-'))}</div>
+	              <div class="font-bold">${escapeHtml(cashierLanguage !== 'ar' ? (item.nameEn || item.name || item.nameAr || '-') : (item.nameAr || item.name || item.nameEn || '-'))}</div>
 	              <div class="text-xs text-purple-700 font-bold">${item.itemType === 'material' ? cashierT('material') : cashierT('product')}</div>
 	            </div>
 	            <button onclick="removeShortageItem(${index})" class="text-red-600 hover:text-red-800 font-bold text-lg">✕</button>
@@ -4858,7 +4924,7 @@ function refreshUI() {
         container.innerHTML = currentOrder.items.map((item, index) => `
           <div class="bg-gray-50 p-3 rounded-lg mb-2">
             <div class="flex justify-between items-start mb-2">
-              <div class="font-bold">${escapeHtml(cashierLanguage === 'en' ? (item.productNameEn || item.productName || '-') : (item.productName || item.productNameEn || '-'))}</div>
+              <div class="font-bold">${escapeHtml(cashierLanguage !== 'ar' ? (item.productNameEn || item.productName || '-') : (item.productName || item.productNameEn || '-'))}</div>
               <button ${isTrolleyDeposit(item) ? 'disabled title="مرتبط بالعربانة"' : ''} onclick="removeItemFromInvoice(${index})" class="text-red-600 hover:text-red-800 font-bold text-lg">✕</button>
             </div>
             <div class="flex items-center gap-2">
@@ -7224,6 +7290,7 @@ function showNumericKeypadForInvoice(index, inputField) {
 
     function confirmLogoutCashier() {
       currentCashier = null;
+      cashierLanguage = cashierDeviceLanguage();
       currentBranch = null;
       currentDailySession = null;
       currentOrder = createEmptyCurrentOrder({ orderType: null });

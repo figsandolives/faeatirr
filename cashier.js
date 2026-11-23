@@ -3631,9 +3631,7 @@ function refreshUI() {
 	        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 	          ${rows.map(item => `
 	            <div class="product-card" onclick="addItemToShortage('${item.itemType}', '${item.id}')">
-	              <div class="text-4xl mb-2">${item.itemType === 'material' ? '🧱' : '📦'}</div>
 	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(item))}</div>
-	              <div class="text-purple-700 font-bold text-sm">${item.itemType === 'material' ? cashierT('material') : cashierT('product')}</div>
 	              <div class="text-gray-500 text-xs" dir="ltr">${escapeHtml(item.barcode || item.code || '')}</div>
 	            </div>
 	          `).join('')}
@@ -3651,7 +3649,6 @@ function refreshUI() {
 	              <div class="category-card" onclick="showShortageMaterialCategory('${category.id}')">
 	                <div class="text-4xl mb-2">📁</div>
 	                <div class="font-bold text-lg">${escapeHtml(cashierDisplayName(category))}</div>
-	                <div class="text-purple-700 text-sm font-bold">${shortageMaterialCountLabel(category.id)}</div>
 	              </div>
 	            `).join('') : `<div class="bg-white rounded-xl border border-purple-100 p-8 text-center text-gray-500 font-bold">${cashierT('noMaterialCategories')}</div>`}
 	          </div>
@@ -3689,9 +3686,7 @@ function refreshUI() {
 	          `).join('')}
 	          ${products.map(prod => `
 	            <div class="product-card" onclick="addItemToShortage('product', '${prod.id}')">
-	              <div class="text-4xl mb-2">📦</div>
 	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(prod))}</div>
-	              <div class="text-purple-700 font-bold text-sm">${cashierT('product')}</div>
 	            </div>
 	          `).join('')}
 	        </div>
@@ -3709,13 +3704,6 @@ function refreshUI() {
 	    function shortageMaterialsIn(category) {
 	      const categoryItemIds = new Set((Array.isArray(category?.productIds) ? category.productIds : Object.values(category?.productIds || {})).map(String));
 	      return allStockMaterials.filter(item => String(item.categoryId || '') === String(category.id) || categoryItemIds.has(String(item.id)));
-	    }
-	    function shortageMaterialCountLabel(categoryId) {
-	      const cats = shortageMaterialCategories();
-	      const ids = [categoryId];
-	      for (let i = 0; i < ids.length; i++) cats.forEach(c => { if (c.parentId === ids[i] && !ids.includes(c.id)) ids.push(c.id); });
-	      const n = ids.reduce((sum, id) => { const c = cats.find(x => x.id === id); return sum + (c ? shortageMaterialsIn(c).length : 0); }, 0);
-	      return cashierLanguage === 'en' ? `${n} items` : `${n} مادة`;
 	    }
 	    function refreshShortageMaterialView() {
 	      if (shortageSearchMode !== 'materials' || shortageSearchTerm.trim() || !document.getElementById('shortageSearchResults')) return;
@@ -3744,14 +3732,11 @@ function refreshUI() {
 	            <div class="category-card" onclick="showShortageMaterialCategory('${subCat.id}')">
 	              <div class="text-3xl mb-2">📁</div>
 	              <div class="font-bold">${escapeHtml(cashierDisplayName(subCat))}</div>
-	              <div class="text-purple-700 text-sm font-bold">${shortageMaterialCountLabel(subCat.id)}</div>
 	            </div>
 	          `).join('')}
 	          ${materials.map(item => `
 	            <div class="product-card" onclick="addItemToShortage('material', '${item.id}')">
-	              <div class="text-4xl mb-2">🧱</div>
 	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(item))}</div>
-	              <div class="text-purple-700 font-bold text-sm">${cashierT('material')}</div>
 	            </div>
 	          `).join('')}
 	        </div>

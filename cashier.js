@@ -1913,6 +1913,10 @@ function refreshUI() {
     const product = allProducts.find(product => product.id === label.dataset.stockProduct);
     if (product) label.outerHTML = renderInvoiceProductStock(product);
   });
+  document.querySelectorAll('[data-stock-material]').forEach(label => {
+    const material = allStockMaterials.find(material => material.id === label.dataset.stockMaterial);
+    if (material) label.outerHTML = renderInvoiceProductStock(material, 'material');
+  });
   scheduleDataCacheSave();
   if (isLoadingFreshData) return;
 
@@ -3632,6 +3636,7 @@ function refreshUI() {
 	          ${rows.map(item => `
 	            <div class="product-card" onclick="addItemToShortage('${item.itemType}', '${item.id}')">
 	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(item))}</div>
+	              ${renderInvoiceProductStock(item, item.itemType === 'material' ? 'material' : 'product')}
 	              <div class="text-gray-500 text-xs" dir="ltr">${escapeHtml(item.barcode || item.code || '')}</div>
 	            </div>
 	          `).join('')}
@@ -3687,6 +3692,7 @@ function refreshUI() {
 	          ${products.map(prod => `
 	            <div class="product-card" onclick="addItemToShortage('product', '${prod.id}')">
 	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(prod))}</div>
+	              ${renderInvoiceProductStock(prod)}
 	            </div>
 	          `).join('')}
 	        </div>
@@ -3737,6 +3743,7 @@ function refreshUI() {
 	          ${materials.map(item => `
 	            <div class="product-card" onclick="addItemToShortage('material', '${item.id}')">
 	              <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(item))}</div>
+	              ${renderInvoiceProductStock(item, 'material')}
 	            </div>
 	          `).join('')}
 	        </div>
@@ -4380,7 +4387,6 @@ function refreshUI() {
       
       ${products.map(prod => `
         <div class="product-card" onclick="addProductToInvoice('${prod.id}')">
-          <div class="text-4xl mb-2">📦</div>
           <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(prod))}</div>
           <div class="text-blue-600 font-bold text-lg">${prod.price.toFixed(3)} ${cashierT('kd')}</div>
           ${renderInvoiceProductStock(prod)}
@@ -4408,7 +4414,6 @@ function refreshUI() {
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           ${filteredProducts.map(prod => `
             <div class="product-card" onclick="addProductToInvoice('${prod.id}')">
-              <div class="text-4xl mb-2">📦</div>
               <div class="font-bold mb-1">${escapeHtml(cashierDisplayName(prod))}</div>
               <div class="text-blue-600 font-bold text-lg">${prod.price.toFixed(3)} ${cashierT('kd')}</div>
           ${renderInvoiceProductStock(prod)}
@@ -4621,16 +4626,18 @@ function refreshUI() {
     function getInvoiceProductUnit(product) {
       const unit = allAccountingUnits.find(unit => unit.id === product?.unitId)
         || allInventoryUnits.find(unit => unit.id === product?.unitId);
-      return unit ? cashierDisplayName(unit) : (product?.unit || '');
+      // Old materials keep the unit's name itself in unitId (e.g. «كيلو»)
+      return unit ? cashierDisplayName(unit) : (product?.unit || (product?.unitId && !String(product.unitId).startsWith('-') ? String(product.unitId) : ''));
     }
 
-    function renderInvoiceProductStock(product) {
+    function renderInvoiceProductStock(product, kind = 'product') {
       const qty = getInvoiceProductStock(product);
       const unit = getInvoiceProductUnit(product);
+      const attr = kind === 'material' ? 'data-stock-material' : 'data-stock-product';
       const text = qty <= 0
         ? (cashierLanguage === 'en' ? 'Out of stock' : 'نفذت الكمية من المخزون')
         : (cashierLanguage === 'en' ? `Remaining: ${formatInventoryDecimal(qty)}${unit ? ' ' + unit : ''} in stock` : `متبقي: ${formatInventoryDecimal(qty)}${unit ? ' ' + unit : ''} في المخزون`);
-      return `<div data-stock-product="${escapeHtml(product.id)}" style="color:#dc2626;font-weight:700;font-size:13px;margin-top:6px">${escapeHtml(text)}</div>`;
+      return `<div ${attr}="${escapeHtml(product.id)}" style="color:#dc2626;font-weight:700;font-size:13px;margin-top:6px">${escapeHtml(text)}</div>`;
     }
 
     function canSetInvoiceProductQuantity(productId, quantity, editIndex = -1) {

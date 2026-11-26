@@ -6269,7 +6269,7 @@ function showNumericKeypadForInvoice(index, inputField) {
           ` : ''}
         </div>
 
-        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; overflow-wrap: anywhere; word-break: break-word;">
           <thead>
             <tr>
               <th style="text-align: right; border-bottom: 1px solid #000; padding: 4px 0;">الصنف</th>
@@ -6501,6 +6501,18 @@ function showNumericKeypadForInvoice(index, inputField) {
           line-height: 1.5;
           letter-spacing: 0.3px;
         }
+
+        /* ملاحظة طويلة بلا مسافات (مثل فلافل/3بيتزا/2لحم) كانت توسّع عمود الصنف وتدفع الكمية والسعر خارج الورق. */
+        .thermal-invoice {
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+        .thermal-invoice table {
+          table-layout: fixed;
+          width: 100% !important;
+        }
+        .thermal-invoice table:not(.notice-items) th:nth-child(2) { width: 13mm !important; }
+        .thermal-invoice table:not(.notice-items) th:nth-child(3) { width: 17mm !important; }
         
         .thermal-invoice strong,
         .thermal-invoice b {
